@@ -1,0 +1,29 @@
+cmake_minimum_required(VERSION 3.2.2)
+project(jello_vm LANGUAGES C)
+
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
+include(CompilerWarnings)
+
+option(JELLO_WARNINGS_AS_ERRORS "Treat warnings as errors" ON)
+
+add_library(jello_vm STATIC src/main.c)
+target_include_directories(jello_vm PUBLIC src/include)
+jello_enable_warnings(jello_vm)
+if(JELLO_WARNINGS_AS_ERRORS)
+  target_compile_options(jello_vm PRIVATE -Werror)
+endif()
+
+install(FILES src/include/jello.h DESTINATION include)
+install(FILES src/include/jello/jdll.h DESTINATION include/jello)
+
+add_executable(jlo_tool tools/jlo_tool.c)
+target_include_directories(jlo_tool PRIVATE src/include)
+jello_enable_warnings(jlo_tool)
+if(JELLO_WARNINGS_AS_ERRORS)
+  target_compile_options(jlo_tool PRIVATE -Werror)
+endif()
