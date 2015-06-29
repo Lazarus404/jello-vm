@@ -4,6 +4,6 @@
 #ifndef JELLO_JIT_INTERNAL_H
 #define JELLO_JIT_INTERNAL_H
 
-/* Interpreter hooks. */
+/* Interpreter and profiler integration hooks. */
 
 #endif /* JELLO_JIT_INTERNAL_H */

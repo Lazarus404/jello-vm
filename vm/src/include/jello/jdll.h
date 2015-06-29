@@ -4,6 +4,6 @@
 #ifndef JELLO_JDLL_H
 #define JELLO_JDLL_H
 
-/* Native plugin ABI for .jdll's */
+/* Native plugin ABI for .jdll authors. */
 
 #endif /* JELLO_JDLL_H */

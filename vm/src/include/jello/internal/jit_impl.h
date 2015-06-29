@@ -4,6 +4,6 @@
 #ifndef JELLO_JIT_IMPL_H
 #define JELLO_JIT_IMPL_H
 
-/* JIT engine */
+/* JIT engine: W^X buffers, IR, tier-1/tier-2 codegen. */
 
 #endif /* JELLO_JIT_IMPL_H */

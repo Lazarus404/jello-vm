@@ -4,6 +4,6 @@
 #ifndef JELLO_VM_INTERNAL_H
 #define JELLO_VM_INTERNAL_H
 
-/* Internal VM layouts, frames, dispatch, GC fields. Stuff! */
+/* Internal VM layouts, frames, dispatch, GC fields. */
 
 #endif /* JELLO_VM_INTERNAL_H */
