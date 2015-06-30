@@ -236,15 +236,6 @@ typedef struct jello_insn {
   uint32_t imm;
 } jello_insn;
 
-/* -- struct/tuple field-layout table entry -- */
-typedef struct jello_bc_struct_sig_entry {
-  uint16_t nfields;
-  uint8_t named;
-  uint8_t is_mutable;
-  const uint32_t* field_type;
-  const uint32_t* field_name_atom; /* NULL when named == 0 */
-} jello_bc_struct_sig_entry;
-
 typedef struct jello_bc_function {
   uint32_t nregs;
   uint32_t cap_start;

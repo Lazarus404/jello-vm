@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
-#include <jello.h>
-#include <jello/internal/bytecode.h>
+#include <jello/internal.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,6 +32,7 @@ static const kind_name_entry KIND_NAMES[] = {
   {"F32", JELLO_T_F32},
   {"F64", JELLO_T_F64},
   {"BYTES", JELLO_T_BYTES},
+  {"STRUCT", JELLO_T_STRUCT},
   {"OBJECT", JELLO_T_OBJECT},
   {"DYNAMIC", JELLO_T_DYNAMIC},
   {"ENUM", JELLO_T_ENUM},
@@ -162,7 +162,20 @@ static const flag_name_entry* flag_entry_from_name(const char* name) {
   for(size_t i = 0; i < NFLAG_NAMES; i++) if(strcmp(FLAG_NAMES[i].name, name) == 0) return &FLAG_NAMES[i];
   return NULL;
 }
-/* -- in-memory module (this chapter's own scope, not the full future loader model) */
+/* -- in-memory module (this chapter's own scope for the `asm` writer only -- */
+
+typedef struct asm_type_entry {
+  jello_type_kind kind;
+  uint32_t p0; /* STRUCT: struct_sigs index. Every other supported kind: unused. */
+} asm_type_entry;
+
+typedef struct asm_struct_sig {
+  uint16_t nfields;
+  uint8_t named;
+  uint8_t is_mutable;
+  uint32_t* field_type;       /* type-table indices */
+  uint32_t* field_name_atom;  /* atom indices, only when named */
+} asm_struct_sig;
 
 typedef struct func_t {
   uint32_t nregs;
@@ -177,7 +190,11 @@ typedef struct module_t {
   uint32_t features;
   uint32_t entry;
   uint32_t ntypes;
-  jello_type_kind* types;
+  asm_type_entry* types;
+  uint32_t natoms;
+  char** atoms;
+  uint32_t nstruct_sigs;
+  asm_struct_sig* struct_sigs;
   uint32_t nfuncs;
   func_t* funcs;
 } module_t;
@@ -185,6 +202,13 @@ typedef struct module_t {
 static void module_free(module_t* m) {
   if(!m) return;
   free(m->types);
+  for(uint32_t i = 0; i < m->natoms; i++) free(m->atoms[i]);
+  free(m->atoms);
+  for(uint32_t i = 0; i < m->nstruct_sigs; i++) {
+    free(m->struct_sigs[i].field_type);
+    free(m->struct_sigs[i].field_name_atom);
+  }
+  free(m->struct_sigs);
   for(uint32_t i = 0; i < m->nfuncs; i++) {
     free(m->funcs[i].reg_type_idx);
     free(m->funcs[i].insns);
@@ -313,34 +337,42 @@ static int parse_features(cursor* c, uint32_t* out_features) {
   return 1;
 }
 
-static int parse_type_entry(cursor* c, jello_type_kind* out) {
+static int parse_type_entry(cursor* c, asm_type_entry* out) {
   char name[32];
   if(!read_ident(c, name, sizeof(name))) return 0;
-  if(!kind_from_name(name, out)) {
+  jello_type_kind kind;
+  if(!kind_from_name(name, &kind)) {
     fprintf(stderr, "%s: unknown or not-yet-supported type kind '%s' "
-                    "(payload-bearing kinds are deferred past Chapter 1)\n",
+                    "(LIST/ARRAY/FUNCTION/ABSTRACT are still deferred past Chapter 2)\n",
             c->filename, name);
     return 0;
+  }
+  out->kind = kind;
+  out->p0 = 0;
+  if(kind == JELLO_T_STRUCT) {
+    if(!expect_ch(c, '(')) return 0;
+    if(!read_uint(c, &out->p0)) return 0;
+    if(!expect_ch(c, ')')) return 0;
   }
   return 1;
 }
 
-static int parse_types(cursor* c, jello_type_kind** out_types, uint32_t* out_n) {
+static int parse_types(cursor* c, asm_type_entry** out_types, uint32_t* out_n) {
   if(!expect_ident(c, "types")) return 0;
   if(!expect_ch(c, ':')) return 0;
   if(!expect_ch(c, '[')) return 0;
-  jello_type_kind* types = NULL;
+  asm_type_entry* types = NULL;
   uint32_t n = 0, cap = 0;
   skip_ws(c);
   if(!match_ch(c, ']')) {
     for(;;) {
-      jello_type_kind k;
-      if(!parse_type_entry(c, &k)) { free(types); return 0; }
+      asm_type_entry ent;
+      if(!parse_type_entry(c, &ent)) { free(types); return 0; }
       if(n == cap) {
         cap = cap ? cap * 2 : 4;
-        types = (jello_type_kind*)realloc(types, cap * sizeof(jello_type_kind));
+        types = (asm_type_entry*)realloc(types, cap * sizeof(asm_type_entry));
       }
-      types[n++] = k;
+      types[n++] = ent;
       if(match_ch(c, ',')) continue;
       break;
     }
@@ -356,14 +388,47 @@ static int expect_empty_list_section(cursor* c, const char* name) {
   if(!expect_ch(c, ':')) return 0;
   if(!expect_ch(c, '[')) return 0;
   if(!expect_ch(c, ']')) {
-    fprintf(stderr, "%s: '%s:' must be empty in Chapter 1's tool (no producer/consumer yet)\n",
+    fprintf(stderr, "%s: '%s:' must be empty in this chapter's tool (no producer/consumer yet)\n",
             c->filename, name);
     return 0;
   }
   return 1;
 }
 
-static int find_type_index_by_kind_name(cursor* c, const jello_type_kind* types, uint32_t ntypes,
+static int parse_atoms(cursor* c, char*** out_atoms, uint32_t* out_n) {
+  if(!expect_ident(c, "atoms")) return 0;
+  if(!expect_ch(c, ':')) return 0;
+  if(!expect_ch(c, '[')) return 0;
+  char** atoms = NULL;
+  uint32_t n = 0, cap = 0;
+  skip_ws(c);
+  if(!match_ch(c, ']')) {
+    for(;;) {
+      char name[64];
+      if(!read_ident(c, name, sizeof(name))) {
+        for(uint32_t i = 0; i < n; i++) free(atoms[i]);
+        free(atoms);
+        return 0;
+      }
+      if(n == cap) { cap = cap ? cap * 2 : 4; atoms = (char**)realloc(atoms, cap * sizeof(char*)); }
+      atoms[n] = (char*)malloc(strlen(name) + 1);
+      strcpy(atoms[n], name);
+      n++;
+      if(match_ch(c, ',')) continue;
+      break;
+    }
+    if(!expect_ch(c, ']')) {
+      for(uint32_t i = 0; i < n; i++) free(atoms[i]);
+      free(atoms);
+      return 0;
+    }
+  }
+  *out_atoms = atoms;
+  *out_n = n;
+  return 1;
+}
+
+static int find_type_index_by_kind_name(cursor* c, const asm_type_entry* types, uint32_t ntypes,
                                           const char* name, uint32_t* out_idx) {
   jello_type_kind want;
   if(!kind_from_name(name, &want)) {
@@ -371,13 +436,133 @@ static int find_type_index_by_kind_name(cursor* c, const jello_type_kind* types,
     return 0;
   }
   for(uint32_t i = 0; i < ntypes; i++) {
-    if(types[i] == want) { *out_idx = i; return 1; }
+    if(types[i].kind == want) { *out_idx = i; return 1; }
   }
   fprintf(stderr, "%s: type kind '%s' used but not declared in 'types:'\n", c->filename, name);
   return 0;
 }
 
-static int parse_reg_types(cursor* c, const jello_type_kind* types, uint32_t ntypes,
+static int find_atom_index_by_name(cursor* c, char* const* atoms, uint32_t natoms,
+                                    const char* name, uint32_t* out_idx) {
+  for(uint32_t i = 0; i < natoms; i++) {
+    if(strcmp(atoms[i], name) == 0) { *out_idx = i; return 1; }
+  }
+  fprintf(stderr, "%s: atom '%s' used but not declared in 'atoms:'\n", c->filename, name);
+  return 0;
+}
+
+static int parse_struct_sig_entry(cursor* c, const asm_type_entry* types, uint32_t ntypes,
+                                   char* const* atoms, uint32_t natoms, asm_struct_sig* out) {
+  memset(out, 0, sizeof(*out));
+  if(!expect_ch(c, '{')) return 0;
+  if(!expect_ident(c, "nfields")) return 0;
+  if(!expect_ch(c, '=')) return 0;
+  uint32_t nfields;
+  if(!read_uint(c, &nfields)) return 0;
+  if(!expect_ident(c, "named")) return 0;
+  if(!expect_ch(c, '=')) return 0;
+  uint32_t named;
+  if(!read_uint(c, &named)) return 0;
+  if(!expect_ident(c, "mutable")) return 0;
+  if(!expect_ch(c, '=')) return 0;
+  uint32_t is_mutable;
+  if(!read_uint(c, &is_mutable)) return 0;
+  if(!expect_ident(c, "fields")) return 0;
+  if(!expect_ch(c, '=')) return 0;
+  if(!expect_ch(c, '[')) return 0;
+
+  out->nfields = (uint16_t)nfields;
+  out->named = (uint8_t)(named ? 1 : 0);
+  out->is_mutable = (uint8_t)(is_mutable ? 1 : 0);
+  uint32_t* field_type = nfields ? (uint32_t*)calloc(nfields, sizeof(uint32_t)) : NULL;
+  uint32_t got = 0;
+  skip_ws(c);
+  if(!match_ch(c, ']')) {
+    for(;;) {
+      char name[32];
+      if(!read_ident(c, name, sizeof(name))) { free(field_type); return 0; }
+      uint32_t ti;
+      if(!find_type_index_by_kind_name(c, types, ntypes, name, &ti)) { free(field_type); return 0; }
+      if(got >= nfields) { fprintf(stderr, "%s: struct_sig has more fields than nfields\n", c->filename); free(field_type); return 0; }
+      field_type[got++] = ti;
+      if(match_ch(c, ',')) continue;
+      break;
+    }
+    if(!expect_ch(c, ']')) { free(field_type); return 0; }
+  }
+  if(got != nfields) {
+    fprintf(stderr, "%s: struct_sig declares nfields=%u but fields=[...] has %u entries\n", c->filename, nfields, got);
+    free(field_type);
+    return 0;
+  }
+  out->field_type = field_type;
+
+  if(out->named) {
+    uint32_t* field_name_atom = NULL;
+    int names_ok = expect_ident(c, "names") && expect_ch(c, '=') && expect_ch(c, '[');
+    if(names_ok) {
+      field_name_atom = nfields ? (uint32_t*)calloc(nfields, sizeof(uint32_t)) : NULL;
+      uint32_t ngot = 0;
+      skip_ws(c);
+      if(!match_ch(c, ']')) {
+        for(;;) {
+          char name[64];
+          uint32_t ai;
+          if(!read_ident(c, name, sizeof(name)) || !find_atom_index_by_name(c, atoms, natoms, name, &ai)) {
+            names_ok = 0;
+            break;
+          }
+          if(ngot >= nfields) {
+            fprintf(stderr, "%s: struct_sig has more names than nfields\n", c->filename);
+            names_ok = 0;
+            break;
+          }
+          field_name_atom[ngot++] = ai;
+          if(match_ch(c, ',')) continue;
+          break;
+        }
+        if(names_ok && !expect_ch(c, ']')) names_ok = 0;
+      }
+    }
+    if(!names_ok) {
+      free(field_name_atom);
+      free(field_type);
+      out->field_type = NULL;
+      return 0;
+    }
+    out->field_name_atom = field_name_atom;
+  }
+
+  if(!expect_ch(c, '}')) return 0;
+  return 1;
+}
+
+static int parse_struct_sigs(cursor* c, const asm_type_entry* types, uint32_t ntypes,
+                              char* const* atoms, uint32_t natoms,
+                              asm_struct_sig** out_sigs, uint32_t* out_n) {
+  if(!expect_ident(c, "struct_sigs")) return 0;
+  if(!expect_ch(c, ':')) return 0;
+  if(!expect_ch(c, '[')) return 0;
+  asm_struct_sig* sigs = NULL;
+  uint32_t n = 0, cap = 0;
+  skip_ws(c);
+  if(!match_ch(c, ']')) {
+    for(;;) {
+      asm_struct_sig sig;
+      if(!parse_struct_sig_entry(c, types, ntypes, atoms, natoms, &sig)) { free(sigs); return 0; }
+      if(n == cap) { cap = cap ? cap * 2 : 4; sigs = (asm_struct_sig*)realloc(sigs, cap * sizeof(asm_struct_sig)); }
+      sigs[n++] = sig;
+      if(match_ch(c, ',')) continue;
+      break;
+    }
+    if(!expect_ch(c, ']')) { free(sigs); return 0; }
+  }
+  *out_sigs = sigs;
+  *out_n = n;
+  return 1;
+}
+
+static int parse_reg_types(cursor* c, const asm_type_entry* types, uint32_t ntypes,
                             uint32_t** out_idx, uint32_t* out_n) {
   if(!expect_ident(c, "reg_types")) return 0;
   if(!expect_ch(c, '=')) return 0;
@@ -447,7 +632,7 @@ static int parse_insn(cursor* c, uint32_t expect_pc, jello_insn* out) {
   return 1;
 }
 
-static int parse_func(cursor* c, const jello_type_kind* types, uint32_t ntypes,
+static int parse_func(cursor* c, const asm_type_entry* types, uint32_t ntypes,
                        uint32_t* out_index, func_t* out_fn) {
   if(!expect_ident(c, "func")) return 0;
   if(!expect_ch(c, '[')) return 0;
@@ -526,8 +711,12 @@ static int parse_module(cursor* c, module_t* out) {
 
   if(!parse_types(c, &out->types, &out->ntypes)) return 0;
   if(!expect_empty_list_section(c, "sigs")) { module_free(out); return 0; }
-  if(!expect_empty_list_section(c, "atoms")) { module_free(out); return 0; }
-  if(!expect_empty_list_section(c, "struct_sigs")) { module_free(out); return 0; }
+  if(!parse_atoms(c, &out->atoms, &out->natoms)) { module_free(out); return 0; }
+  if(!parse_struct_sigs(c, out->types, out->ntypes, out->atoms, out->natoms,
+                         &out->struct_sigs, &out->nstruct_sigs)) {
+    module_free(out);
+    return 0;
+  }
 
   func_t* funcs = NULL;
   uint32_t nfuncs = 0, cap = 0;
@@ -618,9 +807,9 @@ static int write_module(const module_t* m, byte_buf* bb) {
   bb_u32(bb, m->version);
   bb_u32(bb, m->features);
   bb_u32(bb, m->ntypes);
-  bb_u32(bb, 0); /* nsigs */
-  bb_u32(bb, 0); /* nstruct_sigs */
-  bb_u32(bb, 0); /* natoms */
+  bb_u32(bb, 0); /* nsigs -- function signatures are still deferred past Chapter 2 */
+  bb_u32(bb, m->nstruct_sigs);
+  bb_u32(bb, m->natoms);
   bb_u32(bb, m->nfuncs);
   bb_u32(bb, m->entry);
 
@@ -633,11 +822,30 @@ static int write_module(const module_t* m, byte_buf* bb) {
   }
 
   for(uint32_t i = 0; i < m->ntypes; i++) {
-    bb_u8(bb, (uint8_t)m->types[i]);
+    bb_u8(bb, (uint8_t)m->types[i].kind);
     bb_u8(bb, 0);  /* pad1 (u8) */
     bb_u16(bb, 0); /* pad2 (u16) */
-    bb_u32(bb, 0); /* p0 -- always 0: Chapter 1 supports payload-free kinds only */
+    bb_u32(bb, m->types[i].p0);
     bb_u32(bb, 0); /* p1 */
+  }
+
+  /* Signature table: empty (nsigs=0 always, this chapter). */
+  for(uint32_t i = 0; i < m->nstruct_sigs; i++) {
+    const asm_struct_sig* sig = &m->struct_sigs[i];
+    bb_u16(bb, sig->nfields);
+    bb_u8(bb, sig->named);
+    bb_u8(bb, sig->is_mutable);
+    for(uint32_t j = 0; j < sig->nfields; j++) bb_u32(bb, sig->field_type[j]);
+    if(sig->named) {
+      for(uint32_t j = 0; j < sig->nfields; j++) bb_u32(bb, sig->field_name_atom[j]);
+    }
+  }
+
+  /* Atoms: length-prefixed UTF-8, per the frozen container spec. */
+  for(uint32_t i = 0; i < m->natoms; i++) {
+    uint32_t len = (uint32_t)strlen(m->atoms[i]);
+    bb_u32(bb, len);
+    bb_push(bb, m->atoms[i], len);
   }
 
   for(uint32_t f = 0; f < m->nfuncs; f++) {
@@ -654,180 +862,9 @@ static int write_module(const module_t* m, byte_buf* bb) {
   return 1;
 }
 
-/* -- binary reader (structural checks only, Chapter 1 Sec 2.8) -- */
-
-typedef struct byte_reader {
-  const uint8_t* data;
-  size_t len;
-  size_t pos;
-  const char* filename;
-} byte_reader;
-
-static int br_need(byte_reader* r, size_t n) {
-  if(r->pos + n > r->len) {
-    fprintf(stderr, "%s: truncated container (need %zu bytes at offset %zu, have %zu)\n",
-            r->filename, n, r->pos, r->len);
-    return 0;
-  }
-  return 1;
-}
-
-static int br_u8(byte_reader* r, uint8_t* out) {
-  if(!br_need(r, 1)) return 0;
-  *out = r->data[r->pos++];
-  return 1;
-}
-
-static int br_u16(byte_reader* r, uint16_t* out) {
-  if(!br_need(r, 2)) return 0;
-  *out = (uint16_t)((uint16_t)r->data[r->pos] | ((uint16_t)r->data[r->pos + 1] << 8));
-  r->pos += 2;
-  return 1;
-}
-
-static int br_u32(byte_reader* r, uint32_t* out) {
-  if(!br_need(r, 4)) return 0;
-  *out = (uint32_t)r->data[r->pos] | ((uint32_t)r->data[r->pos + 1] << 8) |
-         ((uint32_t)r->data[r->pos + 2] << 16) | ((uint32_t)r->data[r->pos + 3] << 24);
-  r->pos += 4;
-  return 1;
-}
-
-static int read_insn_canonical(byte_reader* r, jello_insn* out) {
-  uint8_t op, a, b, cc;
-  uint32_t imm;
-  if(!br_u8(r, &op) || !br_u8(r, &a) || !br_u8(r, &b) || !br_u8(r, &cc) || !br_u32(r, &imm)) return 0;
-  out->op = op; out->a = a; out->b = b; out->c = cc; out->imm = imm;
-  return 1;
-}
-
-static int read_insn_compressed(byte_reader* r, jello_insn* out) {
-  uint8_t tag, op, a, b, cc;
-  if(!br_u8(r, &tag)) return 0;
-  if(tag != 0 && tag != 1) {
-    fprintf(stderr, "%s: bad COMPRESSED_INSN tag byte %u\n", r->filename, tag);
-    return 0;
-  }
-  if(!br_u8(r, &op) || !br_u8(r, &a) || !br_u8(r, &b) || !br_u8(r, &cc)) return 0;
-  uint32_t imm = 0;
-  if(tag == 0) { if(!br_u32(r, &imm)) return 0; }
-  out->op = op; out->a = a; out->b = b; out->c = cc; out->imm = imm;
-  return 1;
-}
-
-static int read_module(byte_reader* r, module_t* out) {
-  memset(out, 0, sizeof(*out));
-  uint32_t magic;
-  if(!br_u32(r, &magic)) return 0;
-  if(magic != JLO_MAGIC) {
-    fprintf(stderr, "%s: bad magic 0x%08x\n", r->filename, magic);
-    return 0;
-  }
-  if(!br_u32(r, &out->version)) return 0;
-  if(out->version != JLO_VERSION) {
-    fprintf(stderr, "%s: unsupported version %u\n", r->filename, out->version);
-    return 0;
-  }
-  if(!br_u32(r, &out->features)) return 0;
-
-  uint32_t ntypes, nsigs, nstruct_sigs, natoms, nfuncs;
-  if(!br_u32(r, &ntypes)) return 0;
-  if(!br_u32(r, &nsigs)) return 0;
-  if(!br_u32(r, &nstruct_sigs)) return 0;
-  if(!br_u32(r, &natoms)) return 0;
-  if(!br_u32(r, &nfuncs)) return 0;
-  if(!br_u32(r, &out->entry)) return 0;
-  if(out->entry >= nfuncs) {
-    fprintf(stderr, "%s: entry=%u out of range (nfuncs=%u)\n", r->filename, out->entry, nfuncs);
-    return 0;
-  }
-  if(nsigs != 0 || nstruct_sigs != 0 || natoms != 0) {
-    fprintf(stderr, "%s: nsigs/nstruct_sigs/natoms must be 0 -- Chapter 1's tool never produces or "
-                     "consumes non-empty signature/struct-layout/atom tables\n", r->filename);
-    return 0;
-  }
-
-  if(out->features & (uint32_t)JELLO_BC_FEAT_CONST64) {
-    uint32_t nconst_i64 = 0, nconst_f64 = 0;
-    if(!br_u32(r, &nconst_i64) || !br_u32(r, &nconst_f64)) return 0;
-    (void)nconst_i64; (void)nconst_f64;
-  }
-  if(out->features & (uint32_t)JELLO_BC_FEAT_CONSTBYTES) {
-    uint32_t nconst_bytes = 0;
-    if(!br_u32(r, &nconst_bytes)) return 0;
-    (void)nconst_bytes;
-  }
-
-  out->types = (jello_type_kind*)calloc(ntypes ? ntypes : 1, sizeof(jello_type_kind));
-  for(uint32_t i = 0; i < ntypes; i++) {
-    uint8_t kind_u8;
-    uint16_t pad2;
-    uint32_t p0, p1;
-    if(!br_u8(r, &kind_u8)) { module_free(out); return 0; }
-    uint8_t pad1; if(!br_u8(r, &pad1)) { module_free(out); return 0; }
-    if(!br_u16(r, &pad2)) { module_free(out); return 0; }
-    if(!br_u32(r, &p0)) { module_free(out); return 0; }
-    if(!br_u32(r, &p1)) { module_free(out); return 0; }
-    (void)pad1; (void)pad2; (void)p0; (void)p1;
-    if(!jello_bc_type_kind_is_valid(kind_u8)) {
-      fprintf(stderr, "%s: type table entry %u has invalid kind %u\n", r->filename, i, kind_u8);
-      module_free(out);
-      return 0;
-    }
-    out->types[i] = (jello_type_kind)kind_u8;
-  }
-  out->ntypes = ntypes;
-
-  out->funcs = (func_t*)calloc(nfuncs ? nfuncs : 1, sizeof(func_t));
-  int compressed = (out->features & (uint32_t)JELLO_BC_FEAT_COMPRESSED_INSN) != 0;
-  for(uint32_t f = 0; f < nfuncs; f++) {
-    func_t* fn = &out->funcs[f];
-    uint32_t ninsns;
-    if(!br_u32(r, &fn->nregs)) { module_free(out); return 0; }
-    if(fn->nregs > 256) {
-      fprintf(stderr, "%s: func[%u].nregs=%u exceeds the frozen 256-register ceiling\n",
-              r->filename, f, fn->nregs);
-      module_free(out);
-      return 0;
-    }
-    if(!br_u32(r, &fn->cap_start)) { module_free(out); return 0; }
-    if(!br_u32(r, &ninsns)) { module_free(out); return 0; }
-    fn->reg_type_idx = (uint32_t*)calloc(fn->nregs ? fn->nregs : 1, sizeof(uint32_t));
-    for(uint32_t rr = 0; rr < fn->nregs; rr++) {
-      if(!br_u32(r, &fn->reg_type_idx[rr])) { module_free(out); return 0; }
-      if(fn->reg_type_idx[rr] >= out->ntypes) {
-        fprintf(stderr, "%s: func[%u] reg %u references type index %u, out of range (ntypes=%u)\n",
-                r->filename, f, rr, fn->reg_type_idx[rr], out->ntypes);
-        module_free(out);
-        return 0;
-      }
-    }
-    fn->insns = (jello_insn*)calloc(ninsns ? ninsns : 1, sizeof(jello_insn));
-    for(uint32_t k = 0; k < ninsns; k++) {
-      int ok = compressed ? read_insn_compressed(r, &fn->insns[k]) : read_insn_canonical(r, &fn->insns[k]);
-      if(!ok) { module_free(out); return 0; }
-      if(!jello_bc_op_is_valid(fn->insns[k].op)) {
-        fprintf(stderr, "%s: func[%u] insn %u has invalid opcode %u\n", r->filename, f, k,
-                fn->insns[k].op);
-        module_free(out);
-        return 0;
-      }
-    }
-    fn->ninsns = ninsns;
-  }
-  out->nfuncs = nfuncs;
-
-  if(r->pos != r->len) {
-    fprintf(stderr, "%s: %zu trailing byte(s) after the last function body\n",
-            r->filename, r->len - r->pos);
-    /* Trailing bytes are allowed by the frozen spec (Sec 2.2) -- not an error. */
-  }
-  return 1;
-}
-
 /* -- text printer (disassembler) -- */
 
-static void print_module(const module_t* m, FILE* out) {
+static void print_real_module(const jello_bc_module* m, FILE* out) {
   fprintf(out, ".jlo module version=%u features=[", m->version);
   int first = 1;
   for(size_t i = 0; i < NFLAG_NAMES; i++) {
@@ -842,21 +879,51 @@ static void print_module(const module_t* m, FILE* out) {
   fprintf(out, "types: [");
   for(uint32_t i = 0; i < m->ntypes; i++) {
     if(i) fprintf(out, ", ");
-    fprintf(out, "%s", kind_name_of(m->types[i]));
+    jello_type_kind kind = m->types[i].kind;
+    fprintf(out, "%s", kind_name_of(kind));
+    if(kind == JELLO_T_STRUCT) fprintf(out, "(%u)", m->types[i].as.strct.struct_sig_id);
   }
   fprintf(out, "]\n");
   fprintf(out, "sigs: []\n");
-  fprintf(out, "atoms: []\n");
-  fprintf(out, "struct_sigs: []\n");
+
+  fprintf(out, "atoms: [");
+  for(uint32_t i = 0; i < m->natoms; i++) {
+    if(i) fprintf(out, ", ");
+    fprintf(out, "%s", m->atoms[i]);
+  }
+  fprintf(out, "]\n");
+
+  fprintf(out, "struct_sigs: [");
+  for(uint32_t i = 0; i < m->nstruct_sigs; i++) {
+    if(i) fprintf(out, ", ");
+    const jello_struct_sig* sig = &m->struct_sigs[i];
+    fprintf(out, "{ nfields=%u named=%u mutable=%u fields=[", sig->nfields, sig->named, sig->is_mutable);
+    for(uint32_t j = 0; j < sig->nfields; j++) {
+      if(j) fprintf(out, ", ");
+      fprintf(out, "%s", kind_name_of(m->types[sig->field_type[j]].kind));
+    }
+    fprintf(out, "]");
+    if(sig->named) {
+      fprintf(out, " names=[");
+      for(uint32_t j = 0; j < sig->nfields; j++) {
+        if(j) fprintf(out, ", ");
+        fprintf(out, "%s", m->atoms[sig->field_name_atom[j]]);
+      }
+      fprintf(out, "]");
+    }
+    fprintf(out, " }");
+  }
+  fprintf(out, "]\n");
 
   for(uint32_t f = 0; f < m->nfuncs; f++) {
-    const func_t* fn = &m->funcs[f];
+    const jello_bc_function* fn = &m->funcs[f];
     fprintf(out, "func[%u] nregs=%u", f, fn->nregs);
     if(fn->cap_start != fn->nregs) fprintf(out, " cap_start=%u", fn->cap_start);
     fprintf(out, " reg_types=[");
     for(uint32_t r = 0; r < fn->nregs; r++) {
       if(r) fprintf(out, ", ");
-      fprintf(out, "%s", kind_name_of(m->types[fn->reg_type_idx[r]]));
+      jello_type_kind kind = m->types[fn->reg_types[r]].kind;
+      fprintf(out, "%s", kind_name_of(kind));
     }
     fprintf(out, "]\n");
     for(uint32_t k = 0; k < fn->ninsns; k++) {
@@ -925,16 +992,19 @@ static int cmd_disasm(const char* in_path, const char* out_path) {
   size_t n = fread(data, 1, (size_t)size, f);
   fclose(f);
 
-  byte_reader r = {data, n, 0, in_path};
-  module_t m;
-  if(!read_module(&r, &m)) { free(data); return 1; }
+  jello_bc_module* m = NULL;
+  jello_bc_result rr = jello_bc_read(data, n, &m);
   free(data);
+  if(rr.err) {
+    fprintf(stderr, "%s: %s (offset %zu)\n", in_path, rr.msg, rr.offset);
+    return 1;
+  }
 
   FILE* out = out_path ? fopen(out_path, "w") : stdout;
-  if(!out) { fprintf(stderr, "%s: cannot open for writing\n", out_path); module_free(&m); return 1; }
-  print_module(&m, out);
+  if(!out) { fprintf(stderr, "%s: cannot open for writing\n", out_path); jello_bc_free(m); return 1; }
+  print_real_module(m, out);
   if(out_path) fclose(out);
-  module_free(&m);
+  jello_bc_free(m);
   return 0;
 }
 

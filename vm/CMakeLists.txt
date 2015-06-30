@@ -11,7 +11,10 @@ include(CompilerWarnings)
 
 option(JELLO_WARNINGS_AS_ERRORS "Treat warnings as errors" ON)
 
-add_library(jello_vm STATIC src/main.c)
+add_library(jello_vm STATIC
+  src/load/loader.c
+  src/load/check.c
+)
 target_include_directories(jello_vm PUBLIC src/include)
 jello_enable_warnings(jello_vm)
 if(JELLO_WARNINGS_AS_ERRORS)
@@ -23,6 +26,7 @@ install(FILES src/include/jello/jdll.h DESTINATION include/jello)
 
 add_executable(jlo_tool tools/jlo_tool.c)
 target_include_directories(jlo_tool PRIVATE src/include)
+target_link_libraries(jlo_tool PRIVATE jello_vm)
 jello_enable_warnings(jlo_tool)
 if(JELLO_WARNINGS_AS_ERRORS)
   target_compile_options(jlo_tool PRIVATE -Werror)
