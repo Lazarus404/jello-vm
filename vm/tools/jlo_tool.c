@@ -195,6 +195,10 @@ typedef struct module_t {
   char** atoms;
   uint32_t nstruct_sigs;
   asm_struct_sig* struct_sigs;
+  uint32_t nconst_i64;
+  int64_t* const_i64;
+  uint32_t nconst_f64;
+  double* const_f64;
   uint32_t nfuncs;
   func_t* funcs;
 } module_t;
@@ -209,6 +213,8 @@ static void module_free(module_t* m) {
     free(m->struct_sigs[i].field_name_atom);
   }
   free(m->struct_sigs);
+  free(m->const_i64);
+  free(m->const_f64);
   for(uint32_t i = 0; i < m->nfuncs; i++) {
     free(m->funcs[i].reg_type_idx);
     free(m->funcs[i].insns);
@@ -307,7 +313,52 @@ static int read_int(cursor* c, int32_t* out) {
   if(c->pos < c->len && c->buf[c->pos] == '-') { neg = 1; c->pos++; }
   uint32_t mag = 0;
   if(!read_uint(c, &mag)) return 0;
-  *out = neg ? -(int32_t)mag : (int32_t)mag;
+  uint32_t bits = neg ? (0u - mag) : mag;
+  memcpy(out, &bits, sizeof bits);
+  return 1;
+}
+
+static int read_int64(cursor* c, int64_t* out) {
+  skip_ws(c);
+  size_t start = c->pos;
+  if(c->pos < c->len && c->buf[c->pos] == '-') c->pos++;
+  size_t digits_start = c->pos;
+  while(c->pos < c->len && c->buf[c->pos] >= '0' && c->buf[c->pos] <= '9') c->pos++;
+  if(c->pos == digits_start) return perr(c, "expected a 64-bit integer");
+  char buf[32];
+  size_t n = c->pos - start;
+  if(n >= sizeof(buf)) return perr(c, "integer literal too long");
+  memcpy(buf, c->buf + start, n);
+  buf[n] = '\0';
+  *out = (int64_t)strtoll(buf, NULL, 10);
+  return 1;
+}
+
+static int read_double(cursor* c, double* out) {
+  skip_ws(c);
+  size_t start = c->pos;
+  if(c->pos < c->len && (c->buf[c->pos] == '-' || c->buf[c->pos] == '+')) c->pos++;
+  size_t digits_start = c->pos;
+  while(c->pos < c->len && c->buf[c->pos] >= '0' && c->buf[c->pos] <= '9') c->pos++;
+  if(c->pos < c->len && c->buf[c->pos] == '.') {
+    c->pos++;
+    while(c->pos < c->len && c->buf[c->pos] >= '0' && c->buf[c->pos] <= '9') c->pos++;
+  }
+  if(c->pos < c->len && (c->buf[c->pos] == 'e' || c->buf[c->pos] == 'E')) {
+    size_t save = c->pos;
+    c->pos++;
+    if(c->pos < c->len && (c->buf[c->pos] == '-' || c->buf[c->pos] == '+')) c->pos++;
+    size_t exp_digits = c->pos;
+    while(c->pos < c->len && c->buf[c->pos] >= '0' && c->buf[c->pos] <= '9') c->pos++;
+    if(c->pos == exp_digits) c->pos = save;
+  }
+  if(c->pos == digits_start) return perr(c, "expected a floating-point literal");
+  char buf[64];
+  size_t n = c->pos - start;
+  if(n >= sizeof(buf)) return perr(c, "float literal too long");
+  memcpy(buf, c->buf + start, n);
+  buf[n] = '\0';
+  *out = strtod(buf, NULL);
   return 1;
 }
 
@@ -324,7 +375,7 @@ static int parse_features(cursor* c, uint32_t* out_features) {
     const flag_name_entry* fe = flag_entry_from_name(name);
     if(!fe) { fprintf(stderr, "%s: unknown feature flag '%s'\n", c->filename, name); return 0; }
     if(!fe->supported) {
-      fprintf(stderr, "%s: feature flag '%s' has no section producer/consumer in Chapter 1's tool yet\n",
+      fprintf(stderr, "%s: feature flag '%s' has no section producer/consumer in Chapter 2's tool yet\n",
               c->filename, name);
       return 0;
     }
@@ -343,7 +394,7 @@ static int parse_type_entry(cursor* c, asm_type_entry* out) {
   jello_type_kind kind;
   if(!kind_from_name(name, &kind)) {
     fprintf(stderr, "%s: unknown or not-yet-supported type kind '%s' "
-                    "(LIST/ARRAY/FUNCTION/ABSTRACT are still deferred past Chapter 2)\n",
+                    "(LIST/ARRAY/FUNCTION/ABSTRACT are still deferred past Chapter 3)\n",
             c->filename, name);
     return 0;
   }
@@ -424,6 +475,52 @@ static int parse_atoms(cursor* c, char*** out_atoms, uint32_t* out_n) {
     }
   }
   *out_atoms = atoms;
+  *out_n = n;
+  return 1;
+}
+
+static int parse_const_i64(cursor* c, int64_t** out_vals, uint32_t* out_n) {
+  if(!expect_ident(c, "const_i64")) return 0;
+  if(!expect_ch(c, ':')) return 0;
+  if(!expect_ch(c, '[')) return 0;
+  int64_t* vals = NULL;
+  uint32_t n = 0, cap = 0;
+  skip_ws(c);
+  if(!match_ch(c, ']')) {
+    for(;;) {
+      int64_t v;
+      if(!read_int64(c, &v)) { free(vals); return 0; }
+      if(n == cap) { cap = cap ? cap * 2 : 4; vals = (int64_t*)realloc(vals, cap * sizeof(int64_t)); }
+      vals[n++] = v;
+      if(match_ch(c, ',')) continue;
+      break;
+    }
+    if(!expect_ch(c, ']')) { free(vals); return 0; }
+  }
+  *out_vals = vals;
+  *out_n = n;
+  return 1;
+}
+
+static int parse_const_f64(cursor* c, double** out_vals, uint32_t* out_n) {
+  if(!expect_ident(c, "const_f64")) return 0;
+  if(!expect_ch(c, ':')) return 0;
+  if(!expect_ch(c, '[')) return 0;
+  double* vals = NULL;
+  uint32_t n = 0, cap = 0;
+  skip_ws(c);
+  if(!match_ch(c, ']')) {
+    for(;;) {
+      double v;
+      if(!read_double(c, &v)) { free(vals); return 0; }
+      if(n == cap) { cap = cap ? cap * 2 : 4; vals = (double*)realloc(vals, cap * sizeof(double)); }
+      vals[n++] = v;
+      if(match_ch(c, ',')) continue;
+      break;
+    }
+    if(!expect_ch(c, ']')) { free(vals); return 0; }
+  }
+  *out_vals = vals;
   *out_n = n;
   return 1;
 }
@@ -593,7 +690,7 @@ static int parse_reg_operand(cursor* c, uint8_t* out) {
   if(!match_ch(c, 'r')) return perr(c, "expected register operand 'rN'");
   uint32_t v;
   if(!read_uint(c, &v)) return 0;
-  if(v > 255) return perr(c, "register index exceeds 255 (Chapter 1's frozen ceiling)");
+  if(v > 255) return perr(c, "register index exceeds 255 (Chapter 2's frozen ceiling)");
   *out = (uint8_t)v;
   return 1;
 }
@@ -717,6 +814,10 @@ static int parse_module(cursor* c, module_t* out) {
     module_free(out);
     return 0;
   }
+  if(out->features & (uint32_t)JELLO_BC_FEAT_CONST64) {
+    if(!parse_const_i64(c, &out->const_i64, &out->nconst_i64)) { module_free(out); return 0; }
+    if(!parse_const_f64(c, &out->const_f64, &out->nconst_f64)) { module_free(out); return 0; }
+  }
 
   func_t* funcs = NULL;
   uint32_t nfuncs = 0, cap = 0;
@@ -807,15 +908,15 @@ static int write_module(const module_t* m, byte_buf* bb) {
   bb_u32(bb, m->version);
   bb_u32(bb, m->features);
   bb_u32(bb, m->ntypes);
-  bb_u32(bb, 0); /* nsigs -- function signatures are still deferred past Chapter 2 */
+  bb_u32(bb, 0); /* nsigs -- function signatures are still deferred past Chapter 3 */
   bb_u32(bb, m->nstruct_sigs);
   bb_u32(bb, m->natoms);
   bb_u32(bb, m->nfuncs);
   bb_u32(bb, m->entry);
 
   if(m->features & (uint32_t)JELLO_BC_FEAT_CONST64) {
-    bb_u32(bb, 0); /* nconst_i64 */
-    bb_u32(bb, 0); /* nconst_f64 */
+    bb_u32(bb, m->nconst_i64);
+    bb_u32(bb, m->nconst_f64);
   }
   if(m->features & (uint32_t)JELLO_BC_FEAT_CONSTBYTES) {
     bb_u32(bb, 0); /* nconst_bytes */
@@ -846,6 +947,20 @@ static int write_module(const module_t* m, byte_buf* bb) {
     uint32_t len = (uint32_t)strlen(m->atoms[i]);
     bb_u32(bb, len);
     bb_push(bb, m->atoms[i], len);
+  }
+
+  if(m->features & (uint32_t)JELLO_BC_FEAT_CONST64) {
+    for(uint32_t i = 0; i < m->nconst_i64; i++) {
+      uint64_t bits = (uint64_t)m->const_i64[i];
+      bb_u32(bb, (uint32_t)bits);
+      bb_u32(bb, (uint32_t)(bits >> 32));
+    }
+    for(uint32_t i = 0; i < m->nconst_f64; i++) {
+      uint64_t bits;
+      memcpy(&bits, &m->const_f64[i], sizeof bits);
+      bb_u32(bb, (uint32_t)bits);
+      bb_u32(bb, (uint32_t)(bits >> 32));
+    }
   }
 
   for(uint32_t f = 0; f < m->nfuncs; f++) {
@@ -914,6 +1029,21 @@ static void print_real_module(const jello_bc_module* m, FILE* out) {
     fprintf(out, " }");
   }
   fprintf(out, "]\n");
+
+  if(m->features & (uint32_t)JELLO_BC_FEAT_CONST64) {
+    fprintf(out, "const_i64: [");
+    for(uint32_t i = 0; i < m->nconst_i64; i++) {
+      if(i) fprintf(out, ", ");
+      fprintf(out, "%lld", (long long)m->const_i64[i]);
+    }
+    fprintf(out, "]\n");
+    fprintf(out, "const_f64: [");
+    for(uint32_t i = 0; i < m->nconst_f64; i++) {
+      if(i) fprintf(out, ", ");
+      fprintf(out, "%g", m->const_f64[i]);
+    }
+    fprintf(out, "]\n");
+  }
 
   for(uint32_t f = 0; f < m->nfuncs; f++) {
     const jello_bc_function* fn = &m->funcs[f];

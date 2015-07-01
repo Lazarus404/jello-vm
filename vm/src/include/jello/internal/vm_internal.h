@@ -9,7 +9,7 @@
 
 /* Internal VM layouts, frames, dispatch, GC fields. */
 
-/* -- the concrete module (Chapter 2) -- */
+/* -- the concrete module (Chapter 3) -- */
 struct jello_bc_module {
   uint32_t version;
   uint32_t features;

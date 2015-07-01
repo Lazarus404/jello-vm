@@ -392,10 +392,20 @@ jello_bc_result jello_bc_read(const uint8_t* data, size_t size, jello_bc_module*
       funcs[i].reg_types = reg_types;
       funcs[i].ninsns = ninsns;
       funcs[i].insns = insns;
+    }
 
-      for(uint32_t j = 0; j < ninsns; j++) {
-        jello_bc_result vr = jello_bc_validate_insn(m, reg_types, &insns[j], nregs, j, ninsns, m->nfuncs);
+    for(uint32_t i = 0; i < m->nfuncs; i++) {
+      const jello_bc_function* f = &funcs[i];
+      for(uint32_t j = 0; j < f->ninsns; j++) {
+        jello_bc_result vr = jello_bc_validate_insn(m, f->reg_types, &f->insns[j], f->nregs, j, f->ninsns, m->nfuncs);
         if(vr.err) { jello_bc_free(m); *out = NULL; return vr; }
+      }
+
+      if(f->ninsns == 0 ||
+         (f->insns[f->ninsns - 1u].op != (uint8_t)JOP_RET && f->insns[f->ninsns - 1u].op != (uint8_t)JOP_JMP)) {
+        jello_bc_free(m);
+        *out = NULL;
+        return err(JELLO_BC_BAD_FORMAT, "function does not end in a terminator (RET or JMP)", r.off);
       }
     }
   }

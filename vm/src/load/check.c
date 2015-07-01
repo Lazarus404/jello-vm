@@ -48,6 +48,82 @@ static jello_type_kind reg_kind(const jello_bc_module* m, const jello_type_id* r
   return m->types[reg_types[r]].kind;
 }
 
+static int is_narrow_int_kind(jello_type_kind k) {
+  return k == JELLO_T_I8 || k == JELLO_T_I16 || k == JELLO_T_I32;
+}
+
+/* -- Chapter 4 arithmetic/comparison/conversion validation -- */
+static jello_bc_result validate_bin(const jello_bc_module* m, const jello_type_id* reg_types,
+                                     const jello_insn* ins, uint32_t nregs,
+                                     jello_type_kind operand_kind, int dest_may_narrow) {
+  if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) {
+    return err(JELLO_BC_BAD_FORMAT, "arith reg out of range", 0);
+  }
+  jello_type_kind ka = reg_kind(m, reg_types, ins->a);
+  if(dest_may_narrow ? !is_narrow_int_kind(ka) : ka != operand_kind) {
+    return err(JELLO_BC_BAD_FORMAT, "arith dest wrong kind", 0);
+  }
+  if(reg_kind(m, reg_types, ins->b) != operand_kind || reg_kind(m, reg_types, ins->c) != operand_kind) {
+    return err(JELLO_BC_BAD_FORMAT, "arith operand wrong kind", 0);
+  }
+  return ok();
+}
+
+static jello_bc_result validate_un(const jello_bc_module* m, const jello_type_id* reg_types,
+                                    const jello_insn* ins, uint32_t nregs,
+                                    jello_type_kind operand_kind, int dest_may_narrow) {
+  if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "arith reg out of range", 0);
+  jello_type_kind ka = reg_kind(m, reg_types, ins->a);
+  if(dest_may_narrow ? !is_narrow_int_kind(ka) : ka != operand_kind) {
+    return err(JELLO_BC_BAD_FORMAT, "arith dest wrong kind", 0);
+  }
+  if(reg_kind(m, reg_types, ins->b) != operand_kind) return err(JELLO_BC_BAD_FORMAT, "arith operand wrong kind", 0);
+  return ok();
+}
+
+static jello_bc_result validate_bin_imm(const jello_bc_module* m, const jello_type_id* reg_types,
+                                         const jello_insn* ins, uint32_t nregs,
+                                         jello_type_kind operand_kind) {
+  if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "arith reg out of range", 0);
+  if(!is_narrow_int_kind(reg_kind(m, reg_types, ins->a))) return err(JELLO_BC_BAD_FORMAT, "arith dest wrong kind", 0);
+  if(reg_kind(m, reg_types, ins->b) != operand_kind) return err(JELLO_BC_BAD_FORMAT, "arith operand wrong kind", 0);
+  return ok();
+}
+
+static jello_bc_result validate_cmp(const jello_bc_module* m, const jello_type_id* reg_types,
+                                     const jello_insn* ins, uint32_t nregs, jello_type_kind operand_kind) {
+  if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) return err(JELLO_BC_BAD_FORMAT, "cmp reg out of range", 0);
+  if(reg_kind(m, reg_types, ins->a) != JELLO_T_BOOL) return err(JELLO_BC_BAD_FORMAT, "cmp dest must be Bool", 0);
+  if(reg_kind(m, reg_types, ins->b) != operand_kind || reg_kind(m, reg_types, ins->c) != operand_kind) {
+    return err(JELLO_BC_BAD_FORMAT, "cmp operand wrong kind", 0);
+  }
+  return ok();
+}
+
+static jello_bc_result validate_cmp_imm(const jello_bc_module* m, const jello_type_id* reg_types,
+                                         const jello_insn* ins, uint32_t nregs, jello_type_kind operand_kind) {
+  if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "cmp reg out of range", 0);
+  if(reg_kind(m, reg_types, ins->a) != JELLO_T_BOOL) return err(JELLO_BC_BAD_FORMAT, "cmp dest must be Bool", 0);
+  if(reg_kind(m, reg_types, ins->b) != operand_kind) return err(JELLO_BC_BAD_FORMAT, "cmp operand wrong kind", 0);
+  return ok();
+}
+
+static jello_bc_result validate_conv(const jello_bc_module* m, const jello_type_id* reg_types,
+                                      const jello_insn* ins, uint32_t nregs,
+                                      jello_type_kind dst_kind, jello_type_kind src_kind) {
+  if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "conv reg out of range", 0);
+  if(reg_kind(m, reg_types, ins->a) != dst_kind) return err(JELLO_BC_BAD_FORMAT, "conv dest wrong kind", 0);
+  if(reg_kind(m, reg_types, ins->b) != src_kind) return err(JELLO_BC_BAD_FORMAT, "conv src wrong kind", 0);
+  return ok();
+}
+
+static jello_bc_result validate_const(const jello_bc_module* m, const jello_type_id* reg_types,
+                                       const jello_insn* ins, uint32_t nregs, jello_type_kind kind) {
+  if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "const reg out of range", 0);
+  if(reg_kind(m, reg_types, ins->a) != kind) return err(JELLO_BC_BAD_FORMAT, "const dest wrong kind", 0);
+  return ok();
+}
+
 static jello_bc_result validate_mov(const jello_bc_module* m, const jello_type_id* reg_types,
                                      const jello_insn* ins) {
   jello_type_id tid_a = reg_types[ins->a];
@@ -136,6 +212,116 @@ jello_bc_result jello_bc_validate_insn(
     case JOP_CLOSURE:
       if(ins->imm >= nfuncs) return err(JELLO_BC_BAD_FORMAT, "function index out of range", 0);
       return ok();
+
+    case JOP_CONST_I8_IMM:
+      if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "const reg out of range", 0);
+      if(!is_narrow_int_kind(reg_kind(m, reg_types, ins->a))) return err(JELLO_BC_BAD_FORMAT, "const dest wrong kind", 0);
+      return ok();
+    case JOP_CONST_I32:
+      return validate_const(m, reg_types, ins, nregs, JELLO_T_I32);
+    case JOP_CONST_I64:
+      if(ins->imm >= m->nconst_i64) return err(JELLO_BC_BAD_FORMAT, "const_i64 index out of range", 0);
+      return validate_const(m, reg_types, ins, nregs, JELLO_T_I64);
+    case JOP_CONST_F16:
+      return validate_const(m, reg_types, ins, nregs, JELLO_T_F16);
+    case JOP_CONST_F32:
+      return validate_const(m, reg_types, ins, nregs, JELLO_T_F32);
+    case JOP_CONST_F64:
+      if(ins->imm >= m->nconst_f64) return err(JELLO_BC_BAD_FORMAT, "const_f64 index out of range", 0);
+      return validate_const(m, reg_types, ins, nregs, JELLO_T_F64);
+    case JOP_CONST_BOOL:
+      if(ins->imm > 1) return err(JELLO_BC_BAD_FORMAT, "const_bool imm must be 0/1", 0);
+      return validate_const(m, reg_types, ins, nregs, JELLO_T_BOOL);
+
+    case JOP_ADD_I32:
+    case JOP_SUB_I32:
+    case JOP_MUL_I32:
+    case JOP_SHL_I32:
+    case JOP_SHR_I32:
+    case JOP_BITAND_I32:
+    case JOP_BITOR_I32:
+    case JOP_BITXOR_I32:
+      return validate_bin(m, reg_types, ins, nregs, JELLO_T_I32, 1);
+    case JOP_DIV_I32:
+    case JOP_MOD_I32:
+      return validate_bin(m, reg_types, ins, nregs, JELLO_T_I32, 1);
+    case JOP_ADD_I32_IMM:
+    case JOP_SUB_I32_IMM:
+    case JOP_MUL_I32_IMM:
+      return validate_bin_imm(m, reg_types, ins, nregs, JELLO_T_I32);
+    case JOP_NEG_I32:
+      return validate_un(m, reg_types, ins, nregs, JELLO_T_I32, 1);
+
+    case JOP_ADD_I64:
+    case JOP_SUB_I64:
+    case JOP_MUL_I64:
+    case JOP_DIV_I64:
+    case JOP_MOD_I64:
+    case JOP_SHL_I64:
+    case JOP_SHR_I64:
+    case JOP_BITAND_I64:
+    case JOP_BITOR_I64:
+    case JOP_BITXOR_I64:
+      return validate_bin(m, reg_types, ins, nregs, JELLO_T_I64, 0);
+    case JOP_NEG_I64:
+      return validate_un(m, reg_types, ins, nregs, JELLO_T_I64, 0);
+
+    case JOP_ADD_F16:
+    case JOP_SUB_F16:
+    case JOP_MUL_F16:
+      return validate_bin(m, reg_types, ins, nregs, JELLO_T_F16, 0);
+    case JOP_ADD_F32:
+    case JOP_SUB_F32:
+    case JOP_MUL_F32:
+    case JOP_DIV_F32:
+      return validate_bin(m, reg_types, ins, nregs, JELLO_T_F32, 0);
+    case JOP_NEG_F32:
+      return validate_un(m, reg_types, ins, nregs, JELLO_T_F32, 0);
+    case JOP_ADD_F64:
+    case JOP_SUB_F64:
+    case JOP_MUL_F64:
+    case JOP_DIV_F64:
+      return validate_bin(m, reg_types, ins, nregs, JELLO_T_F64, 0);
+    case JOP_NEG_F64:
+      return validate_un(m, reg_types, ins, nregs, JELLO_T_F64, 0);
+    case JOP_NOT_BOOL:
+      return validate_un(m, reg_types, ins, nregs, JELLO_T_BOOL, 0);
+
+    case JOP_EQ_I32:
+    case JOP_LT_I32:
+      return validate_cmp(m, reg_types, ins, nregs, JELLO_T_I32);
+    case JOP_EQ_I32_IMM:
+    case JOP_LT_I32_IMM:
+      return validate_cmp_imm(m, reg_types, ins, nregs, JELLO_T_I32);
+    case JOP_EQ_I64:
+    case JOP_LT_I64:
+      return validate_cmp(m, reg_types, ins, nregs, JELLO_T_I64);
+    case JOP_EQ_F32:
+    case JOP_LT_F32:
+      return validate_cmp(m, reg_types, ins, nregs, JELLO_T_F32);
+    case JOP_EQ_F64:
+    case JOP_LT_F64:
+      return validate_cmp(m, reg_types, ins, nregs, JELLO_T_F64);
+
+    case JOP_SEXT_I64: return validate_conv(m, reg_types, ins, nregs, JELLO_T_I64, JELLO_T_I32);
+    case JOP_SEXT_I16: return validate_conv(m, reg_types, ins, nregs, JELLO_T_I32, JELLO_T_I16);
+    case JOP_TRUNC_I8: return validate_conv(m, reg_types, ins, nregs, JELLO_T_I8, JELLO_T_I32);
+    case JOP_TRUNC_I16: return validate_conv(m, reg_types, ins, nregs, JELLO_T_I16, JELLO_T_I32);
+    case JOP_I32_FROM_I64: return validate_conv(m, reg_types, ins, nregs, JELLO_T_I32, JELLO_T_I64);
+    case JOP_F64_FROM_I32: return validate_conv(m, reg_types, ins, nregs, JELLO_T_F64, JELLO_T_I32);
+    case JOP_I32_FROM_F64: return validate_conv(m, reg_types, ins, nregs, JELLO_T_I32, JELLO_T_F64);
+    case JOP_F64_FROM_I64: return validate_conv(m, reg_types, ins, nregs, JELLO_T_F64, JELLO_T_I64);
+    case JOP_I64_FROM_F64: return validate_conv(m, reg_types, ins, nregs, JELLO_T_I64, JELLO_T_F64);
+    case JOP_F32_FROM_I32: return validate_conv(m, reg_types, ins, nregs, JELLO_T_F32, JELLO_T_I32);
+    case JOP_I32_FROM_F32: return validate_conv(m, reg_types, ins, nregs, JELLO_T_I32, JELLO_T_F32);
+    case JOP_F64_FROM_F32: return validate_conv(m, reg_types, ins, nregs, JELLO_T_F64, JELLO_T_F32);
+    case JOP_F32_FROM_F64: return validate_conv(m, reg_types, ins, nregs, JELLO_T_F32, JELLO_T_F64);
+    case JOP_F32_FROM_I64: return validate_conv(m, reg_types, ins, nregs, JELLO_T_F32, JELLO_T_I64);
+    case JOP_I64_FROM_F32: return validate_conv(m, reg_types, ins, nregs, JELLO_T_I64, JELLO_T_F32);
+    case JOP_F16_FROM_F32: return validate_conv(m, reg_types, ins, nregs, JELLO_T_F16, JELLO_T_F32);
+    case JOP_F32_FROM_F16: return validate_conv(m, reg_types, ins, nregs, JELLO_T_F32, JELLO_T_F16);
+    case JOP_F16_FROM_I32: return validate_conv(m, reg_types, ins, nregs, JELLO_T_F16, JELLO_T_I32);
+    case JOP_I32_FROM_F16: return validate_conv(m, reg_types, ins, nregs, JELLO_T_I32, JELLO_T_F16);
 
     case JOP_STRUCT_GET:
     case JOP_STRUCT_SET: {
