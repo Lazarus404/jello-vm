@@ -6,6 +6,7 @@
 
 #include <jello.h>
 #include <jello/internal/bytecode.h>
+#include <string.h>
 
 /* Internal VM layouts, frames, dispatch, GC fields. */
 
@@ -44,5 +45,165 @@ jello_bc_result jello_bc_validate_insn(
     uint32_t pc,
     uint32_t ninsns,
     uint32_t nfuncs);
+
+/* -- interpreter core (Chapter 4) -- */
+typedef struct reg_frame {
+  uint8_t* mem;
+  const uint32_t* off;
+  uint32_t size;
+} reg_frame;
+
+typedef struct call_frame {
+  const jello_bc_function* f;
+  uint32_t func_index;
+  uint32_t pc;
+  reg_frame rf;
+  uint8_t has_caller;
+  uint32_t caller_dst; /* register in the caller's frame that RET writes into */
+} call_frame;
+
+typedef struct frame_layout {
+  const jello_bc_function* f; /* cache key */
+  uint32_t* off;
+  uint32_t total; /* 8-byte aligned, so the next bump-allocated frame stays aligned too */
+} frame_layout;
+
+struct jello_vm {
+  uint8_t* frame_stack;
+  uint32_t frame_stack_top;
+  uint32_t frame_stack_cap;
+
+  call_frame* call_frames;
+  uint32_t call_frames_len;
+  uint32_t call_frames_cap;
+
+  frame_layout* frame_layouts;
+  uint32_t frame_layouts_len;
+  uint32_t frame_layouts_cap;
+  const jello_bc_module* frame_layouts_mod; /* cache invalidates when the module changes */
+
+  jello_trap_code trap_code;
+};
+
+/* -- register load/store: static inline for the hot dispatch path -- */
+static inline uint8_t* vm_reg_ptr(reg_frame* rf, uint32_t r) {
+  return rf->mem + rf->off[r];
+}
+static inline uint32_t vm_load_u32(reg_frame* rf, uint32_t r) {
+  return *(const uint32_t*)vm_reg_ptr(rf, r);
+}
+static inline void vm_store_u32(reg_frame* rf, uint32_t r, uint32_t v) {
+  *(uint32_t*)vm_reg_ptr(rf, r) = v;
+}
+static inline int64_t vm_load_i64(reg_frame* rf, uint32_t r) {
+  return *(const int64_t*)vm_reg_ptr(rf, r);
+}
+static inline void vm_store_i64(reg_frame* rf, uint32_t r, int64_t v) {
+  *(int64_t*)vm_reg_ptr(rf, r) = v;
+}
+static inline float vm_load_f32(reg_frame* rf, uint32_t r) {
+  return *(const float*)vm_reg_ptr(rf, r);
+}
+static inline void vm_store_f32(reg_frame* rf, uint32_t r, float v) {
+  *(float*)vm_reg_ptr(rf, r) = v;
+}
+static inline double vm_load_f64(reg_frame* rf, uint32_t r) {
+  return *(const double*)vm_reg_ptr(rf, r);
+}
+static inline void vm_store_f64(reg_frame* rf, uint32_t r, double v) {
+  *(double*)vm_reg_ptr(rf, r) = v;
+}
+static inline float vm_f32_from_bits(uint32_t bits) {
+  float f;
+  memcpy(&f, &bits, sizeof f);
+  return f;
+}
+static inline void vm_store_u32_masked(reg_frame* rf, uint32_t r, uint32_t v, jello_type_kind k) {
+  uint32_t masked = v;
+  if(k == JELLO_T_I8) masked = v & 0xFFu;
+  else if(k == JELLO_T_I16) masked = v & 0xFFFFu;
+  vm_store_u32(rf, r, masked);
+}
+
+jello_type_kind vm_reg_kind(const jello_bc_module* m, const jello_bc_function* f, uint32_t r);
+
+/* -- frame stack + per-function layout cache (frame.c) -- */
+int vm_push_frame(jello_vm* vm, const jello_bc_module* m, uint32_t func_index,
+                   uint32_t caller_dst, uint32_t arg_first, uint32_t arg_count, uint8_t has_caller);
+void vm_pop_frame(jello_vm* vm);
+void vm_frame_reset(jello_vm* vm);
+
+/* -- dispatch (dispatch.c) + main loop (exec_loop.c) -- */
+typedef enum op_result {
+  OP_CONTINUE,
+  OP_RETURN,
+  OP_TRAP,
+} op_result;
+
+typedef struct exec_ctx {
+  jello_vm* vm;
+  const jello_bc_module* m;
+  jello_numeric_result* out;
+} exec_ctx;
+
+op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins);
+jello_exec_status vm_exec_loop(exec_ctx* ctx);
+
+/* -- cold-path opcode handlers (ops_arith.c) -- */
+op_result op_div_i32(exec_ctx* ctx, const jello_insn* ins);
+op_result op_mod_i32(exec_ctx* ctx, const jello_insn* ins);
+op_result op_shl_i32(exec_ctx* ctx, const jello_insn* ins);
+op_result op_shr_i32(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bitand_i32(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bitor_i32(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bitxor_i32(exec_ctx* ctx, const jello_insn* ins);
+op_result op_neg_i32(exec_ctx* ctx, const jello_insn* ins);
+
+op_result op_add_i64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_sub_i64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_mul_i64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_div_i64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_mod_i64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_neg_i64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_shl_i64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_shr_i64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bitand_i64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bitor_i64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bitxor_i64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_eq_i64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_lt_i64(exec_ctx* ctx, const jello_insn* ins);
+
+op_result op_add_f16(exec_ctx* ctx, const jello_insn* ins);
+op_result op_sub_f16(exec_ctx* ctx, const jello_insn* ins);
+op_result op_mul_f16(exec_ctx* ctx, const jello_insn* ins);
+
+op_result op_add_f32(exec_ctx* ctx, const jello_insn* ins);
+op_result op_sub_f32(exec_ctx* ctx, const jello_insn* ins);
+op_result op_mul_f32(exec_ctx* ctx, const jello_insn* ins);
+op_result op_div_f32(exec_ctx* ctx, const jello_insn* ins);
+op_result op_neg_f32(exec_ctx* ctx, const jello_insn* ins);
+op_result op_neg_f64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_eq_f32(exec_ctx* ctx, const jello_insn* ins);
+op_result op_lt_f32(exec_ctx* ctx, const jello_insn* ins);
+
+op_result op_sext_i64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_sext_i16(exec_ctx* ctx, const jello_insn* ins);
+op_result op_trunc_i8(exec_ctx* ctx, const jello_insn* ins);
+op_result op_trunc_i16(exec_ctx* ctx, const jello_insn* ins);
+op_result op_i32_from_i64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_f64_from_i32(exec_ctx* ctx, const jello_insn* ins);
+op_result op_i32_from_f64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_f64_from_i64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_i64_from_f64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_f32_from_i32(exec_ctx* ctx, const jello_insn* ins);
+op_result op_i32_from_f32(exec_ctx* ctx, const jello_insn* ins);
+op_result op_f64_from_f32(exec_ctx* ctx, const jello_insn* ins);
+op_result op_f32_from_f64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_f32_from_i64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_i64_from_f32(exec_ctx* ctx, const jello_insn* ins);
+op_result op_f16_from_f32(exec_ctx* ctx, const jello_insn* ins);
+op_result op_f32_from_f16(exec_ctx* ctx, const jello_insn* ins);
+op_result op_f16_from_i32(exec_ctx* ctx, const jello_insn* ins);
+op_result op_i32_from_f16(exec_ctx* ctx, const jello_insn* ins);
 
 #endif /* JELLO_VM_INTERNAL_H */

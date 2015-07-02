@@ -204,7 +204,21 @@ jello_bc_result jello_bc_validate_insn(
       }
       return ok();
 
-    case JOP_CALL:
+    case JOP_CALL: {
+      if(ins->imm >= nfuncs) return err(JELLO_BC_BAD_FORMAT, "function index out of range", 0);
+      if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "call dest reg out of range", 0);
+      if((uint64_t)ins->b + (uint64_t)ins->c > (uint64_t)nregs) {
+        return err(JELLO_BC_BAD_FORMAT, "call arg regs out of range", 0);
+      }
+      const jello_bc_function* callee = &m->funcs[ins->imm];
+      for(uint32_t i = 0; i < ins->c; i++) {
+        if(reg_kind(m, reg_types, ins->b + i) != vm_reg_kind(m, callee, i)) {
+          return err(JELLO_BC_BAD_FORMAT, "call arg type mismatch", 0);
+        }
+      }
+      return ok();
+    }
+
     case JOP_CALLR:
     case JOP_TAILCALL:
     case JOP_TAILCALLR:

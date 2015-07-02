@@ -12,3 +12,7 @@ add_test(NAME build_matrix
 add_test(NAME bytecode_fixtures
   COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/bytecode_fixtures.sh" "${JLO_TOOL}"
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+add_test(NAME interp_fixtures
+  COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/interp_fixtures.sh" "${JLO_TOOL}"
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")

@@ -1064,6 +1064,64 @@ static void print_real_module(const jello_bc_module* m, FILE* out) {
   }
 }
 
+/* -- run: the Chapter 4 execution harness -- */
+
+static const char* trap_code_name(jello_trap_code tc) {
+  switch(tc) {
+    case JELLO_TRAP_NONE: return "NONE";
+    case JELLO_TRAP_ARITHMETIC: return "ARITHMETIC";
+    case JELLO_TRAP_STACK_OVERFLOW: return "STACK_OVERFLOW";
+    default: return "UNKNOWN";
+  }
+}
+
+static void print_numeric_result(const jello_numeric_result* r, FILE* out) {
+  switch(r->kind) {
+    case JELLO_NUM_VOID: fprintf(out, "RESULT kind=VOID\n"); break;
+    case JELLO_NUM_BOOL: fprintf(out, "RESULT kind=BOOL value=%d\n", r->as.b); break;
+    case JELLO_NUM_I32: fprintf(out, "RESULT kind=I32 value=%d\n", r->as.i32); break;
+    case JELLO_NUM_I64: fprintf(out, "RESULT kind=I64 value=%lld\n", (long long)r->as.i64); break;
+    case JELLO_NUM_F32: fprintf(out, "RESULT kind=F32 value=%.9g\n", (double)r->as.f32); break;
+    case JELLO_NUM_F64: fprintf(out, "RESULT kind=F64 value=%.17g\n", r->as.f64); break;
+  }
+}
+
+static int cmd_run(const char* in_path) {
+  FILE* f = fopen(in_path, "rb");
+  if(!f) { fprintf(stderr, "%s: cannot open\n", in_path); return 1; }
+  if(fseek(f, 0, SEEK_END) != 0) { fclose(f); return 1; }
+  long size = ftell(f);
+  if(size < 0) { fclose(f); return 1; }
+  fseek(f, 0, SEEK_SET);
+  uint8_t* data = (uint8_t*)malloc(size > 0 ? (size_t)size : 1);
+  size_t n = fread(data, 1, (size_t)size, f);
+  fclose(f);
+
+  jello_bc_module* m = NULL;
+  jello_bc_result rr = jello_bc_read(data, n, &m);
+  free(data);
+  if(rr.err) {
+    fprintf(stderr, "%s: %s (offset %zu)\n", in_path, rr.msg, rr.offset);
+    return 1;
+  }
+
+  jello_vm* vm = jello_vm_create();
+  if(!vm) { fprintf(stderr, "%s: out of memory creating VM\n", in_path); jello_bc_free(m); return 1; }
+
+  jello_numeric_result result;
+  jello_exec_status st = jello_vm_exec_numeric(vm, m, &result);
+
+  if(st == JELLO_EXEC_OK) {
+    print_numeric_result(&result, stdout);
+  } else {
+    printf("TRAP code=%s\n", trap_code_name(jello_vm_last_trap_code(vm)));
+  }
+
+  jello_vm_destroy(vm);
+  jello_bc_free(m);
+  return 0;
+}
+
 /* -- file I/O helpers -- */
 
 static char* read_whole_file(const char* path, size_t* out_len) {
@@ -1087,6 +1145,7 @@ static char* read_whole_file(const char* path, size_t* out_len) {
 static void usage(const char* prog) {
   fprintf(stderr, "usage: %s asm <in.jlo.txt> -o <out.jlo>\n", prog);
   fprintf(stderr, "       %s disasm <in.jlo> [-o <out.jlo.txt>]\n", prog);
+  fprintf(stderr, "       %s run <in.jlo>\n", prog);
 }
 
 static int cmd_asm(const char* in_path, const char* out_path) {
@@ -1154,6 +1213,9 @@ int main(int argc, char** argv) {
   }
   if(strcmp(subcmd, "disasm") == 0) {
     return cmd_disasm(in_path, out_path);
+  }
+  if(strcmp(subcmd, "run") == 0) {
+    return cmd_run(in_path);
   }
   usage(argv[0]);
   return 1;

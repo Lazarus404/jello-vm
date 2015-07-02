@@ -86,4 +86,47 @@ jello_bc_result jello_bc_read(const uint8_t* data, size_t size, jello_bc_module*
 void jello_bc_free(jello_bc_module* m);
 uint32_t jello_bc_get_entry(const jello_bc_module* m);
 
+/* -- interpreter (Chapter 4) -- */
+struct jello_vm;
+typedef struct jello_vm jello_vm;
+
+jello_vm* jello_vm_create(void);
+void jello_vm_destroy(jello_vm* vm);
+
+typedef enum jello_exec_status {
+  JELLO_EXEC_OK = 0,
+  JELLO_EXEC_TRAP = 1,
+} jello_exec_status;
+
+typedef enum jello_trap_code {
+  JELLO_TRAP_NONE = 0,
+  JELLO_TRAP_ARITHMETIC = 1,
+  JELLO_TRAP_STACK_OVERFLOW = 2,
+} jello_trap_code;
+
+jello_trap_code jello_vm_last_trap_code(const jello_vm* vm);
+
+/* -- numeric-only value boundary (Chapter 4, deliberately not jello_value) --  */
+typedef enum jello_numeric_kind {
+  JELLO_NUM_VOID = 0,
+  JELLO_NUM_BOOL,
+  JELLO_NUM_I32,
+  JELLO_NUM_I64,
+  JELLO_NUM_F32,
+  JELLO_NUM_F64,
+} jello_numeric_kind;
+
+typedef struct jello_numeric_result {
+  jello_numeric_kind kind;
+  union {
+    int32_t i32;
+    int64_t i64;
+    float f32;
+    double f64;
+    int b; /* 0/1, for JELLO_NUM_BOOL */
+  } as;
+} jello_numeric_result;
+
+jello_exec_status jello_vm_exec_numeric(jello_vm* vm, const jello_bc_module* m, jello_numeric_result* out);
+
 #endif /* JELLO_H */
