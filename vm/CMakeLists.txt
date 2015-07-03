@@ -39,3 +39,6 @@ jello_enable_warnings(jlo_tool)
 if(JELLO_WARNINGS_AS_ERRORS)
   target_compile_options(jlo_tool PRIVATE -Werror)
 endif()
+
+enable_testing()
+add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../tests" tests)

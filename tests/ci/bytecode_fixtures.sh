@@ -56,7 +56,7 @@ else
   echo "bytecode_fixtures: compressed_conformance decodes identically FULL vs COMPACT"
 fi
 
-echo "== corrupt binary fixtures: must be rejected, never crash (structural, Chapter 1) =="
+echo "== corrupt binary fixtures: must be rejected, never crash (structural, Chapter 2) =="
 "${JLO_TOOL}" asm "${FIXDIR}/minimal_valid.jlo.txt" -o "${TMP}/valid.jlo"
 
 valid_size=$(wc -c < "${TMP}/valid.jlo")
@@ -76,7 +76,7 @@ else
   echo "bytecode_fixtures: bad_magic.jlo correctly rejected ($(cat "${TMP}/bad_magic.err"))"
 fi
 
-echo "== corrupt semantic fixtures: structurally valid, semantically invalid (Chapter 2) =="
+echo "== corrupt semantic fixtures: structurally valid, semantically invalid (Chapter 3) =="
 for fixture in "${CORRUPTDIR}"/*.jlo.txt; do
   base="$(basename "${fixture}" .jlo.txt)"
   bin="${TMP}/corrupt_${base}.jlo"
@@ -95,8 +95,8 @@ for fixture in "${CORRUPTDIR}"/*.jlo.txt; do
 done
 
 if [[ ${failures} -gt 0 ]]; then
-  echo "chapter2_bytecode_and_validation: ${failures} failure(s)" >&2
+  echo "chapter3_bytecode_and_validation: ${failures} failure(s)" >&2
   exit 1
 fi
 
-echo "chapter2_bytecode_and_validation: passed"
+echo "chapter3_bytecode_and_validation: passed"
