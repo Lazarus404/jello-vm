@@ -36,6 +36,30 @@ for fixture in "${FIXDIR}"/*.jlo.txt; do
   fi
 done
 
+echo "== benchmark fixtures: fib/ackerman/tak/deep_call (Sec 2.8) =="
+echo "   results section, not re-asserted as a pass/fail bound by this script"
+declare -A BENCH_EXPECT=(
+  [fib]="RESULT kind=I32 value=46368"
+  [ackerman]="RESULT kind=I32 value=509"
+  [tak]="RESULT kind=I32 value=7"
+  [deep_call]="RESULT kind=I32 value=50000"
+)
+for name in fib ackerman tak deep_call; do
+  fixture="${BENCHDIR}/${name}.jlo.txt"
+  bin="${TMP}/${name}.jlo"
+  if ! "${JLO_TOOL}" asm "${fixture}" -o "${bin}" 2>"${TMP}/${name}.asm.err"; then
+    fail "${name}: asm failed -- $(cat "${TMP}/${name}.asm.err")"
+    continue
+  fi
+  actual="$("${JLO_TOOL}" run "${bin}" 2>"${TMP}/${name}.run.err" || true)"
+  expected="${BENCH_EXPECT[${name}]}"
+  if [[ "${actual}" != "${expected}" ]]; then
+    fail "${name}: expected [${expected}] got [${actual}] $(cat "${TMP}/${name}.run.err")"
+  else
+    echo "interp_fixtures: ${name} -> ${actual}"
+  fi
+done
+
 if [[ ${failures} -gt 0 ]]; then
   echo "chapter4_interpreter_core: ${failures} failure(s)" >&2
   exit 1

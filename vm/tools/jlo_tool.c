@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <errno.h>
+#include <time.h>
 
 /* -- jlo_tool -- */
 
@@ -1086,7 +1087,7 @@ static void print_numeric_result(const jello_numeric_result* r, FILE* out) {
   }
 }
 
-static int cmd_run(const char* in_path) {
+static int cmd_run(const char* in_path, int repeat) {
   FILE* f = fopen(in_path, "rb");
   if(!f) { fprintf(stderr, "%s: cannot open\n", in_path); return 1; }
   if(fseek(f, 0, SEEK_END) != 0) { fclose(f); return 1; }
@@ -1109,12 +1110,22 @@ static int cmd_run(const char* in_path) {
   if(!vm) { fprintf(stderr, "%s: out of memory creating VM\n", in_path); jello_bc_free(m); return 1; }
 
   jello_numeric_result result;
-  jello_exec_status st = jello_vm_exec_numeric(vm, m, &result);
+  jello_exec_status st = JELLO_EXEC_OK;
+  clock_t t0 = clock();
+  for(int i = 0; i < repeat; i++) {
+    st = jello_vm_exec_numeric(vm, m, &result);
+    if(st != JELLO_EXEC_OK) break;
+  }
+  clock_t t1 = clock();
 
   if(st == JELLO_EXEC_OK) {
     print_numeric_result(&result, stdout);
   } else {
     printf("TRAP code=%s\n", trap_code_name(jello_vm_last_trap_code(vm)));
+  }
+  if(repeat > 1) {
+    double ms = (double)(t1 - t0) * 1000.0 / (double)CLOCKS_PER_SEC;
+    printf("ELAPSED_MS %.3f\n", ms);
   }
 
   jello_vm_destroy(vm);
@@ -1145,7 +1156,7 @@ static char* read_whole_file(const char* path, size_t* out_len) {
 static void usage(const char* prog) {
   fprintf(stderr, "usage: %s asm <in.jlo.txt> -o <out.jlo>\n", prog);
   fprintf(stderr, "       %s disasm <in.jlo> [-o <out.jlo.txt>]\n", prog);
-  fprintf(stderr, "       %s run <in.jlo>\n", prog);
+  fprintf(stderr, "       %s run <in.jlo> [--repeat N]\n", prog);
 }
 
 static int cmd_asm(const char* in_path, const char* out_path) {
@@ -1203,8 +1214,10 @@ int main(int argc, char** argv) {
   const char* subcmd = argv[1];
   const char* in_path = argv[2];
   const char* out_path = NULL;
+  int repeat = 1;
   for(int i = 3; i < argc; i++) {
     if(strcmp(argv[i], "-o") == 0 && i + 1 < argc) { out_path = argv[i + 1]; i++; }
+    else if(strcmp(argv[i], "--repeat") == 0 && i + 1 < argc) { repeat = atoi(argv[i + 1]); i++; }
   }
 
   if(strcmp(subcmd, "asm") == 0) {
@@ -1215,7 +1228,7 @@ int main(int argc, char** argv) {
     return cmd_disasm(in_path, out_path);
   }
   if(strcmp(subcmd, "run") == 0) {
-    return cmd_run(in_path);
+    return cmd_run(in_path, repeat > 0 ? repeat : 1);
   }
   usage(argv[0]);
   return 1;
