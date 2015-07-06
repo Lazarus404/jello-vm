@@ -52,7 +52,7 @@ static int is_narrow_int_kind(jello_type_kind k) {
   return k == JELLO_T_I8 || k == JELLO_T_I16 || k == JELLO_T_I32;
 }
 
-/* -- Chapter 4 arithmetic/comparison/conversion validation -- */
+/* -- Chapter 3 arithmetic/comparison/conversion validation -- */
 static jello_bc_result validate_bin(const jello_bc_module* m, const jello_type_id* reg_types,
                                      const jello_insn* ins, uint32_t nregs,
                                      jello_type_kind operand_kind, int dest_may_narrow) {
@@ -179,7 +179,7 @@ jello_bc_result jello_bc_validate_insn(
     case JOP_JMP: {
       int32_t d = (int32_t)ins->imm;
       int32_t tgt = (int32_t)(pc + 1u) + d;
-      if(tgt < 0 || tgt > (int32_t)ninsns) return err(JELLO_BC_BAD_FORMAT, "jmp target out of range", 0);
+      if(tgt < 0 || tgt >= (int32_t)ninsns) return err(JELLO_BC_BAD_FORMAT, "jmp target out of range", 0);
       return ok();
     }
 
@@ -188,7 +188,7 @@ jello_bc_result jello_bc_validate_insn(
       if(reg_kind(m, reg_types, ins->a) != JELLO_T_BOOL) return err(JELLO_BC_BAD_FORMAT, "jmp_if cond must be bool", 0);
       int32_t d = (int32_t)ins->imm;
       int32_t tgt = (int32_t)(pc + 1u) + d;
-      if(tgt < 0 || tgt > (int32_t)ninsns) return err(JELLO_BC_BAD_FORMAT, "jmp_if target out of range", 0);
+      if(tgt < 0 || tgt >= (int32_t)ninsns) return err(JELLO_BC_BAD_FORMAT, "jmp_if target out of range", 0);
       return ok();
     }
 
@@ -211,6 +211,7 @@ jello_bc_result jello_bc_validate_insn(
         return err(JELLO_BC_BAD_FORMAT, "call arg regs out of range", 0);
       }
       const jello_bc_function* callee = &m->funcs[ins->imm];
+      if(ins->c > callee->nregs) return err(JELLO_BC_BAD_FORMAT, "call passes more args than callee has registers", 0);
       for(uint32_t i = 0; i < ins->c; i++) {
         if(reg_kind(m, reg_types, ins->b + i) != vm_reg_kind(m, callee, i)) {
           return err(JELLO_BC_BAD_FORMAT, "call arg type mismatch", 0);
