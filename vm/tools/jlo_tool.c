@@ -931,7 +931,6 @@ static int write_module(const module_t* m, byte_buf* bb) {
     bb_u32(bb, 0); /* p1 */
   }
 
-  /* Signature table: empty (nsigs=0 always, this chapter). */
   for(uint32_t i = 0; i < m->nstruct_sigs; i++) {
     const asm_struct_sig* sig = &m->struct_sigs[i];
     bb_u16(bb, sig->nfields);

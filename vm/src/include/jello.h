@@ -106,7 +106,7 @@ typedef enum jello_trap_code {
 
 jello_trap_code jello_vm_last_trap_code(const jello_vm* vm);
 
-/* -- numeric-only value boundary (Chapter 4, deliberately not jello_value) --  */
+/* -- numeric-only value boundary (Chapter 4, deliberately not jello_value) -- */
 typedef enum jello_numeric_kind {
   JELLO_NUM_VOID = 0,
   JELLO_NUM_BOOL,

@@ -117,6 +117,8 @@ DEF_BIN_I32_MASKED(op_bitand_i32, a & b)
 DEF_BIN_I32_MASKED(op_bitor_i32, a | b)
 DEF_BIN_I32_MASKED(op_bitxor_i32, a ^ b)
 
+/* Unsigned subtraction from zero avoids the signed-overflow UB that `-x`
+ * would hit at INT32_MIN. */
 op_result op_neg_i32(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   uint32_t x = vm_load_u32(&fr->rf, ins->b);
@@ -229,6 +231,8 @@ DEF_BIN_F16(op_mul_f16, a * b)
 DEF_BIN_F32(op_add_f32, a + b)
 DEF_BIN_F32(op_sub_f32, a - b)
 DEF_BIN_F32(op_mul_f32, a * b)
+/* IEEE-754 division by zero yields +-inf/NaN, not undefined behaviour, so
+ * unlike DIV_I32/DIV_I64 (Sec 2.6.2), this needs no added trap. */
 DEF_BIN_F32(op_div_f32, a / b)
 
 op_result op_neg_f32(exec_ctx* ctx, const jello_insn* ins) {

@@ -10,7 +10,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 include(CompilerWarnings)
 
 option(JELLO_WARNINGS_AS_ERRORS "Treat warnings as errors" ON)
-option(JELLOVM_USE_COMPUTED_GOTO "Use computed-goto dispatch on GCC/Clang (Chapter 4)" ON)
+option(JELLO_USE_COMPUTED_GOTO "Use computed-goto dispatch on GCC/Clang (Chapter 4)" ON)
 
 add_library(jello_vm STATIC
   src/load/loader.c
@@ -21,8 +21,8 @@ add_library(jello_vm STATIC
   src/interp/ops_arith.c
 )
 target_include_directories(jello_vm PUBLIC src/include)
-if(JELLOVM_USE_COMPUTED_GOTO)
-  target_compile_definitions(jello_vm PRIVATE JELLOVM_USE_COMPUTED_GOTO)
+if(JELLO_USE_COMPUTED_GOTO)
+  target_compile_definitions(jello_vm PRIVATE JELLO_USE_COMPUTED_GOTO)
 endif()
 jello_enable_warnings(jello_vm)
 if(JELLO_WARNINGS_AS_ERRORS)

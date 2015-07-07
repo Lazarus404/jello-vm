@@ -10,14 +10,14 @@
 static op_result op_unimplemented(exec_ctx* ctx, const jello_insn* ins) {
   (void)ctx;
   fprintf(stderr,
-      "jello_vm: opcode %u has no Chapter 4 interpreter handler yet "
-      "(deferred to the chapter that owns it)\n",
+      "jello_vm: opcode %u has no Chapter 3 interpreter handler yet "
+      "(deferred to the chapter that owns it -- see JELLO_CHAPTER_3.md Sec 2.7)\n",
       (unsigned)ins->op);
   abort();
 }
 
 op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins) {
-#if defined(JELLOVM_USE_COMPUTED_GOTO) && (defined(__GNUC__) || defined(__clang__))
+#if defined(JELLO_USE_COMPUTED_GOTO) && (defined(__GNUC__) || defined(__clang__))
 #pragma GCC diagnostic push
 #if defined(__clang__)
 #pragma GCC diagnostic ignored "-Wgnu-label-as-value"
