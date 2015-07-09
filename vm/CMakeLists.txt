@@ -19,6 +19,7 @@ add_library(jello_vm STATIC
   src/interp/dispatch.c
   src/interp/exec_loop.c
   src/interp/ops_arith.c
+  src/gc/gc.c
 )
 target_include_directories(jello_vm PUBLIC src/include)
 if(JELLO_USE_COMPUTED_GOTO)

@@ -129,4 +129,36 @@ typedef struct jello_numeric_result {
 
 jello_exec_status jello_vm_exec_numeric(jello_vm* vm, const jello_bc_module* m, jello_numeric_result* out);
 
+/* -- GC v1 (Chapter 5) -- */
+void jello_gc_init(jello_vm* vm);
+void jello_gc_shutdown(jello_vm* vm);
+void* jello_gc_alloc(jello_vm* vm, size_t size);
+void jello_gc_collect(jello_vm* vm);
+void jello_gc_push_root(jello_vm* vm, void* obj);
+void jello_gc_pop_roots(jello_vm* vm, uint32_t n);
+
+void jello_vm_gc_stats(const jello_vm* vm, uint32_t* out_live_bytes, uint32_t* out_collections,
+                        double* out_pause_ms);
+
+/* -- heap object kind tag (Chapter 5) -- */
+typedef enum jello_obj_kind {
+  JELLO_OBJ_BYTES = 1,
+} jello_obj_kind;
+
+typedef struct jello_obj_header {
+  uint8_t kind; /* JELLO_OBJ_BYTES -- the only value this chapter defines */
+} jello_obj_header;
+
+/* -- Bytes (Chapter 5's first heap-allocated kind) -- */
+typedef struct jello_bytes {
+  jello_obj_header h;
+  uint32_t length;
+  uint8_t data[];
+} jello_bytes;
+
+jello_bytes* jello_bytes_new(jello_vm* vm, uint32_t length);
+
+/* -- blocking (Chapter 5) -- */
+void jello_vm_blocking(jello_vm* vm, int is_blocking);
+
 #endif /* JELLO_H */

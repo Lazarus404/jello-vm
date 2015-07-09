@@ -3,6 +3,7 @@
 
 #include <jello/internal.h>
 #include <stdlib.h>
+#include <string.h>
 
 /* -- frame stack + per-function layout cache -- */
 
@@ -34,14 +35,21 @@ static void free_layouts(jello_vm* vm) {
   vm->frame_layouts_mod = NULL;
 }
 
+static int is_pointer_kind(jello_type_kind k) {
+  return k == JELLO_T_BYTES;
+}
+
 static frame_layout* build_layout(jello_vm* vm, const jello_bc_module* m, const jello_bc_function* f) {
   uint32_t* off = f->nregs ? (uint32_t*)malloc((size_t)f->nregs * sizeof(uint32_t)) : NULL;
   uint32_t cursor = 0;
+  int has_pointer = 0;
   for(uint32_t r = 0; r < f->nregs; r++) {
-    uint32_t sz = (uint32_t)jello_slot_size(vm_reg_kind(m, f, r));
+    jello_type_kind k = vm_reg_kind(m, f, r);
+    uint32_t sz = (uint32_t)jello_slot_size(k);
     cursor = align_up(cursor, sz);
     off[r] = cursor;
     cursor += sz;
+    if(is_pointer_kind(k)) has_pointer = 1;
   }
   cursor = align_up(cursor, 8u);
 
@@ -53,6 +61,7 @@ static frame_layout* build_layout(jello_vm* vm, const jello_bc_module* m, const 
   fl->f = f;
   fl->off = off;
   fl->total = cursor;
+  fl->has_pointer = has_pointer;
   return fl;
 }
 
@@ -119,7 +128,10 @@ int vm_push_frame(jello_vm* vm, const jello_bc_module* m, uint32_t func_index,
   fr->rf.off = fl->off;
   fr->rf.size = fl->total;
   fr->has_caller = has_caller;
+  fr->has_pointer = (uint8_t)fl->has_pointer;
   fr->caller_dst = caller_dst;
+
+  if(fl->has_pointer) memset(mem, 0, fl->total);
 
   for(uint32_t i = 0; i < arg_count; i++) {
     if(jello_slot_size(vm_reg_kind(m, f, i)) == 8u) {
@@ -146,11 +158,14 @@ void vm_frame_reset(jello_vm* vm) {
 }
 
 jello_vm* jello_vm_create(void) {
-  return (jello_vm*)calloc(1, sizeof(jello_vm));
+  jello_vm* vm = (jello_vm*)calloc(1, sizeof(jello_vm));
+  if(vm) jello_gc_init(vm);
+  return vm;
 }
 
 void jello_vm_destroy(jello_vm* vm) {
   if(!vm) return;
+  jello_gc_shutdown(vm);
   free(vm->frame_stack);
   free(vm->call_frames);
   free_layouts(vm);
