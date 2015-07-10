@@ -1071,6 +1071,8 @@ static const char* trap_code_name(jello_trap_code tc) {
     case JELLO_TRAP_NONE: return "NONE";
     case JELLO_TRAP_ARITHMETIC: return "ARITHMETIC";
     case JELLO_TRAP_STACK_OVERFLOW: return "STACK_OVERFLOW";
+    case JELLO_TRAP_NULL_DEREF: return "NULL_DEREF";
+    case JELLO_TRAP_BOUNDS: return "BOUNDS";
     default: return "UNKNOWN";
   }
 }

@@ -102,6 +102,8 @@ typedef enum jello_trap_code {
   JELLO_TRAP_NONE = 0,
   JELLO_TRAP_ARITHMETIC = 1,
   JELLO_TRAP_STACK_OVERFLOW = 2,
+  JELLO_TRAP_NULL_DEREF = 3,
+  JELLO_TRAP_BOUNDS = 4,
 } jello_trap_code;
 
 jello_trap_code jello_vm_last_trap_code(const jello_vm* vm);

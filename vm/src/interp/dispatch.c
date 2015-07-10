@@ -55,6 +55,9 @@ op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins) {
     [JOP_I64_FROM_F32] = &&L_I64_FROM_F32, [JOP_F16_FROM_F32] = &&L_F16_FROM_F32,
     [JOP_F32_FROM_F16] = &&L_F32_FROM_F16, [JOP_F16_FROM_I32] = &&L_F16_FROM_I32,
     [JOP_I32_FROM_F16] = &&L_I32_FROM_F16,
+
+    [JOP_BYTES_NEW] = &&L_BYTES_NEW, [JOP_BYTES_LEN] = &&L_BYTES_LEN,
+    [JOP_BYTES_GET_U8] = &&L_BYTES_GET_U8, [JOP_BYTES_SET_U8] = &&L_BYTES_SET_U8,
   };
 
   if((uint32_t)ins->op >= (uint32_t)JOP_COUNT || op_table[ins->op] == NULL) {
@@ -117,6 +120,11 @@ op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins) {
   L_F32_FROM_F16: return op_f32_from_f16(ctx, ins);
   L_F16_FROM_I32: return op_f16_from_i32(ctx, ins);
   L_I32_FROM_F16: return op_i32_from_f16(ctx, ins);
+
+  L_BYTES_NEW: return op_bytes_new(ctx, ins);
+  L_BYTES_LEN: return op_bytes_len(ctx, ins);
+  L_BYTES_GET_U8: return op_bytes_get_u8(ctx, ins);
+  L_BYTES_SET_U8: return op_bytes_set_u8(ctx, ins);
 #pragma GCC diagnostic pop
 #else
   switch((jello_op)ins->op) {
@@ -175,6 +183,11 @@ op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins) {
     case JOP_F32_FROM_F16: return op_f32_from_f16(ctx, ins);
     case JOP_F16_FROM_I32: return op_f16_from_i32(ctx, ins);
     case JOP_I32_FROM_F16: return op_i32_from_f16(ctx, ins);
+
+    case JOP_BYTES_NEW: return op_bytes_new(ctx, ins);
+    case JOP_BYTES_LEN: return op_bytes_len(ctx, ins);
+    case JOP_BYTES_GET_U8: return op_bytes_get_u8(ctx, ins);
+    case JOP_BYTES_SET_U8: return op_bytes_set_u8(ctx, ins);
     default: return op_unimplemented(ctx, ins);
   }
 #endif
