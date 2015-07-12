@@ -1088,7 +1088,7 @@ static void print_numeric_result(const jello_numeric_result* r, FILE* out) {
   }
 }
 
-static int cmd_run(const char* in_path, int repeat) {
+static int cmd_run(const char* in_path, int repeat, int gc_stats) {
   FILE* f = fopen(in_path, "rb");
   if(!f) { fprintf(stderr, "%s: cannot open\n", in_path); return 1; }
   if(fseek(f, 0, SEEK_END) != 0) { fclose(f); return 1; }
@@ -1128,6 +1128,14 @@ static int cmd_run(const char* in_path, int repeat) {
     double ms = (double)(t1 - t0) * 1000.0 / (double)CLOCKS_PER_SEC;
     printf("ELAPSED_MS %.3f\n", ms);
   }
+  if(gc_stats) {
+    uint32_t live_bytes = 0, collections = 0;
+    double pause_ms = 0.0;
+    jello_vm_gc_stats(vm, &live_bytes, &collections, &pause_ms);
+    printf("GC_LIVE_BYTES %u\n", live_bytes);
+    printf("GC_COLLECTIONS %u\n", collections);
+    printf("GC_PAUSE_MS %.3f\n", pause_ms);
+  }
 
   jello_vm_destroy(vm);
   jello_bc_free(m);
@@ -1157,7 +1165,7 @@ static char* read_whole_file(const char* path, size_t* out_len) {
 static void usage(const char* prog) {
   fprintf(stderr, "usage: %s asm <in.jlo.txt> -o <out.jlo>\n", prog);
   fprintf(stderr, "       %s disasm <in.jlo> [-o <out.jlo.txt>]\n", prog);
-  fprintf(stderr, "       %s run <in.jlo> [--repeat N]\n", prog);
+  fprintf(stderr, "       %s run <in.jlo> [--repeat N] [--gc-stats]\n", prog);
 }
 
 static int cmd_asm(const char* in_path, const char* out_path) {
@@ -1216,9 +1224,11 @@ int main(int argc, char** argv) {
   const char* in_path = argv[2];
   const char* out_path = NULL;
   int repeat = 1;
+  int gc_stats = 0;
   for(int i = 3; i < argc; i++) {
     if(strcmp(argv[i], "-o") == 0 && i + 1 < argc) { out_path = argv[i + 1]; i++; }
     else if(strcmp(argv[i], "--repeat") == 0 && i + 1 < argc) { repeat = atoi(argv[i + 1]); i++; }
+    else if(strcmp(argv[i], "--gc-stats") == 0) { gc_stats = 1; }
   }
 
   if(strcmp(subcmd, "asm") == 0) {
@@ -1229,7 +1239,7 @@ int main(int argc, char** argv) {
     return cmd_disasm(in_path, out_path);
   }
   if(strcmp(subcmd, "run") == 0) {
-    return cmd_run(in_path, repeat > 0 ? repeat : 1);
+    return cmd_run(in_path, repeat > 0 ? repeat : 1, gc_stats);
   }
   usage(argv[0]);
   return 1;

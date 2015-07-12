@@ -35,9 +35,28 @@ for fixture in "${FIXDIR}"/bytes_new_len.jlo.txt "${FIXDIR}"/bytes_set_get_u8.jl
   fi
 done
 
+echo "== allocation-churn stress fixture: reclaim proven via --gc-stats, not a fixed RESULT (Sec 2.10) =="
+churn_fixture="${FIXDIR}/bytes_gc_churn.jlo.txt"
+churn_bin="${TMP}/bytes_gc_churn.jlo"
+if ! "${JLO_TOOL}" asm "${churn_fixture}" -o "${churn_bin}" 2>"${TMP}/churn.asm.err"; then
+  fail "bytes_gc_churn: asm failed -- $(cat "${TMP}/churn.asm.err")"
+else
+  out="$("${JLO_TOOL}" run "${churn_bin}" --gc-stats 2>"${TMP}/churn.run.err" || true)"
+  echo "${out}"
+  collections="$(echo "${out}" | awk '/^GC_COLLECTIONS/ {print $2}')"
+  live_bytes="$(echo "${out}" | awk '/^GC_LIVE_BYTES/ {print $2}')"
+  if [[ -z "${collections}" || "${collections}" -le 0 ]]; then
+    fail "bytes_gc_churn: expected at least one real collection, got GC_COLLECTIONS=${collections:-<missing>}"
+  elif [[ -z "${live_bytes}" || "${live_bytes}" -gt 1048576 ]]; then
+    fail "bytes_gc_churn: expected live bytes well under 1MB after reclaim, got GC_LIVE_BYTES=${live_bytes:-<missing>}"
+  else
+    echo "gc_fixtures: bytes_gc_churn reclaimed correctly (collections=${collections}, live_bytes=${live_bytes})"
+  fi
+fi
+
 if [[ ${failures} -gt 0 ]]; then
-  echo "chapter4_gc_v1: ${failures} failure(s)" >&2
+  echo "chapter5_gc_v1: ${failures} failure(s)" >&2
   exit 1
 fi
 
-echo "chapter4_gc_v1: passed"
+echo "chapter5_gc_v1: passed"
