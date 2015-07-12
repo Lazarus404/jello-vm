@@ -376,7 +376,7 @@ static int parse_features(cursor* c, uint32_t* out_features) {
     const flag_name_entry* fe = flag_entry_from_name(name);
     if(!fe) { fprintf(stderr, "%s: unknown feature flag '%s'\n", c->filename, name); return 0; }
     if(!fe->supported) {
-      fprintf(stderr, "%s: feature flag '%s' has no section producer/consumer in Chapter 2's tool yet\n",
+      fprintf(stderr, "%s: feature flag '%s' has no section producer/consumer yet\n",
               c->filename, name);
       return 0;
     }
@@ -395,7 +395,7 @@ static int parse_type_entry(cursor* c, asm_type_entry* out) {
   jello_type_kind kind;
   if(!kind_from_name(name, &kind)) {
     fprintf(stderr, "%s: unknown or not-yet-supported type kind '%s' "
-                    "(LIST/ARRAY/FUNCTION/ABSTRACT are still deferred past Chapter 3)\n",
+                    "(LIST/ARRAY/FUNCTION/ABSTRACT are still deferred)\n",
             c->filename, name);
     return 0;
   }
@@ -691,7 +691,7 @@ static int parse_reg_operand(cursor* c, uint8_t* out) {
   if(!match_ch(c, 'r')) return perr(c, "expected register operand 'rN'");
   uint32_t v;
   if(!read_uint(c, &v)) return 0;
-  if(v > 255) return perr(c, "register index exceeds 255 (Chapter 2's frozen ceiling)");
+  if(v > 255) return perr(c, "register index exceeds 255");
   *out = (uint8_t)v;
   return 1;
 }
@@ -1064,7 +1064,7 @@ static void print_real_module(const jello_bc_module* m, FILE* out) {
   }
 }
 
-/* -- run: the Chapter 4 execution harness -- */
+/* -- run -- */
 
 static const char* trap_code_name(jello_trap_code tc) {
   switch(tc) {

@@ -3,7 +3,7 @@
 
 #include <jello/internal.h>
 
-/* -- Bytes opcode handlers (Chapter 4) -- */
+/* -- Bytes opcode handlers -- */
 
 static call_frame* current_frame(exec_ctx* ctx) {
   return &ctx->vm->call_frames[ctx->vm->call_frames_len - 1u];

@@ -52,7 +52,7 @@ static int is_narrow_int_kind(jello_type_kind k) {
   return k == JELLO_T_I8 || k == JELLO_T_I16 || k == JELLO_T_I32;
 }
 
-/* -- Chapter 3 arithmetic/comparison/conversion validation -- */
+/* -- arithmetic/comparison/conversion validation -- */
 static jello_bc_result validate_bin(const jello_bc_module* m, const jello_type_id* reg_types,
                                      const jello_insn* ins, uint32_t nregs,
                                      jello_type_kind operand_kind, int dest_may_narrow) {

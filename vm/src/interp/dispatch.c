@@ -10,8 +10,7 @@
 static op_result op_unimplemented(exec_ctx* ctx, const jello_insn* ins) {
   (void)ctx;
   fprintf(stderr,
-      "jello_vm: opcode %u has no Chapter 3 interpreter handler yet "
-      "(deferred to the chapter that owns it -- see JELLO_CHAPTER_3.md Sec 2.7)\n",
+      "jello_vm: opcode %u has no interpreter handler yet\n",
       (unsigned)ins->op);
   abort();
 }

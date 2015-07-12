@@ -239,7 +239,7 @@ void jello_gc_collect(jello_vm* vm) {
   vm->gc_pause_ms += (double)(t1 - t0) * 1000.0 / (double)CLOCKS_PER_SEC;
 }
 
-/* -- Bytes: this chapter's one heap-allocated kind -- */
+/* -- Bytes -- */
 
 jello_bytes* jello_bytes_new(jello_vm* vm, uint32_t length) {
   jello_bytes* b = (jello_bytes*)jello_gc_alloc(vm, sizeof(jello_bytes) + (size_t)length);

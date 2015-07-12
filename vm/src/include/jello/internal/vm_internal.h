@@ -10,7 +10,7 @@
 
 /* Internal VM layouts, frames, dispatch, GC fields. */
 
-/* -- the concrete module (Chapter 3) -- */
+/* -- the concrete module -- */
 struct jello_bc_module {
   uint32_t version;
   uint32_t features;
@@ -46,7 +46,7 @@ jello_bc_result jello_bc_validate_insn(
     uint32_t ninsns,
     uint32_t nfuncs);
 
-/* -- interpreter core (Chapter 4) -- */
+/* -- interpreter core -- */
 typedef struct reg_frame {
   uint8_t* mem;
   const uint32_t* off;
@@ -59,8 +59,7 @@ typedef struct call_frame {
   uint32_t pc;
   reg_frame rf;
   uint8_t has_caller;
-  uint8_t has_pointer; /* copied from frame_layout at push (Chapter 4 Sec 2.6); lets GC root
-                        * scanning skip a frame without looking its frame_layout up again */
+  uint8_t has_pointer;
   uint32_t caller_dst; /* register in the caller's frame that RET writes into */
 } call_frame;
 
@@ -68,12 +67,10 @@ typedef struct frame_layout {
   const jello_bc_function* f; /* cache key */
   uint32_t* off;
   uint32_t total; /* 8-byte aligned, so the next bump-allocated frame stays aligned too */
-  int has_pointer; /* Chapter 5: true if any register is BYTES-kind (or, from Chapter 5, any other
-                    * pointer/Dynamic kind); gates both root-scanning and the frame-zero memset on
-                    * push. */
+  int has_pointer;
 } frame_layout;
 
-/* -- GC v1 (Chapter 5) -- */
+/* -- GC v1 -- */
 typedef struct jello_gc_hdr {
   struct jello_gc_hdr* next; /* live-object list, or free-list, depending on state */
   uint32_t total_size;       /* header + payload, rounded up to this object's size class */
@@ -98,11 +95,9 @@ struct jello_vm {
   const jello_bc_module* frame_layouts_mod; /* cache invalidates when the module changes */
 
   jello_trap_code trap_code;
-  const jello_bc_module* running_module; /* set by jello_vm_exec_numeric; GC root-scanning needs
-                                          * the module to resolve a register's declared kind
-                                          * (Chapter 4 Sec 2.6). */
+  const jello_bc_module* running_module;
 
-  /* GC v1 (Chapter 5) */
+  /* GC v1 */
   jello_gc_hdr* gc_objects; /* every live object, singly linked */
   jello_gc_hdr* gc_free_classes[GC_NUM_SIZE_CLASSES]; /* one free-list head per size class */
   uint32_t gc_bytes_live;
@@ -113,7 +108,7 @@ struct jello_vm {
   uint32_t gc_roots_len;
   uint32_t gc_roots_cap;
   double gc_pause_ms; /* cumulative wall-clock time spent inside jello_gc_collect (Sec 2.10) */
-  int gc_blocking_depth; /* Chapter 5's jello_vm_blocking stub (Sec 2.7) */
+  int gc_blocking_depth;
 };
 
 /* -- register load/store: static inline for the hot dispatch path -- */
@@ -237,7 +232,7 @@ op_result op_f32_from_f16(exec_ctx* ctx, const jello_insn* ins);
 op_result op_f16_from_i32(exec_ctx* ctx, const jello_insn* ins);
 op_result op_i32_from_f16(exec_ctx* ctx, const jello_insn* ins);
 
-/* -- Bytes opcode handlers (ops_bytes.c, Chapter 5) -- */
+/* -- Bytes opcode handlers (ops_bytes.c) -- */
 op_result op_bytes_new(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_len(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_get_u8(exec_ctx* ctx, const jello_insn* ins);
