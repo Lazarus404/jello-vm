@@ -104,9 +104,64 @@ typedef enum jello_trap_code {
   JELLO_TRAP_STACK_OVERFLOW = 2,
   JELLO_TRAP_NULL_DEREF = 3,
   JELLO_TRAP_BOUNDS = 4,
+  JELLO_TRAP_TYPE_MISMATCH = 5,
 } jello_trap_code;
 
 jello_trap_code jello_vm_last_trap_code(const jello_vm* vm);
+
+/* -- the Dynamic boundary -- */
+typedef uintptr_t jello_value;
+
+typedef enum jello_value_tag {
+  JELLO_TAG_PTR = 0x0u,
+  JELLO_TAG_I32 = 0x1u,
+  JELLO_TAG_ATOM = 0x2u,
+  JELLO_TAG_BOOL = 0x3u,
+  JELLO_TAG_NULL = 0x4u,
+} jello_value_tag;
+
+static inline jello_value jello_make_null(void) {
+  return (jello_value)JELLO_TAG_NULL;
+}
+static inline int jello_is_null(jello_value v) {
+  return (unsigned)(v & 0x7u) == (unsigned)JELLO_TAG_NULL;
+}
+static inline jello_value jello_make_bool(int b) {
+  return ((jello_value)((b != 0) ? 1u : 0u) << 3) | (jello_value)JELLO_TAG_BOOL;
+}
+static inline int jello_is_bool(jello_value v) {
+  return (unsigned)(v & 0x7u) == (unsigned)JELLO_TAG_BOOL;
+}
+static inline int jello_as_bool(jello_value v) {
+  return (int)((v >> 3) & 1u);
+}
+static inline jello_value jello_make_atom(uint32_t atom_id) {
+  return ((jello_value)atom_id << 3) | (jello_value)JELLO_TAG_ATOM;
+}
+static inline int jello_is_atom(jello_value v) {
+  return (unsigned)(v & 0x7u) == (unsigned)JELLO_TAG_ATOM;
+}
+static inline uint32_t jello_as_atom(jello_value v) {
+  return (uint32_t)(v >> 3);
+}
+static inline jello_value jello_make_i32(int32_t x) {
+  return ((jello_value)(uintptr_t)(uint32_t)x << 3) | (jello_value)JELLO_TAG_I32;
+}
+static inline int jello_is_i32(jello_value v) {
+  return (unsigned)(v & 0x7u) == (unsigned)JELLO_TAG_I32;
+}
+static inline int32_t jello_as_i32(jello_value v) {
+  return (int32_t)(uint32_t)(v >> 3);
+}
+static inline int jello_is_ptr(jello_value v) {
+  return (unsigned)(v & 0x7u) == (unsigned)JELLO_TAG_PTR;
+}
+static inline void* jello_as_ptr(jello_value v) {
+  return (void*)(uintptr_t)v;
+}
+static inline jello_value jello_from_ptr(const void* p) {
+  return (jello_value)(uintptr_t)p;
+}
 
 /* -- numeric-only value boundary -- */
 typedef enum jello_numeric_kind {
@@ -145,10 +200,17 @@ void jello_vm_gc_stats(const jello_vm* vm, uint32_t* out_live_bytes, uint32_t* o
 /* -- heap object kind tag -- */
 typedef enum jello_obj_kind {
   JELLO_OBJ_BYTES = 1,
+  JELLO_OBJ_STRUCT = 2,
+  JELLO_OBJ_OBJECT = 3,
+  JELLO_OBJ_BOX_I64 = 4,
+  JELLO_OBJ_BOX_F64 = 5,
+  JELLO_OBJ_BOX_F32 = 6,
+  JELLO_OBJ_BOX_F16 = 7,
 } jello_obj_kind;
 
 typedef struct jello_obj_header {
   uint8_t kind;
+  uint32_t type_id;
 } jello_obj_header;
 
 /* -- Bytes -- */
@@ -159,6 +221,34 @@ typedef struct jello_bytes {
 } jello_bytes;
 
 jello_bytes* jello_bytes_new(jello_vm* vm, uint32_t length);
+
+/* -- numeric boxing -- */
+typedef struct jello_box_i64 { jello_obj_header h; int64_t value; } jello_box_i64;
+typedef struct jello_box_f64 { jello_obj_header h; double value; } jello_box_f64;
+typedef struct jello_box_f32 { jello_obj_header h; float value; } jello_box_f32;
+typedef struct jello_box_f16 { jello_obj_header h; uint16_t value; } jello_box_f16;
+
+jello_box_i64* jello_box_i64_new(jello_vm* vm, int64_t v);
+jello_box_f64* jello_box_f64_new(jello_vm* vm, double v);
+jello_box_f32* jello_box_f32_new(jello_vm* vm, float v);
+jello_box_f16* jello_box_f16_new(jello_vm* vm, uint16_t bits);
+
+static inline int jello_is_box_i64(jello_value v) {
+  return jello_is_ptr(v) && v != 0 && ((const jello_obj_header*)jello_as_ptr(v))->kind == (uint8_t)JELLO_OBJ_BOX_I64;
+}
+static inline int jello_is_box_f64(jello_value v) {
+  return jello_is_ptr(v) && v != 0 && ((const jello_obj_header*)jello_as_ptr(v))->kind == (uint8_t)JELLO_OBJ_BOX_F64;
+}
+static inline int jello_is_box_f32(jello_value v) {
+  return jello_is_ptr(v) && v != 0 && ((const jello_obj_header*)jello_as_ptr(v))->kind == (uint8_t)JELLO_OBJ_BOX_F32;
+}
+static inline int jello_is_box_f16(jello_value v) {
+  return jello_is_ptr(v) && v != 0 && ((const jello_obj_header*)jello_as_ptr(v))->kind == (uint8_t)JELLO_OBJ_BOX_F16;
+}
+static inline int64_t jello_as_box_i64(jello_value v) { return ((const jello_box_i64*)jello_as_ptr(v))->value; }
+static inline double jello_as_box_f64(jello_value v) { return ((const jello_box_f64*)jello_as_ptr(v))->value; }
+static inline float jello_as_box_f32(jello_value v) { return ((const jello_box_f32*)jello_as_ptr(v))->value; }
+static inline uint16_t jello_as_box_f16(jello_value v) { return ((const jello_box_f16*)jello_as_ptr(v))->value; }
 
 /* -- blocking -- */
 void jello_vm_blocking(jello_vm* vm, int is_blocking);

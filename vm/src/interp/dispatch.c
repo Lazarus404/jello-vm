@@ -57,6 +57,15 @@ op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins) {
 
     [JOP_BYTES_NEW] = &&L_BYTES_NEW, [JOP_BYTES_LEN] = &&L_BYTES_LEN,
     [JOP_BYTES_GET_U8] = &&L_BYTES_GET_U8, [JOP_BYTES_SET_U8] = &&L_BYTES_SET_U8,
+
+    [JOP_CONST_NULL] = &&L_CONST_NULL, [JOP_CONST_ATOM] = &&L_CONST_ATOM,
+    [JOP_TO_DYN] = &&L_TO_DYN,
+    [JOP_FROM_DYN_I8] = &&L_FROM_DYN_I8, [JOP_FROM_DYN_I16] = &&L_FROM_DYN_I16,
+    [JOP_FROM_DYN_I32] = &&L_FROM_DYN_I32, [JOP_FROM_DYN_I64] = &&L_FROM_DYN_I64,
+    [JOP_FROM_DYN_F16] = &&L_FROM_DYN_F16, [JOP_FROM_DYN_F32] = &&L_FROM_DYN_F32,
+    [JOP_FROM_DYN_F64] = &&L_FROM_DYN_F64, [JOP_FROM_DYN_BOOL] = &&L_FROM_DYN_BOOL,
+    [JOP_FROM_DYN_ATOM] = &&L_FROM_DYN_ATOM, [JOP_FROM_DYN_PTR] = &&L_FROM_DYN_PTR,
+    [JOP_KINDOF] = &&L_KINDOF, [JOP_PHYSEQ] = &&L_PHYSEQ,
   };
 
   if((uint32_t)ins->op >= (uint32_t)JOP_COUNT || op_table[ins->op] == NULL) {
@@ -124,6 +133,22 @@ op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins) {
   L_BYTES_LEN: return op_bytes_len(ctx, ins);
   L_BYTES_GET_U8: return op_bytes_get_u8(ctx, ins);
   L_BYTES_SET_U8: return op_bytes_set_u8(ctx, ins);
+
+  L_CONST_NULL: return op_const_null(ctx, ins);
+  L_CONST_ATOM: return op_const_atom(ctx, ins);
+  L_TO_DYN: return op_to_dyn(ctx, ins);
+  L_FROM_DYN_I8: return op_from_dyn_i8(ctx, ins);
+  L_FROM_DYN_I16: return op_from_dyn_i16(ctx, ins);
+  L_FROM_DYN_I32: return op_from_dyn_i32(ctx, ins);
+  L_FROM_DYN_I64: return op_from_dyn_i64(ctx, ins);
+  L_FROM_DYN_F16: return op_from_dyn_f16(ctx, ins);
+  L_FROM_DYN_F32: return op_from_dyn_f32(ctx, ins);
+  L_FROM_DYN_F64: return op_from_dyn_f64(ctx, ins);
+  L_FROM_DYN_BOOL: return op_from_dyn_bool(ctx, ins);
+  L_FROM_DYN_ATOM: return op_from_dyn_atom(ctx, ins);
+  L_FROM_DYN_PTR: return op_from_dyn_ptr(ctx, ins);
+  L_KINDOF: return op_kindof(ctx, ins);
+  L_PHYSEQ: return op_physeq(ctx, ins);
 #pragma GCC diagnostic pop
 #else
   switch((jello_op)ins->op) {
@@ -187,6 +212,22 @@ op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins) {
     case JOP_BYTES_LEN: return op_bytes_len(ctx, ins);
     case JOP_BYTES_GET_U8: return op_bytes_get_u8(ctx, ins);
     case JOP_BYTES_SET_U8: return op_bytes_set_u8(ctx, ins);
+
+    case JOP_CONST_NULL: return op_const_null(ctx, ins);
+    case JOP_CONST_ATOM: return op_const_atom(ctx, ins);
+    case JOP_TO_DYN: return op_to_dyn(ctx, ins);
+    case JOP_FROM_DYN_I8: return op_from_dyn_i8(ctx, ins);
+    case JOP_FROM_DYN_I16: return op_from_dyn_i16(ctx, ins);
+    case JOP_FROM_DYN_I32: return op_from_dyn_i32(ctx, ins);
+    case JOP_FROM_DYN_I64: return op_from_dyn_i64(ctx, ins);
+    case JOP_FROM_DYN_F16: return op_from_dyn_f16(ctx, ins);
+    case JOP_FROM_DYN_F32: return op_from_dyn_f32(ctx, ins);
+    case JOP_FROM_DYN_F64: return op_from_dyn_f64(ctx, ins);
+    case JOP_FROM_DYN_BOOL: return op_from_dyn_bool(ctx, ins);
+    case JOP_FROM_DYN_ATOM: return op_from_dyn_atom(ctx, ins);
+    case JOP_FROM_DYN_PTR: return op_from_dyn_ptr(ctx, ins);
+    case JOP_KINDOF: return op_kindof(ctx, ins);
+    case JOP_PHYSEQ: return op_physeq(ctx, ins);
     default: return op_unimplemented(ctx, ins);
   }
 #endif

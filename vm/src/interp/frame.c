@@ -36,7 +36,14 @@ static void free_layouts(jello_vm* vm) {
 }
 
 static int is_pointer_kind(jello_type_kind k) {
-  return k == JELLO_T_BYTES;
+  return k == JELLO_T_BYTES || k == JELLO_T_DYNAMIC;
+}
+
+static void null_init_dynamic_regs(const jello_bc_module* m, const jello_bc_function* f,
+                                    reg_frame* rf) {
+  for(uint32_t r = 0; r < f->nregs; r++) {
+    if(vm_reg_kind(m, f, r) == JELLO_T_DYNAMIC) vm_store_val(rf, r, jello_make_null());
+  }
 }
 
 static frame_layout* build_layout(jello_vm* vm, const jello_bc_module* m, const jello_bc_function* f) {
@@ -131,7 +138,10 @@ int vm_push_frame(jello_vm* vm, const jello_bc_module* m, uint32_t func_index,
   fr->has_pointer = (uint8_t)fl->has_pointer;
   fr->caller_dst = caller_dst;
 
-  if(fl->has_pointer) memset(mem, 0, fl->total);
+  if(fl->has_pointer) {
+    memset(mem, 0, fl->total);
+    null_init_dynamic_regs(m, f, &fr->rf);
+  }
 
   for(uint32_t i = 0; i < arg_count; i++) {
     if(jello_slot_size(vm_reg_kind(m, f, i)) == 8u) {

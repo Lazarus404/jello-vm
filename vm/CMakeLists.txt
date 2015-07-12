@@ -20,6 +20,8 @@ add_library(jello_vm STATIC
   src/interp/exec_loop.c
   src/interp/ops_arith.c
   src/interp/ops_bytes.c
+  src/interp/ops_dyn.c
+  src/value/value.c
   src/gc/gc.c
 )
 target_include_directories(jello_vm PUBLIC src/include)

@@ -154,6 +154,10 @@ static void trace_object(mark_stack* ms, void* p) {
   const jello_obj_header* oh = (const jello_obj_header*)p;
   switch((jello_obj_kind)oh->kind) {
     case JELLO_OBJ_BYTES:
+    case JELLO_OBJ_BOX_I64:
+    case JELLO_OBJ_BOX_F64:
+    case JELLO_OBJ_BOX_F32:
+    case JELLO_OBJ_BOX_F16:
       return;
     default:
       return;
@@ -184,6 +188,10 @@ static void scan_typed_frames(jello_vm* vm, mark_stack* ms) {
         void* p = NULL;
         memcpy(&p, vm_reg_ptr(rf, r), sizeof(void*));
         mark_ptr(ms, p);
+      } else if(k == JELLO_T_DYNAMIC) {
+        jello_value v;
+        memcpy(&v, vm_reg_ptr(rf, r), sizeof(jello_value));
+        if(jello_is_ptr(v)) mark_ptr(ms, jello_as_ptr(v));
       }
     }
   }
@@ -244,6 +252,38 @@ void jello_gc_collect(jello_vm* vm) {
 jello_bytes* jello_bytes_new(jello_vm* vm, uint32_t length) {
   jello_bytes* b = (jello_bytes*)jello_gc_alloc(vm, sizeof(jello_bytes) + (size_t)length);
   b->h.kind = (uint8_t)JELLO_OBJ_BYTES;
+  b->h.type_id = 0; /* Bytes is not a parameterised kind; type_id unused */
   b->length = length;
+  return b;
+}
+
+/* -- numeric boxing -- */
+
+jello_box_i64* jello_box_i64_new(jello_vm* vm, int64_t v) {
+  jello_box_i64* b = (jello_box_i64*)jello_gc_alloc(vm, sizeof(jello_box_i64));
+  b->h.kind = (uint8_t)JELLO_OBJ_BOX_I64;
+  b->h.type_id = 0;
+  b->value = v;
+  return b;
+}
+jello_box_f64* jello_box_f64_new(jello_vm* vm, double v) {
+  jello_box_f64* b = (jello_box_f64*)jello_gc_alloc(vm, sizeof(jello_box_f64));
+  b->h.kind = (uint8_t)JELLO_OBJ_BOX_F64;
+  b->h.type_id = 0;
+  b->value = v;
+  return b;
+}
+jello_box_f32* jello_box_f32_new(jello_vm* vm, float v) {
+  jello_box_f32* b = (jello_box_f32*)jello_gc_alloc(vm, sizeof(jello_box_f32));
+  b->h.kind = (uint8_t)JELLO_OBJ_BOX_F32;
+  b->h.type_id = 0;
+  b->value = v;
+  return b;
+}
+jello_box_f16* jello_box_f16_new(jello_vm* vm, uint16_t bits) {
+  jello_box_f16* b = (jello_box_f16*)jello_gc_alloc(vm, sizeof(jello_box_f16));
+  b->h.kind = (uint8_t)JELLO_OBJ_BOX_F16;
+  b->h.type_id = 0;
+  b->value = bits;
   return b;
 }

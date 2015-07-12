@@ -247,6 +247,11 @@ jello_bc_result jello_bc_validate_insn(
     case JOP_CONST_BOOL:
       if(ins->imm > 1) return err(JELLO_BC_BAD_FORMAT, "const_bool imm must be 0/1", 0);
       return validate_const(m, reg_types, ins, nregs, JELLO_T_BOOL);
+    case JOP_CONST_NULL:
+      return validate_const(m, reg_types, ins, nregs, JELLO_T_DYNAMIC);
+    case JOP_CONST_ATOM:
+      if(ins->imm >= m->natoms) return err(JELLO_BC_BAD_FORMAT, "const_atom atom id out of range", 0);
+      return validate_const(m, reg_types, ins, nregs, JELLO_T_ATOM);
 
     case JOP_ADD_I32:
     case JOP_SUB_I32:
@@ -337,6 +342,56 @@ jello_bc_result jello_bc_validate_insn(
     case JOP_F32_FROM_F16: return validate_conv(m, reg_types, ins, nregs, JELLO_T_F32, JELLO_T_F16);
     case JOP_F16_FROM_I32: return validate_conv(m, reg_types, ins, nregs, JELLO_T_F16, JELLO_T_I32);
     case JOP_I32_FROM_F16: return validate_conv(m, reg_types, ins, nregs, JELLO_T_I32, JELLO_T_F16);
+
+    /* -- the Dynamic boundary -- */
+    case JOP_TO_DYN:
+      if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "to_dyn reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_DYNAMIC) return err(JELLO_BC_BAD_FORMAT, "to_dyn dst must be Dynamic", 0);
+      return ok();
+    case JOP_FROM_DYN_I8:
+    case JOP_FROM_DYN_I16:
+    case JOP_FROM_DYN_I32:
+    case JOP_FROM_DYN_I64:
+    case JOP_FROM_DYN_F16:
+    case JOP_FROM_DYN_F32:
+    case JOP_FROM_DYN_F64:
+    case JOP_FROM_DYN_BOOL:
+    case JOP_FROM_DYN_ATOM: {
+      if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "from_dyn reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->b) != JELLO_T_DYNAMIC) return err(JELLO_BC_BAD_FORMAT, "from_dyn src must be Dynamic", 0);
+      jello_type_kind want;
+      switch((jello_op)op) {
+        case JOP_FROM_DYN_I8: want = JELLO_T_I8; break;
+        case JOP_FROM_DYN_I16: want = JELLO_T_I16; break;
+        case JOP_FROM_DYN_I32: want = JELLO_T_I32; break;
+        case JOP_FROM_DYN_I64: want = JELLO_T_I64; break;
+        case JOP_FROM_DYN_F16: want = JELLO_T_F16; break;
+        case JOP_FROM_DYN_F32: want = JELLO_T_F32; break;
+        case JOP_FROM_DYN_F64: want = JELLO_T_F64; break;
+        case JOP_FROM_DYN_BOOL: want = JELLO_T_BOOL; break;
+        default: want = JELLO_T_ATOM; break;
+      }
+      if(reg_kind(m, reg_types, ins->a) != want) return err(JELLO_BC_BAD_FORMAT, "from_dyn dst wrong kind", 0);
+      return ok();
+    }
+    case JOP_FROM_DYN_PTR: {
+      if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "from_dyn_ptr reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->b) != JELLO_T_DYNAMIC) return err(JELLO_BC_BAD_FORMAT, "from_dyn_ptr src must be Dynamic", 0);
+      jello_type_kind dk = reg_kind(m, reg_types, ins->a);
+      if(dk != JELLO_T_BYTES && dk != JELLO_T_STRUCT && dk != JELLO_T_OBJECT) {
+        return err(JELLO_BC_BAD_FORMAT, "from_dyn_ptr dst must be a pointer kind", 0);
+      }
+      return ok();
+    }
+    case JOP_KINDOF:
+      if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "kindof reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_I32) return err(JELLO_BC_BAD_FORMAT, "kindof dst must be I32", 0);
+      if(reg_kind(m, reg_types, ins->b) != JELLO_T_DYNAMIC) return err(JELLO_BC_BAD_FORMAT, "kindof src must be Dynamic", 0);
+      return ok();
+    case JOP_PHYSEQ:
+      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) return err(JELLO_BC_BAD_FORMAT, "physeq reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_BOOL) return err(JELLO_BC_BAD_FORMAT, "physeq dst must be Bool", 0);
+      return ok();
 
     case JOP_STRUCT_GET:
     case JOP_STRUCT_SET: {

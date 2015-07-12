@@ -139,6 +139,22 @@ static inline double vm_load_f64(reg_frame* rf, uint32_t r) {
 static inline void vm_store_f64(reg_frame* rf, uint32_t r, double v) {
   *(double*)vm_reg_ptr(rf, r) = v;
 }
+static inline void* vm_load_ptr(reg_frame* rf, uint32_t r) {
+  void* p;
+  memcpy(&p, vm_reg_ptr(rf, r), sizeof(void*));
+  return p;
+}
+static inline void vm_store_ptr(reg_frame* rf, uint32_t r, void* p) {
+  memcpy(vm_reg_ptr(rf, r), &p, sizeof(void*));
+}
+static inline jello_value vm_load_val(reg_frame* rf, uint32_t r) {
+  jello_value v;
+  memcpy(&v, vm_reg_ptr(rf, r), sizeof(jello_value));
+  return v;
+}
+static inline void vm_store_val(reg_frame* rf, uint32_t r, jello_value v) {
+  memcpy(vm_reg_ptr(rf, r), &v, sizeof(jello_value));
+}
 static inline float vm_f32_from_bits(uint32_t bits) {
   float f;
   memcpy(&f, &bits, sizeof f);
@@ -237,5 +253,29 @@ op_result op_bytes_new(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_len(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_get_u8(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_set_u8(exec_ctx* ctx, const jello_insn* ins);
+
+/* -- the boxing boundary (value/value.c) -- */
+jello_value vm_box_from_typed(jello_vm* vm, const jello_bc_module* m, const jello_bc_function* f,
+                               reg_frame* rf, uint32_t r);
+int vm_store_from_boxed(jello_vm* vm, const jello_bc_module* m, const jello_bc_function* f,
+                         reg_frame* rf, uint32_t dst, jello_value v);
+uint32_t vm_kindof_dynamic(jello_value v);
+
+/* -- Dynamic boundary opcode handlers (ops_dyn.c) -- */
+op_result op_to_dyn(exec_ctx* ctx, const jello_insn* ins);
+op_result op_from_dyn_i8(exec_ctx* ctx, const jello_insn* ins);
+op_result op_from_dyn_i16(exec_ctx* ctx, const jello_insn* ins);
+op_result op_from_dyn_i32(exec_ctx* ctx, const jello_insn* ins);
+op_result op_from_dyn_i64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_from_dyn_f16(exec_ctx* ctx, const jello_insn* ins);
+op_result op_from_dyn_f32(exec_ctx* ctx, const jello_insn* ins);
+op_result op_from_dyn_f64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_from_dyn_bool(exec_ctx* ctx, const jello_insn* ins);
+op_result op_from_dyn_atom(exec_ctx* ctx, const jello_insn* ins);
+op_result op_from_dyn_ptr(exec_ctx* ctx, const jello_insn* ins);
+op_result op_kindof(exec_ctx* ctx, const jello_insn* ins);
+op_result op_physeq(exec_ctx* ctx, const jello_insn* ins);
+op_result op_const_null(exec_ctx* ctx, const jello_insn* ins);
+op_result op_const_atom(exec_ctx* ctx, const jello_insn* ins);
 
 #endif /* JELLO_VM_INTERNAL_H */
