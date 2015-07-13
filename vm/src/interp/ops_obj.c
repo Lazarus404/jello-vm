@@ -11,12 +11,35 @@ static call_frame* current_frame(exec_ctx* ctx) {
 
 static int obj_get_chain(jello_vm* vm, const jello_bc_module* m, jello_object* o,
                           uint32_t atom_id, jello_value* out) {
-  *out = jello_object_get(o, atom_id);
+  if(!m->proto_enabled || atom_id == JELLO_ATOM___PROTO__ || !o->proto) {
+    *out = jello_object_get(o, atom_id);
+    return 1;
+  }
+  jello_object* cur = o;
+  jello_value v = jello_make_null();
+  for(uint32_t steps = 0;; steps++) {
+    if(jello_object_has(cur, atom_id)) { v = jello_object_get(cur, atom_id); break; }
+    jello_object* p = cur->proto;
+    if(!p) break;
+    cur = p;
+    if(steps > 1024u) {
+      vm->trap_code = JELLO_TRAP_BOUNDS;
+      return 0;
+    }
+  }
+  *out = v;
   return 1;
 }
 
 static void obj_set_direct(const jello_bc_module* m, jello_object* o, uint32_t atom_id, jello_value v) {
   jello_object_set(o, atom_id, v);
+  if(!m->proto_enabled || atom_id != JELLO_ATOM___PROTO__) return;
+  if(jello_is_ptr(v) && jello_as_ptr(v) != NULL &&
+     ((const jello_obj_header*)jello_as_ptr(v))->kind == (uint8_t)JELLO_OBJ_OBJECT) {
+    o->proto = (jello_object*)jello_as_ptr(v);
+  } else {
+    o->proto = NULL;
+  }
 }
 
 op_result op_obj_new(exec_ctx* ctx, const jello_insn* ins) {

@@ -34,7 +34,10 @@ struct jello_bc_module {
   uint32_t nfuncs;
   const jello_bc_function* funcs;
   uint32_t entry;
+  uint8_t proto_enabled;
 };
+
+#define JELLO_ATOM___PROTO__ 0u
 
 enum {
   JELLO_OBJ_SLOT_EMPTY = 0,

@@ -313,6 +313,9 @@ jello_bc_result jello_bc_read(const uint8_t* data, size_t size, jello_bc_module*
     free(atom_offsets);
   }
 
+  m->proto_enabled = (uint8_t)(m->natoms > JELLO_ATOM___PROTO__ &&
+                                strcmp(m->atoms[JELLO_ATOM___PROTO__], "__proto__") == 0);
+
   // --- constant pools
   if(m->nconst_i64 > 0) {
     int64_t* pool = (int64_t*)calloc(m->nconst_i64, sizeof(int64_t));
