@@ -259,6 +259,26 @@ typedef struct jello_struct {
 
 jello_struct* jello_struct_new(jello_vm* vm, const jello_bc_module* m, uint32_t struct_sig_id);
 
+/* -- Object -- */
+typedef struct jello_object {
+  jello_obj_header h;
+  struct jello_object* proto;
+  uint32_t cap;
+  uint32_t len;
+  uint32_t tombstones;
+  uint32_t* keys;
+  jello_value* vals;
+  uint8_t* states;
+} jello_object;
+
+jello_object* jello_object_new(jello_vm* vm, uint32_t type_id);
+int jello_object_has(const jello_object* o, uint32_t atom_id);
+jello_value jello_object_get(const jello_object* o, uint32_t atom_id);
+void jello_object_set(jello_object* o, uint32_t atom_id, jello_value v);
+int jello_object_remove(jello_object* o, uint32_t atom_id);
+void jello_object_clear(jello_object* o);
+jello_object* jello_object_copy(jello_vm* vm, const jello_object* src);
+
 /* -- blocking -- */
 void jello_vm_blocking(jello_vm* vm, int is_blocking);
 

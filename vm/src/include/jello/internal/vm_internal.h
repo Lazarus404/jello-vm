@@ -36,6 +36,15 @@ struct jello_bc_module {
   uint32_t entry;
 };
 
+enum {
+  JELLO_OBJ_SLOT_EMPTY = 0,
+  JELLO_OBJ_SLOT_OCCUPIED = 1,
+  JELLO_OBJ_SLOT_TOMB = 2,
+};
+#define JELLO_OBJECT_INIT_CAP 8u
+#define JELLO_OBJECT_LOAD_NUM 10u
+#define JELLO_OBJECT_LOAD_DEN 7u
+
 /* -- semantic validation (check.c) -- */
 jello_bc_result jello_bc_validate_insn(
     const jello_bc_module* m,
@@ -282,5 +291,17 @@ op_result op_const_atom(exec_ctx* ctx, const jello_insn* ins);
 op_result op_struct_new(exec_ctx* ctx, const jello_insn* ins);
 op_result op_struct_get(exec_ctx* ctx, const jello_insn* ins);
 op_result op_struct_set(exec_ctx* ctx, const jello_insn* ins);
+
+/* -- Object opcode handlers (ops_obj.c) -- */
+op_result op_obj_new(exec_ctx* ctx, const jello_insn* ins);
+op_result op_obj_has_atom(exec_ctx* ctx, const jello_insn* ins);
+op_result op_obj_get_atom(exec_ctx* ctx, const jello_insn* ins);
+op_result op_obj_set_atom(exec_ctx* ctx, const jello_insn* ins);
+op_result op_obj_get(exec_ctx* ctx, const jello_insn* ins);
+op_result op_obj_set(exec_ctx* ctx, const jello_insn* ins);
+op_result op_obj_has(exec_ctx* ctx, const jello_insn* ins);
+op_result op_obj_remove(exec_ctx* ctx, const jello_insn* ins);
+op_result op_obj_clear(exec_ctx* ctx, const jello_insn* ins);
+op_result op_obj_copy(exec_ctx* ctx, const jello_insn* ins);
 
 #endif /* JELLO_VM_INTERNAL_H */

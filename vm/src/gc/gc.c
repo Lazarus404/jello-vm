@@ -25,6 +25,8 @@ static int size_class_index(uint32_t total) {
   return -1;
 }
 
+static void destroy_object(void* p);
+
 #define GC_INITIAL_THRESHOLD (1024u * 1024u) /* 1MB: a round, generous first-collection budget */
 
 void jello_gc_init(jello_vm* vm) {
@@ -37,6 +39,7 @@ void jello_gc_shutdown(jello_vm* vm) {
   jello_gc_hdr* h = vm->gc_objects;
   while(h) {
     jello_gc_hdr* next = h->next;
+    destroy_object(obj_of(h));
     free(h);
     h = next;
   }
@@ -175,6 +178,15 @@ static void trace_object(mark_stack* ms, const jello_bc_module* m, void* p) {
       }
       return;
     }
+    case JELLO_OBJ_OBJECT: {
+      const jello_object* o = (const jello_object*)p;
+      if(o->proto) mark_ptr(ms, o->proto);
+      for(uint32_t i = 0; i < o->cap; i++) {
+        if(o->states[i] != JELLO_OBJ_SLOT_OCCUPIED) continue;
+        if(jello_is_ptr(o->vals[i])) mark_ptr(ms, jello_as_ptr(o->vals[i]));
+      }
+      return;
+    }
     default:
       return;
   }
@@ -183,8 +195,11 @@ static void trace_object(mark_stack* ms, const jello_bc_module* m, void* p) {
 static void destroy_object(void* p) {
   const jello_obj_header* oh = (const jello_obj_header*)p;
   switch((jello_obj_kind)oh->kind) {
-    case JELLO_OBJ_BYTES:
+    case JELLO_OBJ_OBJECT: {
+      jello_object* o = (jello_object*)p;
+      free(o->keys); /* keys is the malloc base for the whole keys+vals+states block */
       return;
+    }
     default:
       return;
   }
@@ -200,7 +215,7 @@ static void scan_typed_frames(jello_vm* vm, mark_stack* ms) {
     reg_frame* rf = &fr->rf;
     for(uint32_t r = 0; r < f->nregs; r++) {
       jello_type_kind k = m->types[f->reg_types[r]].kind;
-      if(k == JELLO_T_BYTES || k == JELLO_T_STRUCT) {
+      if(k == JELLO_T_BYTES || k == JELLO_T_STRUCT || k == JELLO_T_OBJECT) {
         void* p = NULL;
         memcpy(&p, vm_reg_ptr(rf, r), sizeof(void*));
         mark_ptr(ms, p);

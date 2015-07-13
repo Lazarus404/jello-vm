@@ -416,6 +416,58 @@ jello_bc_result jello_bc_validate_insn(
       return ok();
     }
 
+    /* -- Object -- */
+    case JOP_OBJ_NEW:
+      if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "obj_new reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_OBJECT) return err(JELLO_BC_BAD_FORMAT, "obj_new dst must be Object", 0);
+      return ok();
+    case JOP_OBJ_HAS_ATOM:
+      if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "obj_has_atom reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_BOOL) return err(JELLO_BC_BAD_FORMAT, "obj_has_atom dst must be Bool", 0);
+      if(reg_kind(m, reg_types, ins->b) != JELLO_T_OBJECT) return err(JELLO_BC_BAD_FORMAT, "obj_has_atom src must be Object", 0);
+      if(ins->imm >= m->natoms) return err(JELLO_BC_BAD_FORMAT, "obj_has_atom atom id out of range", 0);
+      return ok();
+    case JOP_OBJ_GET_ATOM:
+      if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "obj_get_atom reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->b) != JELLO_T_OBJECT) return err(JELLO_BC_BAD_FORMAT, "obj_get_atom src must be Object", 0);
+      if(ins->imm >= m->natoms) return err(JELLO_BC_BAD_FORMAT, "obj_get_atom atom id out of range", 0);
+      return ok();
+    case JOP_OBJ_SET_ATOM:
+      if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "obj_set_atom reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->b) != JELLO_T_OBJECT) return err(JELLO_BC_BAD_FORMAT, "obj_set_atom dst must be Object", 0);
+      if(ins->imm >= m->natoms) return err(JELLO_BC_BAD_FORMAT, "obj_set_atom atom id out of range", 0);
+      return ok();
+    case JOP_OBJ_GET:
+      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) return err(JELLO_BC_BAD_FORMAT, "obj_get reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->b) != JELLO_T_OBJECT) return err(JELLO_BC_BAD_FORMAT, "obj_get src must be Object", 0);
+      if(reg_kind(m, reg_types, ins->c) != JELLO_T_ATOM) return err(JELLO_BC_BAD_FORMAT, "obj_get key must be Atom", 0);
+      return ok();
+    case JOP_OBJ_SET:
+      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) return err(JELLO_BC_BAD_FORMAT, "obj_set reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->b) != JELLO_T_OBJECT) return err(JELLO_BC_BAD_FORMAT, "obj_set dst must be Object", 0);
+      if(reg_kind(m, reg_types, ins->c) != JELLO_T_ATOM) return err(JELLO_BC_BAD_FORMAT, "obj_set key must be Atom", 0);
+      return ok();
+    case JOP_OBJ_HAS:
+      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) return err(JELLO_BC_BAD_FORMAT, "obj_has reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_BOOL) return err(JELLO_BC_BAD_FORMAT, "obj_has dst must be Bool", 0);
+      if(reg_kind(m, reg_types, ins->b) != JELLO_T_OBJECT) return err(JELLO_BC_BAD_FORMAT, "obj_has src must be Object", 0);
+      if(reg_kind(m, reg_types, ins->c) != JELLO_T_ATOM) return err(JELLO_BC_BAD_FORMAT, "obj_has key must be Atom", 0);
+      return ok();
+    case JOP_OBJ_REMOVE:
+      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) return err(JELLO_BC_BAD_FORMAT, "obj_remove reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_BOOL) return err(JELLO_BC_BAD_FORMAT, "obj_remove dst must be Bool", 0);
+      if(reg_kind(m, reg_types, ins->b) != JELLO_T_OBJECT) return err(JELLO_BC_BAD_FORMAT, "obj_remove src must be Object", 0);
+      if(reg_kind(m, reg_types, ins->c) != JELLO_T_ATOM) return err(JELLO_BC_BAD_FORMAT, "obj_remove key must be Atom", 0);
+      return ok();
+    case JOP_OBJ_CLEAR:
+      if(ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "obj_clear reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->b) != JELLO_T_OBJECT) return err(JELLO_BC_BAD_FORMAT, "obj_clear src must be Object", 0);
+      return ok();
+    case JOP_OBJ_COPY:
+      if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "obj_copy reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_OBJECT) return err(JELLO_BC_BAD_FORMAT, "obj_copy dst must be Object", 0);
+      if(reg_kind(m, reg_types, ins->b) != JELLO_T_OBJECT) return err(JELLO_BC_BAD_FORMAT, "obj_copy src must be Object", 0);
+      return ok();
     case JOP_BYTES_NEW:
       if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "bytes_new reg out of range", 0);
       if(reg_kind(m, reg_types, ins->a) != JELLO_T_BYTES || reg_kind(m, reg_types, ins->b) != JELLO_T_I32) {

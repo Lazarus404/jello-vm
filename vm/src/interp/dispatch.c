@@ -69,6 +69,12 @@ op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins) {
 
     [JOP_STRUCT_NEW] = &&L_STRUCT_NEW, [JOP_STRUCT_GET] = &&L_STRUCT_GET,
     [JOP_STRUCT_SET] = &&L_STRUCT_SET,
+
+    [JOP_OBJ_NEW] = &&L_OBJ_NEW, [JOP_OBJ_HAS_ATOM] = &&L_OBJ_HAS_ATOM,
+    [JOP_OBJ_GET_ATOM] = &&L_OBJ_GET_ATOM, [JOP_OBJ_SET_ATOM] = &&L_OBJ_SET_ATOM,
+    [JOP_OBJ_GET] = &&L_OBJ_GET, [JOP_OBJ_SET] = &&L_OBJ_SET,
+    [JOP_OBJ_HAS] = &&L_OBJ_HAS, [JOP_OBJ_REMOVE] = &&L_OBJ_REMOVE,
+    [JOP_OBJ_CLEAR] = &&L_OBJ_CLEAR, [JOP_OBJ_COPY] = &&L_OBJ_COPY,
   };
 
   if((uint32_t)ins->op >= (uint32_t)JOP_COUNT || op_table[ins->op] == NULL) {
@@ -156,6 +162,17 @@ op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins) {
   L_STRUCT_NEW: return op_struct_new(ctx, ins);
   L_STRUCT_GET: return op_struct_get(ctx, ins);
   L_STRUCT_SET: return op_struct_set(ctx, ins);
+
+  L_OBJ_NEW: return op_obj_new(ctx, ins);
+  L_OBJ_HAS_ATOM: return op_obj_has_atom(ctx, ins);
+  L_OBJ_GET_ATOM: return op_obj_get_atom(ctx, ins);
+  L_OBJ_SET_ATOM: return op_obj_set_atom(ctx, ins);
+  L_OBJ_GET: return op_obj_get(ctx, ins);
+  L_OBJ_SET: return op_obj_set(ctx, ins);
+  L_OBJ_HAS: return op_obj_has(ctx, ins);
+  L_OBJ_REMOVE: return op_obj_remove(ctx, ins);
+  L_OBJ_CLEAR: return op_obj_clear(ctx, ins);
+  L_OBJ_COPY: return op_obj_copy(ctx, ins);
 #pragma GCC diagnostic pop
 #else
   switch((jello_op)ins->op) {
@@ -239,6 +256,17 @@ op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins) {
     case JOP_STRUCT_NEW: return op_struct_new(ctx, ins);
     case JOP_STRUCT_GET: return op_struct_get(ctx, ins);
     case JOP_STRUCT_SET: return op_struct_set(ctx, ins);
+
+    case JOP_OBJ_NEW: return op_obj_new(ctx, ins);
+    case JOP_OBJ_HAS_ATOM: return op_obj_has_atom(ctx, ins);
+    case JOP_OBJ_GET_ATOM: return op_obj_get_atom(ctx, ins);
+    case JOP_OBJ_SET_ATOM: return op_obj_set_atom(ctx, ins);
+    case JOP_OBJ_GET: return op_obj_get(ctx, ins);
+    case JOP_OBJ_SET: return op_obj_set(ctx, ins);
+    case JOP_OBJ_HAS: return op_obj_has(ctx, ins);
+    case JOP_OBJ_REMOVE: return op_obj_remove(ctx, ins);
+    case JOP_OBJ_CLEAR: return op_obj_clear(ctx, ins);
+    case JOP_OBJ_COPY: return op_obj_copy(ctx, ins);
     default: return op_unimplemented(ctx, ins);
   }
 #endif

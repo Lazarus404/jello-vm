@@ -22,8 +22,10 @@ add_library(jello_vm STATIC
   src/interp/ops_bytes.c
   src/interp/ops_dyn.c
   src/interp/ops_struct.c
+  src/interp/ops_obj.c
   src/value/value.c
   src/gc/gc.c
+  src/gc/object.c
 )
 target_include_directories(jello_vm PUBLIC src/include)
 if(JELLO_USE_COMPUTED_GOTO)
