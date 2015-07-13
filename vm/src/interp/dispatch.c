@@ -66,6 +66,9 @@ op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins) {
     [JOP_FROM_DYN_F64] = &&L_FROM_DYN_F64, [JOP_FROM_DYN_BOOL] = &&L_FROM_DYN_BOOL,
     [JOP_FROM_DYN_ATOM] = &&L_FROM_DYN_ATOM, [JOP_FROM_DYN_PTR] = &&L_FROM_DYN_PTR,
     [JOP_KINDOF] = &&L_KINDOF, [JOP_PHYSEQ] = &&L_PHYSEQ,
+
+    [JOP_STRUCT_NEW] = &&L_STRUCT_NEW, [JOP_STRUCT_GET] = &&L_STRUCT_GET,
+    [JOP_STRUCT_SET] = &&L_STRUCT_SET,
   };
 
   if((uint32_t)ins->op >= (uint32_t)JOP_COUNT || op_table[ins->op] == NULL) {
@@ -149,6 +152,10 @@ op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins) {
   L_FROM_DYN_PTR: return op_from_dyn_ptr(ctx, ins);
   L_KINDOF: return op_kindof(ctx, ins);
   L_PHYSEQ: return op_physeq(ctx, ins);
+
+  L_STRUCT_NEW: return op_struct_new(ctx, ins);
+  L_STRUCT_GET: return op_struct_get(ctx, ins);
+  L_STRUCT_SET: return op_struct_set(ctx, ins);
 #pragma GCC diagnostic pop
 #else
   switch((jello_op)ins->op) {
@@ -228,6 +235,10 @@ op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins) {
     case JOP_FROM_DYN_PTR: return op_from_dyn_ptr(ctx, ins);
     case JOP_KINDOF: return op_kindof(ctx, ins);
     case JOP_PHYSEQ: return op_physeq(ctx, ins);
+
+    case JOP_STRUCT_NEW: return op_struct_new(ctx, ins);
+    case JOP_STRUCT_GET: return op_struct_get(ctx, ins);
+    case JOP_STRUCT_SET: return op_struct_set(ctx, ins);
     default: return op_unimplemented(ctx, ins);
   }
 #endif

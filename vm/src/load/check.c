@@ -393,6 +393,12 @@ jello_bc_result jello_bc_validate_insn(
       if(reg_kind(m, reg_types, ins->a) != JELLO_T_BOOL) return err(JELLO_BC_BAD_FORMAT, "physeq dst must be Bool", 0);
       return ok();
 
+    /* -- Struct -- */
+    case JOP_STRUCT_NEW:
+      if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "struct_new reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_STRUCT) return err(JELLO_BC_BAD_FORMAT, "struct_new dst must be Struct", 0);
+      return ok();
+
     case JOP_STRUCT_GET:
     case JOP_STRUCT_SET: {
       if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "struct reg out of range", 0);

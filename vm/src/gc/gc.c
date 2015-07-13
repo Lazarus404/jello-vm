@@ -149,8 +149,7 @@ static void mark_ptr(mark_stack* ms, void* p) {
   ms_push(ms, p);
 }
 
-static void trace_object(mark_stack* ms, void* p) {
-  (void)ms;
+static void trace_object(mark_stack* ms, const jello_bc_module* m, void* p) {
   const jello_obj_header* oh = (const jello_obj_header*)p;
   switch((jello_obj_kind)oh->kind) {
     case JELLO_OBJ_BYTES:
@@ -159,6 +158,23 @@ static void trace_object(mark_stack* ms, void* p) {
     case JELLO_OBJ_BOX_F32:
     case JELLO_OBJ_BOX_F16:
       return;
+    case JELLO_OBJ_STRUCT: {
+      const jello_struct* s = (const jello_struct*)p;
+      const jello_struct_sig* sig = &m->struct_sigs[oh->type_id];
+      for(uint16_t i = 0; i < sig->nfields; i++) {
+        jello_type_kind fk = m->types[sig->field_type[i]].kind;
+        if(fk == JELLO_T_DYNAMIC) {
+          jello_value v;
+          memcpy(&v, s->fields + sig->field_offset[i], sizeof(jello_value));
+          if(jello_is_ptr(v)) mark_ptr(ms, jello_as_ptr(v));
+        } else if(fk == JELLO_T_BYTES || fk == JELLO_T_STRUCT || fk == JELLO_T_OBJECT) {
+          void* fp;
+          memcpy(&fp, s->fields + sig->field_offset[i], sizeof(void*));
+          mark_ptr(ms, fp);
+        }
+      }
+      return;
+    }
     default:
       return;
   }
@@ -184,7 +200,7 @@ static void scan_typed_frames(jello_vm* vm, mark_stack* ms) {
     reg_frame* rf = &fr->rf;
     for(uint32_t r = 0; r < f->nregs; r++) {
       jello_type_kind k = m->types[f->reg_types[r]].kind;
-      if(k == JELLO_T_BYTES) {
+      if(k == JELLO_T_BYTES || k == JELLO_T_STRUCT) {
         void* p = NULL;
         memcpy(&p, vm_reg_ptr(rf, r), sizeof(void*));
         mark_ptr(ms, p);
@@ -211,7 +227,7 @@ void jello_gc_collect(jello_vm* vm) {
   for(;;) {
     void* p = ms_pop(&ms);
     if(!p) break;
-    trace_object(&ms, p);
+    trace_object(&ms, vm->running_module, p);
   }
   free(ms.items);
 
@@ -286,4 +302,27 @@ jello_box_f16* jello_box_f16_new(jello_vm* vm, uint16_t bits) {
   b->h.type_id = 0;
   b->value = bits;
   return b;
+}
+
+/* -- Struct -- */
+jello_struct* jello_struct_new(jello_vm* vm, const jello_bc_module* m, uint32_t struct_sig_id) {
+  const jello_struct_sig* sig = &m->struct_sigs[struct_sig_id];
+  uint32_t total = 0;
+  if(sig->nfields > 0) {
+    uint32_t last = sig->nfields - 1u;
+    jello_type_kind lk = m->types[sig->field_type[last]].kind;
+    total = sig->field_offset[last] + (uint32_t)jello_slot_size(lk);
+    total = (total + 7u) & ~7u;
+  }
+  jello_struct* s = (jello_struct*)jello_gc_alloc(vm, sizeof(jello_struct) + (size_t)total);
+  s->h.kind = (uint8_t)JELLO_OBJ_STRUCT;
+  s->h.type_id = struct_sig_id;
+  if(total > 0) memset(s->fields, 0, total);
+  for(uint16_t i = 0; i < sig->nfields; i++) {
+    if(m->types[sig->field_type[i]].kind == JELLO_T_DYNAMIC) {
+      jello_value nullv = jello_make_null();
+      memcpy(s->fields + sig->field_offset[i], &nullv, sizeof(jello_value));
+    }
+  }
+  return s;
 }

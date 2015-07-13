@@ -278,4 +278,9 @@ op_result op_physeq(exec_ctx* ctx, const jello_insn* ins);
 op_result op_const_null(exec_ctx* ctx, const jello_insn* ins);
 op_result op_const_atom(exec_ctx* ctx, const jello_insn* ins);
 
+/* -- Struct opcode handlers (ops_struct.c) -- */
+op_result op_struct_new(exec_ctx* ctx, const jello_insn* ins);
+op_result op_struct_get(exec_ctx* ctx, const jello_insn* ins);
+op_result op_struct_set(exec_ctx* ctx, const jello_insn* ins);
+
 #endif /* JELLO_VM_INTERNAL_H */

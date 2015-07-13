@@ -58,6 +58,10 @@ static jello_bc_result rd_bytes(rd* r, uint8_t* out, size_t n) {
   return ok();
 }
 
+static uint32_t align_up(uint32_t x, uint32_t a) {
+  return (a == 0u) ? x : (x + (a - 1u)) & ~(a - 1u);
+}
+
 static jello_bc_result read_insn_canonical(rd* r, jello_insn* out) {
   jello_bc_result rr;
   uint8_t op, a, b, c;
@@ -97,6 +101,7 @@ void jello_bc_free(jello_bc_module* m) {
     for(uint32_t i = 0; i < m->nstruct_sigs; i++) {
       free((void*)m->struct_sigs[i].field_type);
       free((void*)m->struct_sigs[i].field_name_atom);
+      free((void*)m->struct_sigs[i].field_offset);
     }
     free((void*)m->struct_sigs);
   }
@@ -247,6 +252,17 @@ jello_bc_result jello_bc_read(const uint8_t* data, size_t size, jello_bc_module*
           if(ft >= m->ntypes) { jello_bc_free(m); *out = NULL; return err(JELLO_BC_BAD_FORMAT, "struct field type out of range", r.off - 4); }
           ((uint32_t*)field_type)[j] = ft;
         }
+        uint32_t* field_offset = (uint32_t*)calloc(nfields, sizeof(uint32_t));
+        if(!field_offset) { jello_bc_free(m); *out = NULL; return err(JELLO_BC_OUT_OF_MEMORY, "oom struct field_offset", r.off); }
+        uint32_t cursor = 0;
+        for(uint16_t j = 0; j < nfields; j++) {
+          jello_type_kind fk = m->types[field_type[j]].kind;
+          uint32_t sz = (uint32_t)jello_slot_size(fk);
+          cursor = align_up(cursor, sz);
+          field_offset[j] = cursor;
+          cursor += sz;
+        }
+        sigs[i].field_offset = field_offset;
         if(named) {
           uint32_t* field_name_atom = (uint32_t*)calloc(nfields, sizeof(uint32_t));
           if(!field_name_atom) { jello_bc_free(m); *out = NULL; return err(JELLO_BC_OUT_OF_MEMORY, "oom struct field_name_atom", r.off); }

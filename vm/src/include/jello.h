@@ -51,6 +51,7 @@ typedef struct jello_struct_sig {
   uint8_t is_mutable;
   const uint32_t* field_type;
   const uint32_t* field_name_atom; /* NULL when named == 0 */
+  const uint32_t* field_offset;    /* byte offset */
 } jello_struct_sig;
 
 typedef struct jello_type_entry {
@@ -249,6 +250,14 @@ static inline int64_t jello_as_box_i64(jello_value v) { return ((const jello_box
 static inline double jello_as_box_f64(jello_value v) { return ((const jello_box_f64*)jello_as_ptr(v))->value; }
 static inline float jello_as_box_f32(jello_value v) { return ((const jello_box_f32*)jello_as_ptr(v))->value; }
 static inline uint16_t jello_as_box_f16(jello_value v) { return ((const jello_box_f16*)jello_as_ptr(v))->value; }
+
+/* -- Struct -- */
+typedef struct jello_struct {
+  jello_obj_header h;
+  uint8_t fields[];
+} jello_struct;
+
+jello_struct* jello_struct_new(jello_vm* vm, const jello_bc_module* m, uint32_t struct_sig_id);
 
 /* -- blocking -- */
 void jello_vm_blocking(jello_vm* vm, int is_blocking);

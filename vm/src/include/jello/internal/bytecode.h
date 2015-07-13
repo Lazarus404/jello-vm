@@ -203,26 +203,27 @@ typedef enum jello_op {
   JOP_BITS_READ = 149,
 
   /* Struct (fixed-offset field access) */
-  JOP_STRUCT_GET = 150,
-  JOP_STRUCT_SET = 151,
+  JOP_STRUCT_NEW = 150,
+  JOP_STRUCT_GET = 151,
+  JOP_STRUCT_SET = 152,
 
   /* Object (atom-dispatched field access) */
-  JOP_OBJ_NEW = 152,
-  JOP_OBJ_HAS_ATOM = 153,
-  JOP_OBJ_GET_ATOM = 154,
-  JOP_OBJ_SET_ATOM = 155,
-  JOP_OBJ_GET = 156,
-  JOP_OBJ_SET = 157,
-  JOP_OBJ_HAS = 158,
-  JOP_OBJ_REMOVE = 159,
-  JOP_OBJ_CLEAR = 160,
-  JOP_OBJ_COPY = 161,
-  JOP_OBJ_KEYS = 162,
+  JOP_OBJ_NEW = 153,
+  JOP_OBJ_HAS_ATOM = 154,
+  JOP_OBJ_GET_ATOM = 155,
+  JOP_OBJ_SET_ATOM = 156,
+  JOP_OBJ_GET = 157,
+  JOP_OBJ_SET = 158,
+  JOP_OBJ_HAS = 159,
+  JOP_OBJ_REMOVE = 160,
+  JOP_OBJ_CLEAR = 161,
+  JOP_OBJ_COPY = 162,
+  JOP_OBJ_KEYS = 163,
 
   /* Enum */
-  JOP_ENUM_NEW = 163,
-  JOP_ENUM_TAG = 164,
-  JOP_ENUM_GET = 165,
+  JOP_ENUM_NEW = 164,
+  JOP_ENUM_TAG = 165,
+  JOP_ENUM_GET = 166,
 } jello_op;
 
 #define JOP_COUNT (JOP_ENUM_GET + 1)
