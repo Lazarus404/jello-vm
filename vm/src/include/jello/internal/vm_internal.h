@@ -82,7 +82,7 @@ typedef struct frame_layout {
   int has_pointer;
 } frame_layout;
 
-/* -- GC v1 -- */
+/* -- GC -- */
 typedef struct jello_gc_hdr {
   struct jello_gc_hdr* next; /* live-object list, or free-list, depending on state */
   uint32_t total_size;       /* header + payload, rounded up to this object's size class */
@@ -92,7 +92,23 @@ typedef struct jello_gc_hdr {
 #define GC_NUM_SIZE_CLASSES 8
 #define GC_MAX_SIZE_CLASS_BYTES 4096u
 
+/* -- the shared heap -- */
+typedef struct jello_heap {
+  jello_gc_hdr* gc_objects; /* every live object, singly linked */
+  jello_gc_hdr* gc_free_classes[GC_NUM_SIZE_CLASSES]; /* one free-list head per size class */
+  uint32_t gc_bytes_live;
+  uint32_t gc_next_collect;
+  uint32_t gc_collections;
+  uint32_t gc_freed_objects;
+  void** gc_roots;
+  uint32_t gc_roots_len;
+  uint32_t gc_roots_cap;
+  double gc_pause_ms; /* cumulative wall-clock time spent inside jello_gc_collect (Sec 2.10) */
+} jello_heap;
+
 struct jello_vm {
+  jello_heap* heap;
+
   uint8_t* frame_stack;
   uint32_t frame_stack_top;
   uint32_t frame_stack_cap;
@@ -109,17 +125,6 @@ struct jello_vm {
   jello_trap_code trap_code;
   const jello_bc_module* running_module;
 
-  /* GC v1 */
-  jello_gc_hdr* gc_objects; /* every live object, singly linked */
-  jello_gc_hdr* gc_free_classes[GC_NUM_SIZE_CLASSES]; /* one free-list head per size class */
-  uint32_t gc_bytes_live;
-  uint32_t gc_next_collect;
-  uint32_t gc_collections;
-  uint32_t gc_freed_objects;
-  void** gc_roots;
-  uint32_t gc_roots_len;
-  uint32_t gc_roots_cap;
-  double gc_pause_ms; /* cumulative wall-clock time spent inside jello_gc_collect (Sec 2.10) */
   int gc_blocking_depth;
 };
 

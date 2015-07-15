@@ -169,13 +169,17 @@ void vm_frame_reset(jello_vm* vm) {
 
 jello_vm* jello_vm_create(void) {
   jello_vm* vm = (jello_vm*)calloc(1, sizeof(jello_vm));
-  if(vm) jello_gc_init(vm);
+  if(!vm) return NULL;
+  vm->heap = (jello_heap*)calloc(1, sizeof(jello_heap));
+  if(!vm->heap) { free(vm); return NULL; }
+  jello_gc_init(vm);
   return vm;
 }
 
 void jello_vm_destroy(jello_vm* vm) {
   if(!vm) return;
   jello_gc_shutdown(vm);
+  free(vm->heap);
   free(vm->frame_stack);
   free(vm->call_frames);
   free_layouts(vm);

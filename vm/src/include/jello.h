@@ -51,7 +51,7 @@ typedef struct jello_struct_sig {
   uint8_t is_mutable;
   const uint32_t* field_type;
   const uint32_t* field_name_atom; /* NULL when named == 0 */
-  const uint32_t* field_offset;    /* byte offset */
+  const uint32_t* field_offset;
 } jello_struct_sig;
 
 typedef struct jello_type_entry {
@@ -187,14 +187,13 @@ typedef struct jello_numeric_result {
 
 jello_exec_status jello_vm_exec_numeric(jello_vm* vm, const jello_bc_module* m, jello_numeric_result* out);
 
-/* -- GC v1 -- */
+/* -- GC -- */
 void jello_gc_init(jello_vm* vm);
 void jello_gc_shutdown(jello_vm* vm);
 void* jello_gc_alloc(jello_vm* vm, size_t size);
 void jello_gc_collect(jello_vm* vm);
 void jello_gc_push_root(jello_vm* vm, void* obj);
 void jello_gc_pop_roots(jello_vm* vm, uint32_t n);
-
 void jello_vm_gc_stats(const jello_vm* vm, uint32_t* out_live_bytes, uint32_t* out_collections,
                         double* out_pause_ms);
 

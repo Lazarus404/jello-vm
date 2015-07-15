@@ -30,93 +30,94 @@ static void destroy_object(void* p);
 #define GC_INITIAL_THRESHOLD (1024u * 1024u) /* 1MB: a round, generous first-collection budget */
 
 void jello_gc_init(jello_vm* vm) {
-  if(!vm) return;
-  if(vm->gc_next_collect == 0) vm->gc_next_collect = GC_INITIAL_THRESHOLD;
+  if(!vm || !vm->heap) return;
+  if(vm->heap->gc_next_collect == 0) vm->heap->gc_next_collect = GC_INITIAL_THRESHOLD;
 }
 
 void jello_gc_shutdown(jello_vm* vm) {
-  if(!vm) return;
-  jello_gc_hdr* h = vm->gc_objects;
+  if(!vm || !vm->heap) return;
+  jello_heap* heap = vm->heap;
+  jello_gc_hdr* h = heap->gc_objects;
   while(h) {
     jello_gc_hdr* next = h->next;
     destroy_object(obj_of(h));
     free(h);
     h = next;
   }
-  vm->gc_objects = NULL;
-  vm->gc_bytes_live = 0;
+  heap->gc_objects = NULL;
+  heap->gc_bytes_live = 0;
   for(int i = 0; i < GC_NUM_SIZE_CLASSES; i++) {
-    jello_gc_hdr* fh = vm->gc_free_classes[i];
+    jello_gc_hdr* fh = heap->gc_free_classes[i];
     while(fh) {
       jello_gc_hdr* next = fh->next;
       free(fh);
       fh = next;
     }
-    vm->gc_free_classes[i] = NULL;
+    heap->gc_free_classes[i] = NULL;
   }
-  free(vm->gc_roots);
-  vm->gc_roots = NULL;
-  vm->gc_roots_len = 0;
-  vm->gc_roots_cap = 0;
+  free(heap->gc_roots);
+  heap->gc_roots = NULL;
+  heap->gc_roots_len = 0;
+  heap->gc_roots_cap = 0;
 }
 
 void jello_gc_push_root(jello_vm* vm, void* obj) {
   if(!vm) abort();
-  if(vm->gc_roots_len == vm->gc_roots_cap) {
-    uint32_t ncap = vm->gc_roots_cap ? vm->gc_roots_cap * 2u : 32u;
-    void** nv = (void**)realloc(vm->gc_roots, sizeof(void*) * (size_t)ncap);
+  jello_heap* heap = vm->heap;
+  if(heap->gc_roots_len == heap->gc_roots_cap) {
+    uint32_t ncap = heap->gc_roots_cap ? heap->gc_roots_cap * 2u : 32u;
+    void** nv = (void**)realloc(heap->gc_roots, sizeof(void*) * (size_t)ncap);
     if(!nv) abort();
-    vm->gc_roots = nv;
-    vm->gc_roots_cap = ncap;
+    heap->gc_roots = nv;
+    heap->gc_roots_cap = ncap;
   }
-  vm->gc_roots[vm->gc_roots_len++] = obj;
+  heap->gc_roots[heap->gc_roots_len++] = obj;
 }
 
 void jello_gc_pop_roots(jello_vm* vm, uint32_t n) {
   if(!vm) abort();
-  if(n > vm->gc_roots_len) abort();
-  vm->gc_roots_len -= n;
+  jello_heap* heap = vm->heap;
+  if(n > heap->gc_roots_len) abort();
+  heap->gc_roots_len -= n;
 }
 
 void jello_vm_gc_stats(const jello_vm* vm, uint32_t* out_live_bytes, uint32_t* out_collections,
                         double* out_pause_ms) {
-  if(!vm) return;
-  if(out_live_bytes) *out_live_bytes = vm->gc_bytes_live;
-  if(out_collections) *out_collections = vm->gc_collections;
-  if(out_pause_ms) *out_pause_ms = vm->gc_pause_ms;
+  if(!vm || !vm->heap) return;
+  if(out_live_bytes) *out_live_bytes = vm->heap->gc_bytes_live;
+  if(out_collections) *out_collections = vm->heap->gc_collections;
+  if(out_pause_ms) *out_pause_ms = vm->heap->gc_pause_ms;
 }
 
 void* jello_gc_alloc(jello_vm* vm, size_t size) {
   if(!vm) abort();
+  jello_heap* heap = vm->heap;
   uint32_t requested = (uint32_t)(sizeof(jello_gc_hdr) + size);
 
-  if(vm->gc_next_collect && vm->gc_bytes_live >= vm->gc_next_collect) {
+  if(heap->gc_next_collect && heap->gc_bytes_live >= heap->gc_next_collect) {
     jello_gc_collect(vm);
   }
 
   int ci = size_class_index(requested);
-  jello_gc_hdr* h;
-  uint32_t total;
-  if(ci >= 0) {
-    total = GC_SIZE_CLASSES[ci];
-    h = vm->gc_free_classes[ci];
-    if(h) {
-      vm->gc_free_classes[ci] = h->next;
-    } else {
-      h = (jello_gc_hdr*)malloc(total);
-      if(!h) abort();
-    }
-  } else {
-    total = requested;
+  uint32_t total = (ci >= 0) ? GC_SIZE_CLASSES[ci] : requested;
+  jello_gc_hdr* h = NULL;
+
+  if(ci >= 0 && heap->gc_free_classes[ci]) {
+    h = heap->gc_free_classes[ci];
+    heap->gc_free_classes[ci] = h->next;
+  }
+
+  if(!h) {
     h = (jello_gc_hdr*)malloc(total);
     if(!h) abort();
   }
-
   h->total_size = total;
   h->marked = 0;
-  h->next = vm->gc_objects;
-  vm->gc_objects = h;
-  vm->gc_bytes_live += total;
+
+  h->next = heap->gc_objects;
+  heap->gc_objects = h;
+  heap->gc_bytes_live += total;
+
   return obj_of(h);
 }
 
@@ -230,13 +231,14 @@ static void scan_typed_frames(jello_vm* vm, mark_stack* ms) {
 
 void jello_gc_collect(jello_vm* vm) {
   if(!vm) abort();
-  vm->gc_collections++;
+  jello_heap* heap = vm->heap;
+  heap->gc_collections++;
 
   clock_t t0 = clock();
 
   mark_stack ms = {0};
 
-  for(uint32_t i = 0; i < vm->gc_roots_len; i++) mark_ptr(&ms, vm->gc_roots[i]);
+  for(uint32_t i = 0; i < heap->gc_roots_len; i++) mark_ptr(&ms, heap->gc_roots[i]);
   scan_typed_frames(vm, &ms);
 
   for(;;) {
@@ -246,20 +248,20 @@ void jello_gc_collect(jello_vm* vm) {
   }
   free(ms.items);
 
-  jello_gc_hdr** prev = &vm->gc_objects;
-  jello_gc_hdr* h = vm->gc_objects;
+  jello_gc_hdr** prev = &heap->gc_objects;
+  jello_gc_hdr* h = heap->gc_objects;
   uint32_t live_bytes = 0;
   while(h) {
     jello_gc_hdr* next = h->next;
     if(!h->marked) {
       void* obj = obj_of(h);
-      vm->gc_freed_objects++;
+      heap->gc_freed_objects++;
       *prev = next;
       destroy_object(obj);
       int ci = size_class_index(h->total_size);
       if(ci >= 0 && h->total_size == GC_SIZE_CLASSES[ci]) {
-        h->next = vm->gc_free_classes[ci];
-        vm->gc_free_classes[ci] = h;
+        h->next = heap->gc_free_classes[ci];
+        heap->gc_free_classes[ci] = h;
       } else {
         free(h);
       }
@@ -271,11 +273,11 @@ void jello_gc_collect(jello_vm* vm) {
     h = next;
   }
 
-  vm->gc_bytes_live = live_bytes;
-  vm->gc_next_collect = (live_bytes < 256u * 1024u) ? (512u * 1024u) : (live_bytes * 2u);
+  heap->gc_bytes_live = live_bytes;
+  heap->gc_next_collect = (live_bytes < 256u * 1024u) ? (512u * 1024u) : (live_bytes * 2u);
 
   clock_t t1 = clock();
-  vm->gc_pause_ms += (double)(t1 - t0) * 1000.0 / (double)CLOCKS_PER_SEC;
+  heap->gc_pause_ms += (double)(t1 - t0) * 1000.0 / (double)CLOCKS_PER_SEC;
 }
 
 /* -- Bytes -- */
@@ -283,7 +285,7 @@ void jello_gc_collect(jello_vm* vm) {
 jello_bytes* jello_bytes_new(jello_vm* vm, uint32_t length) {
   jello_bytes* b = (jello_bytes*)jello_gc_alloc(vm, sizeof(jello_bytes) + (size_t)length);
   b->h.kind = (uint8_t)JELLO_OBJ_BYTES;
-  b->h.type_id = 0; /* Bytes is not a parameterised kind; type_id unused */
+  b->h.type_id = 0; /* Bytes is not a parameterised kind */
   b->length = length;
   return b;
 }
