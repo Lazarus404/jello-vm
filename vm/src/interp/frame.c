@@ -26,7 +26,7 @@ static frame_layout* find_layout(jello_vm* vm, const jello_bc_function* f) {
   return NULL;
 }
 
-static void free_layouts(jello_vm* vm) {
+void vm_free_layouts(jello_vm* vm) {
   for(uint32_t i = 0; i < vm->frame_layouts_len; i++) free(vm->frame_layouts[i].off);
   free(vm->frame_layouts);
   vm->frame_layouts = NULL;
@@ -74,7 +74,7 @@ static frame_layout* build_layout(jello_vm* vm, const jello_bc_module* m, const 
 
 static frame_layout* get_layout(jello_vm* vm, const jello_bc_module* m, const jello_bc_function* f) {
   if(vm->frame_layouts_mod != m) {
-    free_layouts(vm);
+    vm_free_layouts(vm);
     vm->frame_layouts_mod = m;
   }
   frame_layout* fl = find_layout(vm, f);
@@ -165,23 +165,4 @@ void vm_frame_reset(jello_vm* vm) {
   vm->frame_stack_top = 0;
   vm->call_frames_len = 0;
   vm->trap_code = JELLO_TRAP_NONE;
-}
-
-jello_vm* jello_vm_create(void) {
-  jello_vm* vm = (jello_vm*)calloc(1, sizeof(jello_vm));
-  if(!vm) return NULL;
-  vm->heap = (jello_heap*)calloc(1, sizeof(jello_heap));
-  if(!vm->heap) { free(vm); return NULL; }
-  jello_gc_init(vm);
-  return vm;
-}
-
-void jello_vm_destroy(jello_vm* vm) {
-  if(!vm) return;
-  jello_gc_shutdown(vm);
-  free(vm->heap);
-  free(vm->frame_stack);
-  free(vm->call_frames);
-  free_layouts(vm);
-  free(vm);
 }

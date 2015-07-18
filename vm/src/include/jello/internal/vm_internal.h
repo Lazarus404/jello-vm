@@ -6,6 +6,8 @@
 
 #include <jello.h>
 #include <jello/internal/bytecode.h>
+#include <pthread.h>
+#include <stdatomic.h>
 #include <string.h>
 
 /* Internal VM layouts, frames, dispatch, GC fields. */
@@ -104,6 +106,17 @@ typedef struct jello_heap {
   uint32_t gc_roots_len;
   uint32_t gc_roots_cap;
   double gc_pause_ms; /* cumulative wall-clock time spent inside jello_gc_collect (Sec 2.10) */
+
+  /* -- stop-the-world -- */
+  pthread_mutex_t alloc_lock;
+  atomic_int stop_requested;
+  pthread_mutex_t stw_lock;
+  pthread_cond_t stw_resume_cv;
+
+  struct jello_vm** threads;
+  uint32_t threads_len;
+  uint32_t threads_cap;
+  uint32_t refcount; /* freed once the last jello_vm registered against this heap is destroyed */
 } jello_heap;
 
 struct jello_vm {
@@ -125,7 +138,10 @@ struct jello_vm {
   jello_trap_code trap_code;
   const jello_bc_module* running_module;
 
-  int gc_blocking_depth;
+  /* -- quiescent tracking -- */
+  atomic_int quiescent_depth;
+
+  atomic_int in_exec;
 };
 
 /* -- register load/store: static inline for the hot dispatch path -- */
@@ -191,6 +207,7 @@ int vm_push_frame(jello_vm* vm, const jello_bc_module* m, uint32_t func_index,
                    uint32_t caller_dst, uint32_t arg_first, uint32_t arg_count, uint8_t has_caller);
 void vm_pop_frame(jello_vm* vm);
 void vm_frame_reset(jello_vm* vm);
+void vm_free_layouts(jello_vm* vm);
 
 /* -- dispatch (dispatch.c) + main loop (exec_loop.c) -- */
 typedef enum op_result {
@@ -311,5 +328,17 @@ op_result op_obj_has(exec_ctx* ctx, const jello_insn* ins);
 op_result op_obj_remove(exec_ctx* ctx, const jello_insn* ins);
 op_result op_obj_clear(exec_ctx* ctx, const jello_insn* ins);
 op_result op_obj_copy(exec_ctx* ctx, const jello_insn* ins);
+
+/* -- threads + the shared heap (thread/thread.c) -- */
+jello_vm* jello_vm_create_joined(jello_vm* existing);
+
+void vm_go_quiescent(jello_vm* vm);
+void vm_wait_for_resume(jello_vm* vm);
+void vm_leave_quiescent(jello_vm* vm);
+
+void vm_safepoint_check(jello_vm* vm);
+
+int vm_heap_stop_the_world(jello_vm* vm);
+void vm_heap_resume_the_world(jello_vm* vm);
 
 #endif /* JELLO_VM_INTERNAL_H */

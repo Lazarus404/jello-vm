@@ -26,6 +26,7 @@ add_library(jello_vm STATIC
   src/value/value.c
   src/gc/gc.c
   src/gc/object.c
+  src/thread/thread.c
 )
 target_include_directories(jello_vm PUBLIC src/include)
 if(JELLO_USE_COMPUTED_GOTO)
@@ -35,6 +36,9 @@ jello_enable_warnings(jello_vm)
 if(JELLO_WARNINGS_AS_ERRORS)
   target_compile_options(jello_vm PRIVATE -Werror)
 endif()
+
+find_package(Threads REQUIRED)
+target_link_libraries(jello_vm PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
 
 install(FILES src/include/jello.h DESTINATION include)
 install(FILES src/include/jello/jdll.h DESTINATION include/jello)

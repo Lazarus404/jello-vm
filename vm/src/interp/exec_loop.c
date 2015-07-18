@@ -4,7 +4,7 @@
 #include <jello/internal.h>
 #include <string.h>
 
-/* -- the dispatch loop -- */
+  /* -- the dispatch loop -- */
 
 jello_exec_status vm_exec_loop(exec_ctx* ctx) {
   jello_vm* vm = ctx->vm;
@@ -49,11 +49,13 @@ jello_exec_status vm_exec_loop(exec_ctx* ctx) {
       }
 
       case JOP_JMP:
+        if((int32_t)ins->imm < 0) vm_safepoint_check(vm);
         fr->pc = (uint32_t)((int32_t)fr->pc + (int32_t)ins->imm);
         break;
 
       case JOP_JMP_IF:
         if(vm_load_u32(rf, ins->a) != 0u) {
+          if((int32_t)ins->imm < 0) vm_safepoint_check(vm);
           fr->pc = (uint32_t)((int32_t)fr->pc + (int32_t)ins->imm);
         }
         break;
@@ -65,6 +67,7 @@ jello_exec_status vm_exec_loop(exec_ctx* ctx) {
       }
 
       case JOP_CALL: {
+        vm_safepoint_check(vm);
         if(!vm_push_frame(vm, m, ins->imm, ins->a, ins->b, ins->c, 1)) {
           return JELLO_EXEC_TRAP;
         }
@@ -210,12 +213,15 @@ jello_exec_status vm_exec_loop(exec_ctx* ctx) {
 }
 
 jello_exec_status jello_vm_exec_numeric(jello_vm* vm, const jello_bc_module* m, jello_numeric_result* out) {
+  atomic_store(&vm->in_exec, 1);
+
   vm_frame_reset(vm);
   out->kind = JELLO_NUM_VOID;
 
   vm->running_module = m;
-  
+
   if(!vm_push_frame(vm, m, jello_bc_get_entry(m), 0, 0, 0, 0)) {
+    atomic_store(&vm->in_exec, 0);
     return JELLO_EXEC_TRAP;
   }
 
@@ -223,7 +229,9 @@ jello_exec_status jello_vm_exec_numeric(jello_vm* vm, const jello_bc_module* m, 
   ctx.vm = vm;
   ctx.m = m;
   ctx.out = out;
-  return vm_exec_loop(&ctx);
+  jello_exec_status st = vm_exec_loop(&ctx);
+  atomic_store(&vm->in_exec, 0);
+  return st;
 }
 
 jello_trap_code jello_vm_last_trap_code(const jello_vm* vm) {

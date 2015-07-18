@@ -64,6 +64,7 @@ void jello_gc_shutdown(jello_vm* vm) {
 void jello_gc_push_root(jello_vm* vm, void* obj) {
   if(!vm) abort();
   jello_heap* heap = vm->heap;
+  pthread_mutex_lock(&heap->alloc_lock);
   if(heap->gc_roots_len == heap->gc_roots_cap) {
     uint32_t ncap = heap->gc_roots_cap ? heap->gc_roots_cap * 2u : 32u;
     void** nv = (void**)realloc(heap->gc_roots, sizeof(void*) * (size_t)ncap);
@@ -72,13 +73,16 @@ void jello_gc_push_root(jello_vm* vm, void* obj) {
     heap->gc_roots_cap = ncap;
   }
   heap->gc_roots[heap->gc_roots_len++] = obj;
+  pthread_mutex_unlock(&heap->alloc_lock);
 }
 
 void jello_gc_pop_roots(jello_vm* vm, uint32_t n) {
   if(!vm) abort();
   jello_heap* heap = vm->heap;
+  pthread_mutex_lock(&heap->alloc_lock);
   if(n > heap->gc_roots_len) abort();
   heap->gc_roots_len -= n;
+  pthread_mutex_unlock(&heap->alloc_lock);
 }
 
 void jello_vm_gc_stats(const jello_vm* vm, uint32_t* out_live_bytes, uint32_t* out_collections,
@@ -91,21 +95,25 @@ void jello_vm_gc_stats(const jello_vm* vm, uint32_t* out_live_bytes, uint32_t* o
 
 void* jello_gc_alloc(jello_vm* vm, size_t size) {
   if(!vm) abort();
+  vm_safepoint_check(vm);
   jello_heap* heap = vm->heap;
   uint32_t requested = (uint32_t)(sizeof(jello_gc_hdr) + size);
 
-  if(heap->gc_next_collect && heap->gc_bytes_live >= heap->gc_next_collect) {
-    jello_gc_collect(vm);
-  }
+  pthread_mutex_lock(&heap->alloc_lock);
+  int should_collect = heap->gc_next_collect && heap->gc_bytes_live >= heap->gc_next_collect;
+  pthread_mutex_unlock(&heap->alloc_lock);
+  if(should_collect) jello_gc_collect(vm);
 
   int ci = size_class_index(requested);
   uint32_t total = (ci >= 0) ? GC_SIZE_CLASSES[ci] : requested;
   jello_gc_hdr* h = NULL;
 
+  pthread_mutex_lock(&heap->alloc_lock);
   if(ci >= 0 && heap->gc_free_classes[ci]) {
     h = heap->gc_free_classes[ci];
     heap->gc_free_classes[ci] = h->next;
   }
+  pthread_mutex_unlock(&heap->alloc_lock);
 
   if(!h) {
     h = (jello_gc_hdr*)malloc(total);
@@ -114,9 +122,11 @@ void* jello_gc_alloc(jello_vm* vm, size_t size) {
   h->total_size = total;
   h->marked = 0;
 
+  pthread_mutex_lock(&heap->alloc_lock);
   h->next = heap->gc_objects;
   heap->gc_objects = h;
   heap->gc_bytes_live += total;
+  pthread_mutex_unlock(&heap->alloc_lock);
 
   return obj_of(h);
 }
@@ -232,6 +242,8 @@ static void scan_typed_frames(jello_vm* vm, mark_stack* ms) {
 void jello_gc_collect(jello_vm* vm) {
   if(!vm) abort();
   jello_heap* heap = vm->heap;
+  if(!vm_heap_stop_the_world(vm)) return; /* another thread's collection already ran */
+
   heap->gc_collections++;
 
   clock_t t0 = clock();
@@ -239,7 +251,7 @@ void jello_gc_collect(jello_vm* vm) {
   mark_stack ms = {0};
 
   for(uint32_t i = 0; i < heap->gc_roots_len; i++) mark_ptr(&ms, heap->gc_roots[i]);
-  scan_typed_frames(vm, &ms);
+  for(uint32_t i = 0; i < heap->threads_len; i++) scan_typed_frames(heap->threads[i], &ms);
 
   for(;;) {
     void* p = ms_pop(&ms);
@@ -278,6 +290,8 @@ void jello_gc_collect(jello_vm* vm) {
 
   clock_t t1 = clock();
   heap->gc_pause_ms += (double)(t1 - t0) * 1000.0 / (double)CLOCKS_PER_SEC;
+
+  vm_heap_resume_the_world(vm);
 }
 
 /* -- Bytes -- */
