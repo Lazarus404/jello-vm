@@ -27,6 +27,9 @@ add_library(jello_vm STATIC
   src/gc/gc.c
   src/gc/object.c
   src/thread/thread.c
+  src/jdll/loader.c
+  src/jdll/marshal.c
+  src/jdll/call_native.c
 )
 target_include_directories(jello_vm PUBLIC src/include)
 if(JELLO_USE_COMPUTED_GOTO)
@@ -39,6 +42,12 @@ endif()
 
 find_package(Threads REQUIRED)
 target_link_libraries(jello_vm PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
+
+if(APPLE)
+  target_link_libraries(jello_vm INTERFACE "-Wl,-force_load,$<TARGET_FILE:jello_vm>")
+else()
+  target_link_libraries(jello_vm INTERFACE "-Wl,--whole-archive" "$<TARGET_FILE:jello_vm>" "-Wl,--no-whole-archive")
+endif()
 
 install(FILES src/include/jello.h DESTINATION include)
 install(FILES src/include/jello/jdll.h DESTINATION include/jello)

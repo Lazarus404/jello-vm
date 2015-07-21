@@ -2,6 +2,7 @@
 // Copyright (c) Jahred Love. All rights reserved.
 
 #include <jello/internal.h>
+#include <jello/jdll.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -92,6 +93,12 @@ static jello_bc_result read_insn_compressed(rd* r, jello_insn* out) {
 
 void jello_bc_free(jello_bc_module* m) {
   if(!m) return;
+  if(m->jdll_handles) {
+    jello_jdll_handle** handles = (jello_jdll_handle**)m->jdll_handles;
+    for(uint32_t i = 0; i < m->njdll_handles; i++) jello_jdll_unload(handles[i]);
+    free(handles);
+  }
+  free((void*)m->imports);
   free((void*)m->types);
   if(m->sigs) {
     for(uint32_t i = 0; i < m->nsigs; i++) free((void*)m->sigs[i].args);
@@ -150,6 +157,7 @@ jello_bc_result jello_bc_read(const uint8_t* data, size_t size, jello_bc_module*
   if((rr = rd_u32(&r, &m->nfuncs)).err) { jello_bc_free(m); *out = NULL; return rr; }
   if((rr = rd_u32(&r, &m->entry)).err) { jello_bc_free(m); *out = NULL; return rr; }
   if(m->entry >= m->nfuncs) { jello_bc_free(m); *out = NULL; return err(JELLO_BC_BAD_FORMAT, "entry out of range", r.off - 4); }
+  if((rr = rd_u32(&r, &m->nimports)).err) { jello_bc_free(m); *out = NULL; return rr; }
 
   if(m->features & (uint32_t)JELLO_BC_FEAT_CONST64) {
     if((rr = rd_u32(&r, &m->nconst_i64)).err) { jello_bc_free(m); *out = NULL; return rr; }
@@ -311,6 +319,65 @@ jello_bc_result jello_bc_read(const uint8_t* data, size_t size, jello_bc_module*
     for(uint32_t i = 0; i < m->natoms; i++) atoms[i] = m->atoms_data + atom_offsets[i];
     m->atoms = atoms;
     free(atom_offsets);
+  }
+
+  // --- native imports
+  if(m->nimports > 0) {
+    jello_import_sig* imports = (jello_import_sig*)calloc(m->nimports, sizeof(jello_import_sig));
+    jello_jdll_handle** handles = (jello_jdll_handle**)calloc(m->nimports, sizeof(jello_jdll_handle*));
+    if(!imports || !handles) {
+      free(imports); free(handles);
+      jello_bc_free(m); *out = NULL; return err(JELLO_BC_OUT_OF_MEMORY, "oom imports", r.off);
+    }
+    m->imports = imports;
+    m->jdll_handles = handles;
+    for(uint32_t i = 0; i < m->nimports; i++) {
+      uint32_t lib_atom = 0, exp_atom = 0;
+      uint8_t ret_kind = 0, arity = 0;
+      if((rr = rd_u32(&r, &lib_atom)).err) { jello_bc_free(m); *out = NULL; return rr; }
+      if(lib_atom >= m->natoms) { jello_bc_free(m); *out = NULL; return err(JELLO_BC_BAD_FORMAT, "import library atom out of range", r.off - 4); }
+      if((rr = rd_u32(&r, &exp_atom)).err) { jello_bc_free(m); *out = NULL; return rr; }
+      if(exp_atom >= m->natoms) { jello_bc_free(m); *out = NULL; return err(JELLO_BC_BAD_FORMAT, "import export atom out of range", r.off - 4); }
+      if((rr = rd_u8(&r, &ret_kind)).err) { jello_bc_free(m); *out = NULL; return rr; }
+      if(!jello_bc_type_kind_is_valid(ret_kind)) { jello_bc_free(m); *out = NULL; return err(JELLO_BC_BAD_FORMAT, "import ret kind invalid", r.off - 1); }
+      if((rr = rd_u8(&r, &arity)).err) { jello_bc_free(m); *out = NULL; return rr; }
+      if(arity > 8) { jello_bc_free(m); *out = NULL; return err(JELLO_BC_BAD_FORMAT, "import arity exceeds 8 (v1 ceiling)", r.off - 1); }
+      ((jello_import_sig*)imports)[i].library_atom = lib_atom;
+      ((jello_import_sig*)imports)[i].export_atom = exp_atom;
+      ((jello_import_sig*)imports)[i].ret_kind = ret_kind;
+      ((jello_import_sig*)imports)[i].arity = arity;
+      for(uint8_t j = 0; j < 8; j++) {
+        uint8_t ak = 0;
+        if((rr = rd_u8(&r, &ak)).err) { jello_bc_free(m); *out = NULL; return rr; }
+        if(j < arity && !jello_bc_type_kind_is_valid(ak)) {
+          jello_bc_free(m); *out = NULL; return err(JELLO_BC_BAD_FORMAT, "import arg kind invalid", r.off - 1);
+        }
+        ((jello_import_sig*)imports)[i].arg_kinds[j] = ak;
+      }
+
+      const char* library_name = m->atoms[lib_atom];
+      const char* export_name = m->atoms[exp_atom];
+      jello_jdll_handle* h = jello_jdll_load(library_name);
+      if(!h) {
+        jello_bc_free(m); *out = NULL;
+        return err(JELLO_BC_BAD_FORMAT, "import: .jdll not found or ABI mismatch", r.off);
+      }
+      handles[i] = h;
+      m->njdll_handles = i + 1u;
+
+      const jello_jdll_export* exp = jello_jdll_find_export(h, export_name);
+      if(!exp) {
+        jello_bc_free(m); *out = NULL;
+        return err(JELLO_BC_BAD_FORMAT, "import: export not found in .jdll", r.off);
+      }
+      int sig_matches = (exp->ret_kind == ret_kind) && (exp->arity == arity);
+      for(uint8_t j = 0; sig_matches && j < arity; j++) sig_matches = (exp->arg_kinds[j] == imports[i].arg_kinds[j]);
+      if(!sig_matches) {
+        jello_bc_free(m); *out = NULL;
+        return err(JELLO_BC_BAD_FORMAT, "import: declared signature does not match .jdll export", r.off);
+      }
+      ((jello_import_sig*)imports)[i].resolved = exp;
+    }
   }
 
   m->proto_enabled = (uint8_t)(m->natoms > JELLO_ATOM___PROTO__ &&

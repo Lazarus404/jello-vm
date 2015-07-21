@@ -23,7 +23,7 @@ static void vm_store_f16_bits(reg_frame* rf, uint32_t r, uint16_t bits) {
   vm_store_u32(rf, r, (uint32_t)bits);
 }
 
-static float f16_bits_to_f32(uint16_t h) {
+float vm_f16_to_f32(uint16_t h) {
   uint32_t sign = (uint32_t)(h & 0x8000u) << 16;
   uint32_t exp = (uint32_t)(h >> 10) & 0x1Fu;
   uint32_t mant = (uint32_t)(h & 0x3FFu);
@@ -49,7 +49,7 @@ static float f16_bits_to_f32(uint16_t h) {
   return vm_f32_from_bits(bits);
 }
 
-static uint16_t f32_to_f16_bits(float f) {
+uint16_t vm_f32_to_f16(float f) {
   uint32_t bits;
   memcpy(&bits, &f, sizeof bits);
   uint32_t sign = (bits >> 16) & 0x8000u;
@@ -205,9 +205,9 @@ op_result op_lt_i64(exec_ctx* ctx, const jello_insn* ins) {
 #define DEF_BIN_F16(NAME, EXPR)                                              \
   op_result NAME(exec_ctx* ctx, const jello_insn* ins) {                     \
     call_frame* fr = current_frame(ctx);                                     \
-    float a = f16_bits_to_f32(vm_load_f16_bits(&fr->rf, ins->b));            \
-    float b = f16_bits_to_f32(vm_load_f16_bits(&fr->rf, ins->c));            \
-    vm_store_f16_bits(&fr->rf, ins->a, f32_to_f16_bits((float)(EXPR)));      \
+    float a = vm_f16_to_f32(vm_load_f16_bits(&fr->rf, ins->b));            \
+    float b = vm_f16_to_f32(vm_load_f16_bits(&fr->rf, ins->c));            \
+    vm_store_f16_bits(&fr->rf, ins->a, vm_f32_to_f16((float)(EXPR)));      \
     return OP_CONTINUE;                                                      \
   }
 
@@ -371,28 +371,28 @@ op_result op_i64_from_f32(exec_ctx* ctx, const jello_insn* ins) {
 op_result op_f16_from_f32(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   float x = vm_load_f32(&fr->rf, ins->b);
-  vm_store_f16_bits(&fr->rf, ins->a, f32_to_f16_bits(x));
+  vm_store_f16_bits(&fr->rf, ins->a, vm_f32_to_f16(x));
   return OP_CONTINUE;
 }
 
 op_result op_f32_from_f16(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   uint16_t bits = vm_load_f16_bits(&fr->rf, ins->b);
-  vm_store_f32(&fr->rf, ins->a, f16_bits_to_f32(bits));
+  vm_store_f32(&fr->rf, ins->a, vm_f16_to_f32(bits));
   return OP_CONTINUE;
 }
 
 op_result op_f16_from_i32(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   int32_t x = (int32_t)vm_load_u32(&fr->rf, ins->b);
-  vm_store_f16_bits(&fr->rf, ins->a, f32_to_f16_bits((float)x));
+  vm_store_f16_bits(&fr->rf, ins->a, vm_f32_to_f16((float)x));
   return OP_CONTINUE;
 }
 
 op_result op_i32_from_f16(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   uint16_t bits = vm_load_f16_bits(&fr->rf, ins->b);
-  float x = f16_bits_to_f32(bits);
+  float x = vm_f16_to_f32(bits);
   vm_store_u32(&fr->rf, ins->a, (uint32_t)(int32_t)x);
   return OP_CONTINUE;
 }

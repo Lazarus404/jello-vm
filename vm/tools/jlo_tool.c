@@ -113,6 +113,7 @@ static const op_name_entry OP_NAMES[] = {
   {"OBJ_HAS", JOP_OBJ_HAS}, {"OBJ_REMOVE", JOP_OBJ_REMOVE}, {"OBJ_CLEAR", JOP_OBJ_CLEAR},
   {"OBJ_COPY", JOP_OBJ_COPY}, {"OBJ_KEYS", JOP_OBJ_KEYS},
   {"ENUM_NEW", JOP_ENUM_NEW}, {"ENUM_TAG", JOP_ENUM_TAG}, {"ENUM_GET", JOP_ENUM_GET},
+  {"CALL_NATIVE", JOP_CALL_NATIVE},
 };
 #define NOP_NAMES (sizeof(OP_NAMES) / sizeof(OP_NAMES[0]))
 
@@ -136,6 +137,7 @@ static const flag_name_entry FLAG_NAMES[] = {
   {"TYPE_PROFILE", JELLO_BC_FEAT_TYPE_PROFILE, 0},
   {"STACK_MAP", JELLO_BC_FEAT_STACK_MAP, 0},
   {"PKG_DEPS", JELLO_BC_FEAT_PKG_DEPS, 0},
+  {"IMPORTS", JELLO_BC_FEAT_IMPORTS, 1},
 };
 #define NFLAG_NAMES (sizeof(FLAG_NAMES) / sizeof(FLAG_NAMES[0]))
 
@@ -178,6 +180,14 @@ typedef struct asm_struct_sig {
   uint32_t* field_name_atom;  /* atom indices, only when named */
 } asm_struct_sig;
 
+typedef struct asm_import_sig {
+  uint32_t library_atom;
+  uint32_t export_atom;
+  jello_type_kind ret_kind;
+  uint8_t arity;
+  jello_type_kind arg_kinds[8];
+} asm_import_sig;
+
 typedef struct func_t {
   uint32_t nregs;
   uint32_t cap_start;
@@ -200,6 +210,8 @@ typedef struct module_t {
   int64_t* const_i64;
   uint32_t nconst_f64;
   double* const_f64;
+  uint32_t nimports;
+  asm_import_sig* imports;
   uint32_t nfuncs;
   func_t* funcs;
 } module_t;
@@ -216,6 +228,7 @@ static void module_free(module_t* m) {
   free(m->struct_sigs);
   free(m->const_i64);
   free(m->const_f64);
+  free(m->imports);
   for(uint32_t i = 0; i < m->nfuncs; i++) {
     free(m->funcs[i].reg_type_idx);
     free(m->funcs[i].insns);
@@ -660,6 +673,83 @@ static int parse_struct_sigs(cursor* c, const asm_type_entry* types, uint32_t nt
   return 1;
 }
 
+static int parse_import_entry(cursor* c, char* const* atoms, uint32_t natoms, asm_import_sig* out) {
+  memset(out, 0, sizeof(*out));
+  if(!expect_ch(c, '{')) return 0;
+  if(!expect_ident(c, "library")) return 0;
+  if(!expect_ch(c, '=')) return 0;
+  char libname[64];
+  if(!read_ident(c, libname, sizeof(libname))) return 0;
+  if(!find_atom_index_by_name(c, atoms, natoms, libname, &out->library_atom)) return 0;
+  match_ch(c, ',');
+
+  if(!expect_ident(c, "export")) return 0;
+  if(!expect_ch(c, '=')) return 0;
+  char expname[64];
+  if(!read_ident(c, expname, sizeof(expname))) return 0;
+  if(!find_atom_index_by_name(c, atoms, natoms, expname, &out->export_atom)) return 0;
+  match_ch(c, ',');
+
+  if(!expect_ident(c, "ret")) return 0;
+  if(!expect_ch(c, '=')) return 0;
+  char retname[32];
+  if(!read_ident(c, retname, sizeof(retname))) return 0;
+  if(!kind_from_name(retname, &out->ret_kind)) {
+    fprintf(stderr, "%s: unknown ret kind '%s' in import\n", c->filename, retname);
+    return 0;
+  }
+  match_ch(c, ',');
+
+  if(!expect_ident(c, "args")) return 0;
+  if(!expect_ch(c, '=')) return 0;
+  if(!expect_ch(c, '[')) return 0;
+  uint32_t got = 0;
+  skip_ws(c);
+  if(!match_ch(c, ']')) {
+    for(;;) {
+      char name[32];
+      if(!read_ident(c, name, sizeof(name))) return 0;
+      jello_type_kind ak;
+      if(!kind_from_name(name, &ak)) {
+        fprintf(stderr, "%s: unknown arg kind '%s' in import\n", c->filename, name);
+        return 0;
+      }
+      if(got >= 8) { fprintf(stderr, "%s: import arity exceeds 8 (v1 ceiling)\n", c->filename); return 0; }
+      out->arg_kinds[got++] = ak;
+      if(match_ch(c, ',')) continue;
+      break;
+    }
+    if(!expect_ch(c, ']')) return 0;
+  }
+  out->arity = (uint8_t)got;
+  if(!expect_ch(c, '}')) return 0;
+  return 1;
+}
+
+static int parse_imports(cursor* c, char* const* atoms, uint32_t natoms,
+                          asm_import_sig** out_imports, uint32_t* out_n) {
+  if(!expect_ident(c, "imports")) return 0;
+  if(!expect_ch(c, ':')) return 0;
+  if(!expect_ch(c, '[')) return 0;
+  asm_import_sig* imports = NULL;
+  uint32_t n = 0, cap = 0;
+  skip_ws(c);
+  if(!match_ch(c, ']')) {
+    for(;;) {
+      asm_import_sig imp;
+      if(!parse_import_entry(c, atoms, natoms, &imp)) { free(imports); return 0; }
+      if(n == cap) { cap = cap ? cap * 2 : 4; imports = (asm_import_sig*)realloc(imports, cap * sizeof(asm_import_sig)); }
+      imports[n++] = imp;
+      if(match_ch(c, ',')) continue;
+      break;
+    }
+    if(!expect_ch(c, ']')) { free(imports); return 0; }
+  }
+  *out_imports = imports;
+  *out_n = n;
+  return 1;
+}
+
 static int parse_reg_types(cursor* c, const asm_type_entry* types, uint32_t ntypes,
                             uint32_t** out_idx, uint32_t* out_n) {
   if(!expect_ident(c, "reg_types")) return 0;
@@ -819,6 +909,9 @@ static int parse_module(cursor* c, module_t* out) {
     if(!parse_const_i64(c, &out->const_i64, &out->nconst_i64)) { module_free(out); return 0; }
     if(!parse_const_f64(c, &out->const_f64, &out->nconst_f64)) { module_free(out); return 0; }
   }
+  if(out->features & (uint32_t)JELLO_BC_FEAT_IMPORTS) {
+    if(!parse_imports(c, out->atoms, out->natoms, &out->imports, &out->nimports)) { module_free(out); return 0; }
+  }
 
   func_t* funcs = NULL;
   uint32_t nfuncs = 0, cap = 0;
@@ -914,6 +1007,7 @@ static int write_module(const module_t* m, byte_buf* bb) {
   bb_u32(bb, m->natoms);
   bb_u32(bb, m->nfuncs);
   bb_u32(bb, m->entry);
+  bb_u32(bb, m->nimports);
 
   if(m->features & (uint32_t)JELLO_BC_FEAT_CONST64) {
     bb_u32(bb, m->nconst_i64);
@@ -947,6 +1041,15 @@ static int write_module(const module_t* m, byte_buf* bb) {
     uint32_t len = (uint32_t)strlen(m->atoms[i]);
     bb_u32(bb, len);
     bb_push(bb, m->atoms[i], len);
+  }
+
+  for(uint32_t i = 0; i < m->nimports; i++) {
+    const asm_import_sig* imp = &m->imports[i];
+    bb_u32(bb, imp->library_atom);
+    bb_u32(bb, imp->export_atom);
+    bb_u8(bb, (uint8_t)imp->ret_kind);
+    bb_u8(bb, imp->arity);
+    for(int j = 0; j < 8; j++) bb_u8(bb, (uint8_t)imp->arg_kinds[j]);
   }
 
   if(m->features & (uint32_t)JELLO_BC_FEAT_CONST64) {

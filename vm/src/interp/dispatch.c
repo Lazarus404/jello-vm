@@ -10,7 +10,7 @@
 static op_result op_unimplemented(exec_ctx* ctx, const jello_insn* ins) {
   (void)ctx;
   fprintf(stderr,
-      "jello_vm: opcode %u has no interpreter handler yet\n",
+      "jello_vm: opcode %u has no Chapter 3 interpreter handler yet\n",
       (unsigned)ins->op);
   abort();
 }
@@ -75,6 +75,8 @@ op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins) {
     [JOP_OBJ_GET] = &&L_OBJ_GET, [JOP_OBJ_SET] = &&L_OBJ_SET,
     [JOP_OBJ_HAS] = &&L_OBJ_HAS, [JOP_OBJ_REMOVE] = &&L_OBJ_REMOVE,
     [JOP_OBJ_CLEAR] = &&L_OBJ_CLEAR, [JOP_OBJ_COPY] = &&L_OBJ_COPY,
+
+    [JOP_CALL_NATIVE] = &&L_CALL_NATIVE,
   };
 
   if((uint32_t)ins->op >= (uint32_t)JOP_COUNT || op_table[ins->op] == NULL) {
@@ -173,6 +175,8 @@ op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins) {
   L_OBJ_REMOVE: return op_obj_remove(ctx, ins);
   L_OBJ_CLEAR: return op_obj_clear(ctx, ins);
   L_OBJ_COPY: return op_obj_copy(ctx, ins);
+
+  L_CALL_NATIVE: return op_call_native(ctx, ins);
 #pragma GCC diagnostic pop
 #else
   switch((jello_op)ins->op) {
@@ -267,6 +271,7 @@ op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins) {
     case JOP_OBJ_REMOVE: return op_obj_remove(ctx, ins);
     case JOP_OBJ_CLEAR: return op_obj_clear(ctx, ins);
     case JOP_OBJ_COPY: return op_obj_copy(ctx, ins);
+    case JOP_CALL_NATIVE: return op_call_native(ctx, ins);
     default: return op_unimplemented(ctx, ins);
   }
 #endif

@@ -495,6 +495,28 @@ jello_bc_result jello_bc_validate_insn(
       }
       return ok();
 
+    /* -- native calls -- */
+    case JOP_CALL_NATIVE: {
+      if(ins->imm >= m->nimports) return err(JELLO_BC_BAD_FORMAT, "import index out of range", 0);
+      const jello_import_sig* sig = &m->imports[ins->imm];
+      if(ins->c != sig->arity) return err(JELLO_BC_BAD_FORMAT, "call_native arg count mismatch", 0);
+      if((uint64_t)ins->b + (uint64_t)ins->c > (uint64_t)nregs) {
+        return err(JELLO_BC_BAD_FORMAT, "call_native arg regs out of range", 0);
+      }
+      for(uint32_t i = 0; i < ins->c; i++) {
+        if((uint8_t)reg_kind(m, reg_types, ins->b + i) != sig->arg_kinds[i]) {
+          return err(JELLO_BC_BAD_FORMAT, "call_native arg type mismatch", 0);
+        }
+      }
+      if((jello_type_kind)sig->ret_kind != JELLO_T_VOID) {
+        if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "call_native dest reg out of range", 0);
+        if(reg_kind(m, reg_types, ins->a) != (jello_type_kind)sig->ret_kind) {
+          return err(JELLO_BC_BAD_FORMAT, "call_native dest wrong kind", 0);
+        }
+      }
+      return ok();
+    }
+
     case JOP_BITS_WRITE:
     case JOP_BITS_READ: {
       if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "bits op reg out of range", 0);

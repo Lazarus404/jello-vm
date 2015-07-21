@@ -24,6 +24,7 @@ typedef enum jello_bc_feature_flags {
   JELLO_BC_FEAT_TYPE_PROFILE = 1u << 10,
   JELLO_BC_FEAT_STACK_MAP = 1u << 11,
   JELLO_BC_FEAT_PKG_DEPS = 1u << 12,
+  JELLO_BC_FEAT_IMPORTS = 1u << 13,
 } jello_bc_feature_flags;
 
 /* -- opcode table -- */
@@ -224,9 +225,12 @@ typedef enum jello_op {
   JOP_ENUM_NEW = 164,
   JOP_ENUM_TAG = 165,
   JOP_ENUM_GET = 166,
+
+  /* Native calls */
+  JOP_CALL_NATIVE = 167,
 } jello_op;
 
-#define JOP_COUNT (JOP_ENUM_GET + 1)
+#define JOP_COUNT (JOP_CALL_NATIVE + 1)
 
 /* -- canonical instruction encoding -- */
 typedef struct jello_insn {

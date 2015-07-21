@@ -12,6 +12,16 @@
 
 /* Internal VM layouts, frames, dispatch, GC fields. */
 
+/* -- native imports -- */
+typedef struct jello_import_sig {
+  uint32_t library_atom;
+  uint32_t export_atom;
+  uint8_t ret_kind;
+  uint8_t arity;
+  uint8_t arg_kinds[8];
+  const struct jello_jdll_export* resolved;
+} jello_import_sig;
+
 /* -- the concrete module -- */
 struct jello_bc_module {
   uint32_t version;
@@ -37,6 +47,10 @@ struct jello_bc_module {
   const jello_bc_function* funcs;
   uint32_t entry;
   uint8_t proto_enabled;
+  uint32_t nimports;
+  const jello_import_sig* imports;
+  void* jdll_handles;
+  uint32_t njdll_handles;
 };
 
 #define JELLO_ATOM___PROTO__ 0u
@@ -200,6 +214,9 @@ static inline void vm_store_u32_masked(reg_frame* rf, uint32_t r, uint32_t v, je
   vm_store_u32(rf, r, masked);
 }
 
+float vm_f16_to_f32(uint16_t bits);
+uint16_t vm_f32_to_f16(float f);
+
 jello_type_kind vm_reg_kind(const jello_bc_module* m, const jello_bc_function* f, uint32_t r);
 
 /* -- frame stack + per-function layout cache (frame.c) -- */
@@ -340,5 +357,14 @@ void vm_safepoint_check(jello_vm* vm);
 
 int vm_heap_stop_the_world(jello_vm* vm);
 void vm_heap_resume_the_world(jello_vm* vm);
+
+/* -- the JDLL ABI (jdll/loader.c, jdll/marshal.c, jdll/call_native.c) -- */
+typedef struct jello_jdll_handle jello_jdll_handle;
+
+jello_jdll_handle* jello_jdll_load(const char* library_name);
+void jello_jdll_unload(jello_jdll_handle* h);
+const struct jello_jdll_export* jello_jdll_find_export(const jello_jdll_handle* h, const char* name);
+
+op_result op_call_native(exec_ctx* ctx, const jello_insn* ins);
 
 #endif /* JELLO_VM_INTERNAL_H */
