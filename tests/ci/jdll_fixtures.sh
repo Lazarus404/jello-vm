@@ -55,6 +55,9 @@ for fixture in "${CORRUPTDIR}"/*.jlo.txt; do
   fi
 done
 
+echo "== std JDLL (file I/O, get_env, argv) =="
+echo "jdll_fixtures: covered by chapter7_threads_and_stop_the_world (tests/csrc/chapter7_thread_tests.c) -- see that fixture's own test_std_jdll_* functions"
+
 if [[ ${failures} -gt 0 ]]; then
   echo "chapter7_jdll_and_std: ${failures} failure(s)" >&2
   exit 1

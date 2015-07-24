@@ -56,4 +56,5 @@ add_test(NAME chapter7_threads_and_stop_the_world
   COMMAND chapter7_thread_tests
   WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 set_tests_properties(chapter7_threads_and_stop_the_world PROPERTIES
+  ENVIRONMENT "JELLO_JDLL_PATH=$<TARGET_FILE_DIR:test_native_jdll>:$<TARGET_FILE_DIR:jello_std_jdll>;${JELLO_JDLL_ASAN_OPTIONS}"
   TIMEOUT 60)
