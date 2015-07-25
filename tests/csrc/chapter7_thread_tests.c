@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -21,6 +22,152 @@ static void watchdog_handler(int sig) {
   fprintf(stderr, "WATCHDOG: test took too long, aborting\n");
   fflush(stderr);
   _exit(99);
+}
+
+static double now_ms(void) {
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  return (double)tv.tv_sec * 1000.0 + (double)tv.tv_usec / 1000.0;
+}
+
+/* -- fixture 1: two joined VMs, one allocating, one blocked in a native call -- */
+
+#define ALLOC_ROUNDS 4000
+#define SLEEP_MS 60
+
+typedef struct alloc_thread_arg {
+  jello_vm* vm;
+  uint32_t collections_seen;
+} alloc_thread_arg;
+
+static void* alloc_thread_main(void* argp) {
+  alloc_thread_arg* arg = (alloc_thread_arg*)argp;
+  for(int i = 0; i < ALLOC_ROUNDS; i++) {
+    jello_bytes* b = jello_bytes_new(arg->vm, 300);
+    (void)b;
+  }
+  uint32_t live = 0, collections = 0;
+  double pause_ms = 0.0;
+  jello_vm_gc_stats(arg->vm, &live, &collections, &pause_ms);
+  arg->collections_seen = collections;
+  return NULL;
+}
+
+static jello_bc_module* build_sleep_module(int ms) {
+  jello_bc_module* m = (jello_bc_module*)calloc(1, sizeof(jello_bc_module));
+
+  static const char* names[] = {"test_native", "sleep_ms"};
+  const char** atoms = (const char**)malloc(sizeof(char*) * 2u);
+  atoms[0] = names[0];
+  atoms[1] = names[1];
+  m->natoms = 2;
+  m->atoms = atoms;
+
+  jello_type_entry* types = (jello_type_entry*)calloc(2, sizeof(jello_type_entry));
+  types[0].kind = JELLO_T_I32;
+  types[1].kind = JELLO_T_BOOL;
+  m->ntypes = 2;
+  m->types = types;
+
+  jello_import_sig* imports = (jello_import_sig*)calloc(1, sizeof(jello_import_sig));
+  imports[0].library_atom = 0;
+  imports[0].export_atom = 1;
+  imports[0].ret_kind = (uint8_t)JELLO_T_BOOL;
+  imports[0].arity = 1;
+  imports[0].arg_kinds[0] = (uint8_t)JELLO_T_I32;
+
+  jello_jdll_handle* h = jello_jdll_load("test_native");
+  if(!h) { fprintf(stderr, "build_sleep_module: failed to load test_native.jdll (check JELLO_JDLL_PATH)\n"); abort(); }
+  const jello_jdll_export* exp = jello_jdll_find_export(h, "sleep_ms");
+  if(!exp) { fprintf(stderr, "build_sleep_module: test_native has no sleep_ms export\n"); abort(); }
+  imports[0].resolved = exp;
+  m->nimports = 1;
+  m->imports = imports;
+  jello_jdll_handle** handles = (jello_jdll_handle**)malloc(sizeof(jello_jdll_handle*));
+  handles[0] = h;
+  m->jdll_handles = handles;
+  m->njdll_handles = 1;
+
+  jello_type_id* reg_types = (jello_type_id*)malloc(sizeof(jello_type_id) * 2u);
+  reg_types[0] = 0; /* r0: I32 */
+  reg_types[1] = 1; /* r1: Bool */
+
+  /* 0: CONST_I32 r0 = ms
+   * 1: CALL_NATIVE r1 = sleep_ms(r0)
+   * 2: RET r1
+   */
+  jello_insn* insns = (jello_insn*)calloc(3, sizeof(jello_insn));
+  insns[0].op = (uint8_t)JOP_CONST_I32; insns[0].a = 0; insns[0].imm = (uint32_t)ms;
+  insns[1].op = (uint8_t)JOP_CALL_NATIVE; insns[1].a = 1; insns[1].b = 0; insns[1].c = 1; insns[1].imm = 0;
+  insns[2].op = (uint8_t)JOP_RET; insns[2].a = 1;
+
+  jello_bc_function* funcs = (jello_bc_function*)calloc(1, sizeof(jello_bc_function));
+  funcs[0].nregs = 2;
+  funcs[0].cap_start = 2;
+  funcs[0].reg_types = reg_types;
+  funcs[0].ninsns = 3;
+  funcs[0].insns = insns;
+  m->nfuncs = 1;
+  m->funcs = funcs;
+  m->entry = 0;
+  return m;
+}
+
+typedef struct blocking_thread_arg {
+  jello_vm* vm;
+  const jello_bc_module* m;
+  int ok;
+} blocking_thread_arg;
+
+static void* blocking_thread_main(void* argp) {
+  blocking_thread_arg* arg = (blocking_thread_arg*)argp;
+  jello_numeric_result out;
+  jello_exec_status st = jello_vm_exec_numeric(arg->vm, arg->m, &out);
+  arg->ok = (st == JELLO_EXEC_OK && out.kind == JELLO_NUM_BOOL && out.as.b == 1);
+  return NULL;
+}
+
+static void test_shared_heap_alloc_and_blocking_call(void) {
+  printf("== fixture: shared heap, one allocating thread + one blocking-native-call thread ==\n");
+
+  jello_vm* vm_a = jello_vm_create();
+  assert(vm_a);
+  jello_vm* vm_b = jello_vm_create_joined(vm_a);
+  assert(vm_b);
+
+  jello_bc_module* m = build_sleep_module(SLEEP_MS);
+
+  alloc_thread_arg a_arg = {vm_a, 0};
+  blocking_thread_arg b_arg = {vm_b, m, 0};
+
+  double t0 = now_ms();
+  pthread_t ta, tb;
+  assert(pthread_create(&ta, NULL, alloc_thread_main, &a_arg) == 0);
+  assert(pthread_create(&tb, NULL, blocking_thread_main, &b_arg) == 0);
+  assert(pthread_join(ta, NULL) == 0);
+  assert(pthread_join(tb, NULL) == 0);
+  double elapsed = now_ms() - t0;
+
+  printf("  collections_seen=%u blocking_call_ok=%d elapsed_ms=%.1f\n",
+         a_arg.collections_seen, b_arg.ok, elapsed);
+
+  assert(b_arg.ok && "blocking native call must still return the correct value");
+  assert(a_arg.collections_seen > 0 && "allocation loop must have triggered at least one real collection");
+  assert(elapsed < (double)(SLEEP_MS * 8) && "threads must not have serialised behind one another");
+
+  free((void*)m->types);
+  free((void*)m->atoms);
+  free((void*)m->imports);
+  jello_jdll_unload(((jello_jdll_handle**)m->jdll_handles)[0]);
+  free(m->jdll_handles);
+  free((void*)m->funcs[0].reg_types);
+  free((void*)m->funcs[0].insns);
+  free((void*)m->funcs);
+  free(m);
+
+  jello_vm_destroy(vm_b);
+  jello_vm_destroy(vm_a);
+  printf("  PASS\n");
 }
 
 /* -- fixture 2: the backward-JMP safepoint check actually fires -- */
@@ -382,6 +529,7 @@ int main(void) {
   setvbuf(stdout, NULL, _IONBF, 0);
   signal(SIGALRM, watchdog_handler);
   alarm(45);
+  test_shared_heap_alloc_and_blocking_call();
   test_safepoint_at_loop_backedge();
 
   jello_jdll_handle* std_h = jello_jdll_load("std");

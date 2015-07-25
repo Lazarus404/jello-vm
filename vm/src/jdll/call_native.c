@@ -28,7 +28,9 @@ op_result op_call_native(exec_ctx* ctx, const jello_insn* ins) {
   jctx.failed = 0;
   jctx.fail_msg = NULL;
 
+  vm_go_quiescent(vm);
   exp->fn(&jctx);
+  vm_leave_quiescent(vm);
 
   if(jctx.failed) {
     vm->trap_code = JELLO_TRAP_TYPE_MISMATCH;

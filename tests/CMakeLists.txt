@@ -11,7 +11,7 @@ if(TARGET jlo_tool)
     COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/interp_fixtures.sh" "$<TARGET_FILE:jlo_tool>"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
-  add_test(NAME chapter5_gc_v1
+  add_test(NAME chapter5_gc
     COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/gc_fixtures.sh" "$<TARGET_FILE:jlo_tool>"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
