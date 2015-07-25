@@ -204,7 +204,7 @@ typedef enum jello_op {
   JOP_BITS_READ = 149,
 
   /* Struct (fixed-offset field access) */
-  JOP_STRUCT_NEW = 150,
+  JOP_STRUCT_NEW = 150, /* Chapter 5: closes a Chapter 1 gap -- STRUCT_GET/SET had no constructor */
   JOP_STRUCT_GET = 151,
   JOP_STRUCT_SET = 152,
 
@@ -226,11 +226,19 @@ typedef enum jello_op {
   JOP_ENUM_TAG = 165,
   JOP_ENUM_GET = 166,
 
-  /* Native calls */
   JOP_CALL_NATIVE = 167,
+
+  JOP_BYTES_READ_I64_LE = 168,
+  JOP_BYTES_READ_I64_BE = 169,
+  JOP_BYTES_READ_F64_LE = 170,
+  JOP_BYTES_READ_F64_BE = 171,
+  JOP_BYTES_WRITE_I64_LE = 172,
+  JOP_BYTES_WRITE_I64_BE = 173,
+  JOP_BYTES_WRITE_F64_LE = 174,
+  JOP_BYTES_WRITE_F64_BE = 175,
 } jello_op;
 
-#define JOP_COUNT (JOP_CALL_NATIVE + 1)
+#define JOP_COUNT (JOP_BYTES_WRITE_F64_BE + 1)
 
 /* -- canonical instruction encoding -- */
 typedef struct jello_insn {

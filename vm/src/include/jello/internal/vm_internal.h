@@ -110,7 +110,7 @@ typedef struct jello_gc_hdr {
 
 /* -- the shared heap -- */
 typedef struct jello_heap {
-  jello_gc_hdr* gc_objects; /* every live object, singly linked */
+  jello_gc_hdr* gc_objects;                      /* every live object, singly linked */
   jello_gc_hdr* gc_free_classes[GC_NUM_SIZE_CLASSES]; /* one free-list head per size class */
   uint32_t gc_bytes_live;
   uint32_t gc_next_collect;
@@ -304,6 +304,32 @@ op_result op_bytes_new(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_len(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_get_u8(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_set_u8(exec_ctx* ctx, const jello_insn* ins);
+
+/* -- Bytes memory/layout opcode handlers (ops_bytes.c) -- */
+op_result op_bytes_read_u16_le(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_read_u16_be(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_read_u32_le(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_read_u32_be(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_read_i32_le(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_read_i32_be(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_read_f32_le(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_read_f32_be(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_read_i64_le(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_read_i64_be(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_read_f64_le(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_read_f64_be(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_write_u16_le(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_write_u16_be(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_write_u32_le(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_write_u32_be(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_write_i32_le(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_write_i32_be(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_write_f32_le(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_write_f32_be(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_write_i64_le(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_write_i64_be(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_write_f64_le(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_write_f64_be(exec_ctx* ctx, const jello_insn* ins);
 
 /* -- the boxing boundary (value/value.c) -- */
 jello_value vm_box_from_typed(jello_vm* vm, const jello_bc_module* m, const jello_bc_function* f,

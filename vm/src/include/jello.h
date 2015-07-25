@@ -164,7 +164,7 @@ static inline jello_value jello_from_ptr(const void* p) {
   return (jello_value)(uintptr_t)p;
 }
 
-/* -- numeric-only value boundary -- */
+/* -- numeric-only value boundary (deliberately not jello_value) -- */
 typedef enum jello_numeric_kind {
   JELLO_NUM_VOID = 0,
   JELLO_NUM_BOOL,
@@ -194,6 +194,7 @@ void* jello_gc_alloc(jello_vm* vm, size_t size);
 void jello_gc_collect(jello_vm* vm);
 void jello_gc_push_root(jello_vm* vm, void* obj);
 void jello_gc_pop_roots(jello_vm* vm, uint32_t n);
+
 void jello_vm_gc_stats(const jello_vm* vm, uint32_t* out_live_bytes, uint32_t* out_collections,
                         double* out_pause_ms);
 

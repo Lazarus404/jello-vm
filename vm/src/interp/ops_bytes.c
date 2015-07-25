@@ -71,3 +71,147 @@ op_result op_bytes_set_u8(exec_ctx* ctx, const jello_insn* ins) {
   b->data[idx] = (uint8_t)v;
   return OP_CONTINUE;
 }
+
+/* -- Memory-layout Bytes opcodes -- */
+
+static jello_bytes* bytes_arg(exec_ctx* ctx, call_frame* fr, uint32_t r) {
+  void* p = vm_load_ptr(&fr->rf, r);
+  if(!p) {
+    ctx->vm->trap_code = JELLO_TRAP_NULL_DEREF;
+    return NULL;
+  }
+  return (jello_bytes*)p;
+}
+
+static int bytes_access_in_range(const jello_bytes* b, uint32_t offset, uint32_t width) {
+  return (uint64_t)offset + (uint64_t)width <= (uint64_t)b->length;
+}
+
+static uint64_t rd_le(const uint8_t* p, uint32_t width) {
+  uint64_t v = 0;
+  for(uint32_t i = width; i-- > 0;) v = (v << 8) | p[i];
+  return v;
+}
+static uint64_t rd_be(const uint8_t* p, uint32_t width) {
+  uint64_t v = 0;
+  for(uint32_t i = 0; i < width; i++) v = (v << 8) | p[i];
+  return v;
+}
+static void wr_le(uint8_t* p, uint64_t v, uint32_t width) {
+  for(uint32_t i = 0; i < width; i++) {
+    p[i] = (uint8_t)(v & 0xFFu);
+    v >>= 8;
+  }
+}
+static void wr_be(uint8_t* p, uint64_t v, uint32_t width) {
+  for(uint32_t i = width; i-- > 0;) {
+    p[i] = (uint8_t)(v & 0xFFu);
+    v >>= 8;
+  }
+}
+
+static op_result bytes_read_int(exec_ctx* ctx, const jello_insn* ins, uint32_t width, int be) {
+  call_frame* fr = current_frame(ctx);
+  jello_bytes* b = bytes_arg(ctx, fr, ins->b);
+  if(!b) return OP_TRAP;
+  uint32_t off = vm_load_u32(&fr->rf, ins->c);
+  if(!bytes_access_in_range(b, off, width)) {
+    ctx->vm->trap_code = JELLO_TRAP_BOUNDS;
+    return OP_TRAP;
+  }
+  uint64_t raw = be ? rd_be(b->data + off, width) : rd_le(b->data + off, width);
+  if(width == 8u) vm_store_i64(&fr->rf, ins->a, (int64_t)raw);
+  else vm_store_u32(&fr->rf, ins->a, (uint32_t)raw);
+  return OP_CONTINUE;
+}
+
+static op_result bytes_read_float(exec_ctx* ctx, const jello_insn* ins, uint32_t width, int be) {
+  call_frame* fr = current_frame(ctx);
+  jello_bytes* b = bytes_arg(ctx, fr, ins->b);
+  if(!b) return OP_TRAP;
+  uint32_t off = vm_load_u32(&fr->rf, ins->c);
+  if(!bytes_access_in_range(b, off, width)) {
+    ctx->vm->trap_code = JELLO_TRAP_BOUNDS;
+    return OP_TRAP;
+  }
+  uint64_t raw = be ? rd_be(b->data + off, width) : rd_le(b->data + off, width);
+  if(width == 8u) {
+    double d;
+    uint64_t bits = raw;
+    memcpy(&d, &bits, sizeof d);
+    vm_store_f64(&fr->rf, ins->a, d);
+  } else {
+    float f;
+    uint32_t bits = (uint32_t)raw;
+    memcpy(&f, &bits, sizeof f);
+    vm_store_f32(&fr->rf, ins->a, f);
+  }
+  return OP_CONTINUE;
+}
+
+static op_result bytes_write_int(exec_ctx* ctx, const jello_insn* ins, uint32_t width, int be) {
+  call_frame* fr = current_frame(ctx);
+  jello_bytes* b = bytes_arg(ctx, fr, ins->b);
+  if(!b) return OP_TRAP;
+  uint32_t off = vm_load_u32(&fr->rf, ins->c);
+  if(!bytes_access_in_range(b, off, width)) {
+    ctx->vm->trap_code = JELLO_TRAP_BOUNDS;
+    return OP_TRAP;
+  }
+  uint64_t raw = (width == 8u) ? (uint64_t)vm_load_i64(&fr->rf, ins->a) : (uint64_t)vm_load_u32(&fr->rf, ins->a);
+  if(be) wr_be(b->data + off, raw, width);
+  else wr_le(b->data + off, raw, width);
+  return OP_CONTINUE;
+}
+
+static op_result bytes_write_float(exec_ctx* ctx, const jello_insn* ins, uint32_t width, int be) {
+  call_frame* fr = current_frame(ctx);
+  jello_bytes* b = bytes_arg(ctx, fr, ins->b);
+  if(!b) return OP_TRAP;
+  uint32_t off = vm_load_u32(&fr->rf, ins->c);
+  if(!bytes_access_in_range(b, off, width)) {
+    ctx->vm->trap_code = JELLO_TRAP_BOUNDS;
+    return OP_TRAP;
+  }
+  uint64_t raw;
+  if(width == 8u) {
+    double d = vm_load_f64(&fr->rf, ins->a);
+    uint64_t bits;
+    memcpy(&bits, &d, sizeof bits);
+    raw = bits;
+  } else {
+    float f = vm_load_f32(&fr->rf, ins->a);
+    uint32_t bits;
+    memcpy(&bits, &f, sizeof bits);
+    raw = bits;
+  }
+  if(be) wr_be(b->data + off, raw, width);
+  else wr_le(b->data + off, raw, width);
+  return OP_CONTINUE;
+}
+
+op_result op_bytes_read_u16_le(exec_ctx* ctx, const jello_insn* ins) { return bytes_read_int(ctx, ins, 2, 0); }
+op_result op_bytes_read_u16_be(exec_ctx* ctx, const jello_insn* ins) { return bytes_read_int(ctx, ins, 2, 1); }
+op_result op_bytes_read_u32_le(exec_ctx* ctx, const jello_insn* ins) { return bytes_read_int(ctx, ins, 4, 0); }
+op_result op_bytes_read_u32_be(exec_ctx* ctx, const jello_insn* ins) { return bytes_read_int(ctx, ins, 4, 1); }
+op_result op_bytes_read_i32_le(exec_ctx* ctx, const jello_insn* ins) { return bytes_read_int(ctx, ins, 4, 0); }
+op_result op_bytes_read_i32_be(exec_ctx* ctx, const jello_insn* ins) { return bytes_read_int(ctx, ins, 4, 1); }
+op_result op_bytes_read_i64_le(exec_ctx* ctx, const jello_insn* ins) { return bytes_read_int(ctx, ins, 8, 0); }
+op_result op_bytes_read_i64_be(exec_ctx* ctx, const jello_insn* ins) { return bytes_read_int(ctx, ins, 8, 1); }
+op_result op_bytes_read_f32_le(exec_ctx* ctx, const jello_insn* ins) { return bytes_read_float(ctx, ins, 4, 0); }
+op_result op_bytes_read_f32_be(exec_ctx* ctx, const jello_insn* ins) { return bytes_read_float(ctx, ins, 4, 1); }
+op_result op_bytes_read_f64_le(exec_ctx* ctx, const jello_insn* ins) { return bytes_read_float(ctx, ins, 8, 0); }
+op_result op_bytes_read_f64_be(exec_ctx* ctx, const jello_insn* ins) { return bytes_read_float(ctx, ins, 8, 1); }
+
+op_result op_bytes_write_u16_le(exec_ctx* ctx, const jello_insn* ins) { return bytes_write_int(ctx, ins, 2, 0); }
+op_result op_bytes_write_u16_be(exec_ctx* ctx, const jello_insn* ins) { return bytes_write_int(ctx, ins, 2, 1); }
+op_result op_bytes_write_u32_le(exec_ctx* ctx, const jello_insn* ins) { return bytes_write_int(ctx, ins, 4, 0); }
+op_result op_bytes_write_u32_be(exec_ctx* ctx, const jello_insn* ins) { return bytes_write_int(ctx, ins, 4, 1); }
+op_result op_bytes_write_i32_le(exec_ctx* ctx, const jello_insn* ins) { return bytes_write_int(ctx, ins, 4, 0); }
+op_result op_bytes_write_i32_be(exec_ctx* ctx, const jello_insn* ins) { return bytes_write_int(ctx, ins, 4, 1); }
+op_result op_bytes_write_i64_le(exec_ctx* ctx, const jello_insn* ins) { return bytes_write_int(ctx, ins, 8, 0); }
+op_result op_bytes_write_i64_be(exec_ctx* ctx, const jello_insn* ins) { return bytes_write_int(ctx, ins, 8, 1); }
+op_result op_bytes_write_f32_le(exec_ctx* ctx, const jello_insn* ins) { return bytes_write_float(ctx, ins, 4, 0); }
+op_result op_bytes_write_f32_be(exec_ctx* ctx, const jello_insn* ins) { return bytes_write_float(ctx, ins, 4, 1); }
+op_result op_bytes_write_f64_le(exec_ctx* ctx, const jello_insn* ins) { return bytes_write_float(ctx, ins, 8, 0); }
+op_result op_bytes_write_f64_be(exec_ctx* ctx, const jello_insn* ins) { return bytes_write_float(ctx, ins, 8, 1); }

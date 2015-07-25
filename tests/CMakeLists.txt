@@ -18,6 +18,10 @@ if(TARGET jlo_tool)
   add_test(NAME chapter6_dynamic_and_objects
     COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/dyn_fixtures.sh" "$<TARGET_FILE:jlo_tool>"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+  add_test(NAME chapter8_bytes_layout
+    COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/packet_fixtures.sh" "$<TARGET_FILE:jlo_tool>"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 endif()
 
 add_library(test_native_jdll MODULE jdll/test_native.c)

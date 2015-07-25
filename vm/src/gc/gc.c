@@ -294,12 +294,12 @@ void jello_gc_collect(jello_vm* vm) {
   vm_heap_resume_the_world(vm);
 }
 
-/* -- Bytes -- */
+/* -- Bytes-- */
 
 jello_bytes* jello_bytes_new(jello_vm* vm, uint32_t length) {
   jello_bytes* b = (jello_bytes*)jello_gc_alloc(vm, sizeof(jello_bytes) + (size_t)length);
   b->h.kind = (uint8_t)JELLO_OBJ_BYTES;
-  b->h.type_id = 0; /* Bytes is not a parameterised kind */
+  b->h.type_id = 0; /* Bytes is not a parameterised kind (Chapter 4 Sec 2.2); type_id unused */
   b->length = length;
   return b;
 }

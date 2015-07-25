@@ -495,6 +495,79 @@ jello_bc_result jello_bc_validate_insn(
       }
       return ok();
 
+    case JOP_BYTES_READ_U16_LE:
+    case JOP_BYTES_READ_U16_BE:
+    case JOP_BYTES_READ_U32_LE:
+    case JOP_BYTES_READ_U32_BE:
+    case JOP_BYTES_READ_I32_LE:
+    case JOP_BYTES_READ_I32_BE:
+      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) return err(JELLO_BC_BAD_FORMAT, "bytes read reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_I32 || reg_kind(m, reg_types, ins->b) != JELLO_T_BYTES ||
+         reg_kind(m, reg_types, ins->c) != JELLO_T_I32) {
+        return err(JELLO_BC_BAD_FORMAT, "bytes_read types required", 0);
+      }
+      return ok();
+    case JOP_BYTES_READ_F32_LE:
+    case JOP_BYTES_READ_F32_BE:
+      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) return err(JELLO_BC_BAD_FORMAT, "bytes read reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_F32 || reg_kind(m, reg_types, ins->b) != JELLO_T_BYTES ||
+         reg_kind(m, reg_types, ins->c) != JELLO_T_I32) {
+        return err(JELLO_BC_BAD_FORMAT, "bytes_read_f32 types required", 0);
+      }
+      return ok();
+    case JOP_BYTES_READ_I64_LE:
+    case JOP_BYTES_READ_I64_BE:
+      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) return err(JELLO_BC_BAD_FORMAT, "bytes read reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_I64 || reg_kind(m, reg_types, ins->b) != JELLO_T_BYTES ||
+         reg_kind(m, reg_types, ins->c) != JELLO_T_I32) {
+        return err(JELLO_BC_BAD_FORMAT, "bytes_read_i64 types required", 0);
+      }
+      return ok();
+    case JOP_BYTES_READ_F64_LE:
+    case JOP_BYTES_READ_F64_BE:
+      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) return err(JELLO_BC_BAD_FORMAT, "bytes read reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_F64 || reg_kind(m, reg_types, ins->b) != JELLO_T_BYTES ||
+         reg_kind(m, reg_types, ins->c) != JELLO_T_I32) {
+        return err(JELLO_BC_BAD_FORMAT, "bytes_read_f64 types required", 0);
+      }
+      return ok();
+    case JOP_BYTES_WRITE_U16_LE:
+    case JOP_BYTES_WRITE_U16_BE:
+    case JOP_BYTES_WRITE_U32_LE:
+    case JOP_BYTES_WRITE_U32_BE:
+    case JOP_BYTES_WRITE_I32_LE:
+    case JOP_BYTES_WRITE_I32_BE:
+      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) return err(JELLO_BC_BAD_FORMAT, "bytes write reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_I32 || reg_kind(m, reg_types, ins->b) != JELLO_T_BYTES ||
+         reg_kind(m, reg_types, ins->c) != JELLO_T_I32) {
+        return err(JELLO_BC_BAD_FORMAT, "bytes_write types required", 0);
+      }
+      return ok();
+    case JOP_BYTES_WRITE_F32_LE:
+    case JOP_BYTES_WRITE_F32_BE:
+      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) return err(JELLO_BC_BAD_FORMAT, "bytes write reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_F32 || reg_kind(m, reg_types, ins->b) != JELLO_T_BYTES ||
+         reg_kind(m, reg_types, ins->c) != JELLO_T_I32) {
+        return err(JELLO_BC_BAD_FORMAT, "bytes_write_f32 types required", 0);
+      }
+      return ok();
+    case JOP_BYTES_WRITE_I64_LE:
+    case JOP_BYTES_WRITE_I64_BE:
+      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) return err(JELLO_BC_BAD_FORMAT, "bytes write reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_I64 || reg_kind(m, reg_types, ins->b) != JELLO_T_BYTES ||
+         reg_kind(m, reg_types, ins->c) != JELLO_T_I32) {
+        return err(JELLO_BC_BAD_FORMAT, "bytes_write_i64 types required", 0);
+      }
+      return ok();
+    case JOP_BYTES_WRITE_F64_LE:
+    case JOP_BYTES_WRITE_F64_BE:
+      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) return err(JELLO_BC_BAD_FORMAT, "bytes write reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_F64 || reg_kind(m, reg_types, ins->b) != JELLO_T_BYTES ||
+         reg_kind(m, reg_types, ins->c) != JELLO_T_I32) {
+        return err(JELLO_BC_BAD_FORMAT, "bytes_write_f64 types required", 0);
+      }
+      return ok();
+
     /* -- native calls -- */
     case JOP_CALL_NATIVE: {
       if(ins->imm >= m->nimports) return err(JELLO_BC_BAD_FORMAT, "import index out of range", 0);

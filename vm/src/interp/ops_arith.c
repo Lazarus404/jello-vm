@@ -205,9 +205,9 @@ op_result op_lt_i64(exec_ctx* ctx, const jello_insn* ins) {
 #define DEF_BIN_F16(NAME, EXPR)                                              \
   op_result NAME(exec_ctx* ctx, const jello_insn* ins) {                     \
     call_frame* fr = current_frame(ctx);                                     \
-    float a = vm_f16_to_f32(vm_load_f16_bits(&fr->rf, ins->b));            \
-    float b = vm_f16_to_f32(vm_load_f16_bits(&fr->rf, ins->c));            \
-    vm_store_f16_bits(&fr->rf, ins->a, vm_f32_to_f16((float)(EXPR)));      \
+    float a = vm_f16_to_f32(vm_load_f16_bits(&fr->rf, ins->b));              \
+    float b = vm_f16_to_f32(vm_load_f16_bits(&fr->rf, ins->c));              \
+    vm_store_f16_bits(&fr->rf, ins->a, vm_f32_to_f16((float)(EXPR)));        \
     return OP_CONTINUE;                                                      \
   }
 

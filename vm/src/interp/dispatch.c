@@ -10,7 +10,8 @@
 static op_result op_unimplemented(exec_ctx* ctx, const jello_insn* ins) {
   (void)ctx;
   fprintf(stderr,
-      "jello_vm: opcode %u has no Chapter 3 interpreter handler yet\n",
+      "jello_vm: opcode %u has no Chapter 3 interpreter handler yet "
+      "(deferred to the chapter that owns it -- see JELLO_CHAPTER_3.md Sec 2.7)\n",
       (unsigned)ins->op);
   abort();
 }
@@ -57,6 +58,19 @@ op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins) {
 
     [JOP_BYTES_NEW] = &&L_BYTES_NEW, [JOP_BYTES_LEN] = &&L_BYTES_LEN,
     [JOP_BYTES_GET_U8] = &&L_BYTES_GET_U8, [JOP_BYTES_SET_U8] = &&L_BYTES_SET_U8,
+
+    [JOP_BYTES_READ_U16_LE] = &&L_BYTES_READ_U16_LE, [JOP_BYTES_READ_U16_BE] = &&L_BYTES_READ_U16_BE,
+    [JOP_BYTES_READ_U32_LE] = &&L_BYTES_READ_U32_LE, [JOP_BYTES_READ_U32_BE] = &&L_BYTES_READ_U32_BE,
+    [JOP_BYTES_READ_I32_LE] = &&L_BYTES_READ_I32_LE, [JOP_BYTES_READ_I32_BE] = &&L_BYTES_READ_I32_BE,
+    [JOP_BYTES_READ_F32_LE] = &&L_BYTES_READ_F32_LE, [JOP_BYTES_READ_F32_BE] = &&L_BYTES_READ_F32_BE,
+    [JOP_BYTES_READ_I64_LE] = &&L_BYTES_READ_I64_LE, [JOP_BYTES_READ_I64_BE] = &&L_BYTES_READ_I64_BE,
+    [JOP_BYTES_READ_F64_LE] = &&L_BYTES_READ_F64_LE, [JOP_BYTES_READ_F64_BE] = &&L_BYTES_READ_F64_BE,
+    [JOP_BYTES_WRITE_U16_LE] = &&L_BYTES_WRITE_U16_LE, [JOP_BYTES_WRITE_U16_BE] = &&L_BYTES_WRITE_U16_BE,
+    [JOP_BYTES_WRITE_U32_LE] = &&L_BYTES_WRITE_U32_LE, [JOP_BYTES_WRITE_U32_BE] = &&L_BYTES_WRITE_U32_BE,
+    [JOP_BYTES_WRITE_I32_LE] = &&L_BYTES_WRITE_I32_LE, [JOP_BYTES_WRITE_I32_BE] = &&L_BYTES_WRITE_I32_BE,
+    [JOP_BYTES_WRITE_F32_LE] = &&L_BYTES_WRITE_F32_LE, [JOP_BYTES_WRITE_F32_BE] = &&L_BYTES_WRITE_F32_BE,
+    [JOP_BYTES_WRITE_I64_LE] = &&L_BYTES_WRITE_I64_LE, [JOP_BYTES_WRITE_I64_BE] = &&L_BYTES_WRITE_I64_BE,
+    [JOP_BYTES_WRITE_F64_LE] = &&L_BYTES_WRITE_F64_LE, [JOP_BYTES_WRITE_F64_BE] = &&L_BYTES_WRITE_F64_BE,
 
     [JOP_CONST_NULL] = &&L_CONST_NULL, [JOP_CONST_ATOM] = &&L_CONST_ATOM,
     [JOP_TO_DYN] = &&L_TO_DYN,
@@ -144,6 +158,31 @@ op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins) {
   L_BYTES_LEN: return op_bytes_len(ctx, ins);
   L_BYTES_GET_U8: return op_bytes_get_u8(ctx, ins);
   L_BYTES_SET_U8: return op_bytes_set_u8(ctx, ins);
+
+  L_BYTES_READ_U16_LE: return op_bytes_read_u16_le(ctx, ins);
+  L_BYTES_READ_U16_BE: return op_bytes_read_u16_be(ctx, ins);
+  L_BYTES_READ_U32_LE: return op_bytes_read_u32_le(ctx, ins);
+  L_BYTES_READ_U32_BE: return op_bytes_read_u32_be(ctx, ins);
+  L_BYTES_READ_I32_LE: return op_bytes_read_i32_le(ctx, ins);
+  L_BYTES_READ_I32_BE: return op_bytes_read_i32_be(ctx, ins);
+  L_BYTES_READ_F32_LE: return op_bytes_read_f32_le(ctx, ins);
+  L_BYTES_READ_F32_BE: return op_bytes_read_f32_be(ctx, ins);
+  L_BYTES_READ_I64_LE: return op_bytes_read_i64_le(ctx, ins);
+  L_BYTES_READ_I64_BE: return op_bytes_read_i64_be(ctx, ins);
+  L_BYTES_READ_F64_LE: return op_bytes_read_f64_le(ctx, ins);
+  L_BYTES_READ_F64_BE: return op_bytes_read_f64_be(ctx, ins);
+  L_BYTES_WRITE_U16_LE: return op_bytes_write_u16_le(ctx, ins);
+  L_BYTES_WRITE_U16_BE: return op_bytes_write_u16_be(ctx, ins);
+  L_BYTES_WRITE_U32_LE: return op_bytes_write_u32_le(ctx, ins);
+  L_BYTES_WRITE_U32_BE: return op_bytes_write_u32_be(ctx, ins);
+  L_BYTES_WRITE_I32_LE: return op_bytes_write_i32_le(ctx, ins);
+  L_BYTES_WRITE_I32_BE: return op_bytes_write_i32_be(ctx, ins);
+  L_BYTES_WRITE_F32_LE: return op_bytes_write_f32_le(ctx, ins);
+  L_BYTES_WRITE_F32_BE: return op_bytes_write_f32_be(ctx, ins);
+  L_BYTES_WRITE_I64_LE: return op_bytes_write_i64_le(ctx, ins);
+  L_BYTES_WRITE_I64_BE: return op_bytes_write_i64_be(ctx, ins);
+  L_BYTES_WRITE_F64_LE: return op_bytes_write_f64_le(ctx, ins);
+  L_BYTES_WRITE_F64_BE: return op_bytes_write_f64_be(ctx, ins);
 
   L_CONST_NULL: return op_const_null(ctx, ins);
   L_CONST_ATOM: return op_const_atom(ctx, ins);
@@ -240,6 +279,31 @@ op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins) {
     case JOP_BYTES_LEN: return op_bytes_len(ctx, ins);
     case JOP_BYTES_GET_U8: return op_bytes_get_u8(ctx, ins);
     case JOP_BYTES_SET_U8: return op_bytes_set_u8(ctx, ins);
+
+    case JOP_BYTES_READ_U16_LE: return op_bytes_read_u16_le(ctx, ins);
+    case JOP_BYTES_READ_U16_BE: return op_bytes_read_u16_be(ctx, ins);
+    case JOP_BYTES_READ_U32_LE: return op_bytes_read_u32_le(ctx, ins);
+    case JOP_BYTES_READ_U32_BE: return op_bytes_read_u32_be(ctx, ins);
+    case JOP_BYTES_READ_I32_LE: return op_bytes_read_i32_le(ctx, ins);
+    case JOP_BYTES_READ_I32_BE: return op_bytes_read_i32_be(ctx, ins);
+    case JOP_BYTES_READ_F32_LE: return op_bytes_read_f32_le(ctx, ins);
+    case JOP_BYTES_READ_F32_BE: return op_bytes_read_f32_be(ctx, ins);
+    case JOP_BYTES_READ_I64_LE: return op_bytes_read_i64_le(ctx, ins);
+    case JOP_BYTES_READ_I64_BE: return op_bytes_read_i64_be(ctx, ins);
+    case JOP_BYTES_READ_F64_LE: return op_bytes_read_f64_le(ctx, ins);
+    case JOP_BYTES_READ_F64_BE: return op_bytes_read_f64_be(ctx, ins);
+    case JOP_BYTES_WRITE_U16_LE: return op_bytes_write_u16_le(ctx, ins);
+    case JOP_BYTES_WRITE_U16_BE: return op_bytes_write_u16_be(ctx, ins);
+    case JOP_BYTES_WRITE_U32_LE: return op_bytes_write_u32_le(ctx, ins);
+    case JOP_BYTES_WRITE_U32_BE: return op_bytes_write_u32_be(ctx, ins);
+    case JOP_BYTES_WRITE_I32_LE: return op_bytes_write_i32_le(ctx, ins);
+    case JOP_BYTES_WRITE_I32_BE: return op_bytes_write_i32_be(ctx, ins);
+    case JOP_BYTES_WRITE_F32_LE: return op_bytes_write_f32_le(ctx, ins);
+    case JOP_BYTES_WRITE_F32_BE: return op_bytes_write_f32_be(ctx, ins);
+    case JOP_BYTES_WRITE_I64_LE: return op_bytes_write_i64_le(ctx, ins);
+    case JOP_BYTES_WRITE_I64_BE: return op_bytes_write_i64_be(ctx, ins);
+    case JOP_BYTES_WRITE_F64_LE: return op_bytes_write_f64_le(ctx, ins);
+    case JOP_BYTES_WRITE_F64_BE: return op_bytes_write_f64_be(ctx, ins);
 
     case JOP_CONST_NULL: return op_const_null(ctx, ins);
     case JOP_CONST_ATOM: return op_const_atom(ctx, ins);
