@@ -335,6 +335,9 @@ op_result op_bytes_write_i64_le(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_write_i64_be(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_write_f64_le(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_write_f64_be(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bits_write(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bits_read(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_blit(exec_ctx* ctx, const jello_insn* ins);
 
 /* -- the boxing boundary (value/value.c) -- */
 jello_value vm_box_from_typed(jello_vm* vm, const jello_bc_module* m, const jello_bc_function* f,

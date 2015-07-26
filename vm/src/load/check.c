@@ -590,6 +590,13 @@ jello_bc_result jello_bc_validate_insn(
         return err(JELLO_BC_BAD_FORMAT, "bytes_write_f64 types required", 0);
       }
       return ok();
+    case JOP_BYTES_BLIT:
+      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) return err(JELLO_BC_BAD_FORMAT, "bytes_blit reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_BYTES || reg_kind(m, reg_types, ins->b) != JELLO_T_BYTES ||
+         reg_kind(m, reg_types, ins->c) != JELLO_T_I32) {
+        return err(JELLO_BC_BAD_FORMAT, "bytes_blit types required", 0);
+      }
+      return ok();
 
     /* -- native calls -- */
     case JOP_CALL_NATIVE: {
@@ -618,7 +625,9 @@ jello_bc_result jello_bc_validate_insn(
       if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "bits op reg out of range", 0);
       if(ins->c < 1 || ins->c > 32) return err(JELLO_BC_BAD_FORMAT, "bits op width must be 1-32", 0);
       uint32_t bytes_reg = ((jello_op)op == JOP_BITS_WRITE) ? ins->a : ins->b;
+      uint32_t i32_reg = ((jello_op)op == JOP_BITS_WRITE) ? ins->b : ins->a;
       if(reg_kind(m, reg_types, bytes_reg) != JELLO_T_BYTES) return err(JELLO_BC_BAD_FORMAT, "bits op Bytes operand wrong kind", 0);
+      if(reg_kind(m, reg_types, i32_reg) != JELLO_T_I32) return err(JELLO_BC_BAD_FORMAT, "bits op I32 operand wrong kind", 0);
       return ok();
     }
 

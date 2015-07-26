@@ -236,9 +236,11 @@ typedef enum jello_op {
   JOP_BYTES_WRITE_I64_BE = 173,
   JOP_BYTES_WRITE_F64_LE = 174,
   JOP_BYTES_WRITE_F64_BE = 175,
+
+  JOP_BYTES_BLIT = 176,
 } jello_op;
 
-#define JOP_COUNT (JOP_BYTES_WRITE_F64_BE + 1)
+#define JOP_COUNT (JOP_BYTES_BLIT + 1)
 
 /* -- canonical instruction encoding -- */
 typedef struct jello_insn {

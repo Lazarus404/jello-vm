@@ -287,3 +287,65 @@ op_result op_bytes_write_f32_le(exec_ctx* ctx, const jello_insn* ins) { return b
 op_result op_bytes_write_f32_be(exec_ctx* ctx, const jello_insn* ins) { return bytes_write_float(ctx, ins, 4, 1); }
 op_result op_bytes_write_f64_le(exec_ctx* ctx, const jello_insn* ins) { return bytes_write_float(ctx, ins, 8, 0); }
 op_result op_bytes_write_f64_be(exec_ctx* ctx, const jello_insn* ins) { return bytes_write_float(ctx, ins, 8, 1); }
+
+op_result op_bits_write(exec_ctx* ctx, const jello_insn* ins) {
+  call_frame* fr = current_frame(ctx);
+  jello_bytes* b = bytes_arg(ctx, fr, ins->a);
+  if(!b) return OP_TRAP;
+  uint32_t width = ins->c;
+  uint32_t bit_off = ins->imm;
+  uint64_t total_bits = (uint64_t)b->length * 8u;
+  if((uint64_t)bit_off + (uint64_t)width > total_bits) {
+    ctx->vm->trap_code = JELLO_TRAP_BOUNDS;
+    return OP_TRAP;
+  }
+  uint32_t value = vm_load_u32(&fr->rf, ins->b);
+  for(uint32_t i = 0; i < width; i++) {
+    uint32_t bit_val = (value >> (width - 1u - i)) & 1u;
+    uint64_t dst_bit = (uint64_t)bit_off + i;
+    uint32_t byte_idx = (uint32_t)(dst_bit / 8u);
+    uint32_t bit_in_byte = (uint32_t)(dst_bit % 8u);
+    uint8_t mask = (uint8_t)(0x80u >> bit_in_byte);
+    if(bit_val) b->data[byte_idx] = (uint8_t)(b->data[byte_idx] | mask);
+    else b->data[byte_idx] = (uint8_t)(b->data[byte_idx] & (uint8_t)~mask);
+  }
+  return OP_CONTINUE;
+}
+
+op_result op_bits_read(exec_ctx* ctx, const jello_insn* ins) {
+  call_frame* fr = current_frame(ctx);
+  jello_bytes* b = bytes_arg(ctx, fr, ins->b);
+  if(!b) return OP_TRAP;
+  uint32_t width = ins->c;
+  uint32_t bit_off = ins->imm;
+  uint64_t total_bits = (uint64_t)b->length * 8u;
+  if((uint64_t)bit_off + (uint64_t)width > total_bits) {
+    ctx->vm->trap_code = JELLO_TRAP_BOUNDS;
+    return OP_TRAP;
+  }
+  uint32_t value = 0;
+  for(uint32_t i = 0; i < width; i++) {
+    uint64_t src_bit = (uint64_t)bit_off + i;
+    uint32_t byte_idx = (uint32_t)(src_bit / 8u);
+    uint32_t bit_in_byte = (uint32_t)(src_bit % 8u);
+    uint32_t bit_val = (uint32_t)(b->data[byte_idx] >> (7u - bit_in_byte)) & 1u;
+    value = (value << 1) | bit_val;
+  }
+  vm_store_u32(&fr->rf, ins->a, value);
+  return OP_CONTINUE;
+}
+
+op_result op_bytes_blit(exec_ctx* ctx, const jello_insn* ins) {
+  call_frame* fr = current_frame(ctx);
+  jello_bytes* dst = bytes_arg(ctx, fr, ins->a);
+  if(!dst) return OP_TRAP;
+  jello_bytes* src = bytes_arg(ctx, fr, ins->b);
+  if(!src) return OP_TRAP;
+  uint32_t off = vm_load_u32(&fr->rf, ins->c);
+  if(!bytes_access_in_range(dst, off, src->length)) {
+    ctx->vm->trap_code = JELLO_TRAP_BOUNDS;
+    return OP_TRAP;
+  }
+  memmove(dst->data + off, src->data, src->length);
+  return OP_CONTINUE;
+}

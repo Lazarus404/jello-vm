@@ -74,6 +74,8 @@ op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins) {
     [JOP_BYTES_WRITE_F32_LE] = &&L_BYTES_WRITE_F32_LE, [JOP_BYTES_WRITE_F32_BE] = &&L_BYTES_WRITE_F32_BE,
     [JOP_BYTES_WRITE_I64_LE] = &&L_BYTES_WRITE_I64_LE, [JOP_BYTES_WRITE_I64_BE] = &&L_BYTES_WRITE_I64_BE,
     [JOP_BYTES_WRITE_F64_LE] = &&L_BYTES_WRITE_F64_LE, [JOP_BYTES_WRITE_F64_BE] = &&L_BYTES_WRITE_F64_BE,
+    [JOP_BITS_WRITE] = &&L_BITS_WRITE, [JOP_BITS_READ] = &&L_BITS_READ,
+    [JOP_BYTES_BLIT] = &&L_BYTES_BLIT,
 
     [JOP_CONST_NULL] = &&L_CONST_NULL, [JOP_CONST_ATOM] = &&L_CONST_ATOM,
     [JOP_TO_DYN] = &&L_TO_DYN,
@@ -191,6 +193,9 @@ op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins) {
   L_BYTES_WRITE_I64_BE: return op_bytes_write_i64_be(ctx, ins);
   L_BYTES_WRITE_F64_LE: return op_bytes_write_f64_le(ctx, ins);
   L_BYTES_WRITE_F64_BE: return op_bytes_write_f64_be(ctx, ins);
+  L_BITS_WRITE: return op_bits_write(ctx, ins);
+  L_BITS_READ: return op_bits_read(ctx, ins);
+  L_BYTES_BLIT: return op_bytes_blit(ctx, ins);
 
   L_CONST_NULL: return op_const_null(ctx, ins);
   L_CONST_ATOM: return op_const_atom(ctx, ins);
@@ -317,6 +322,9 @@ op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins) {
     case JOP_BYTES_WRITE_I64_BE: return op_bytes_write_i64_be(ctx, ins);
     case JOP_BYTES_WRITE_F64_LE: return op_bytes_write_f64_le(ctx, ins);
     case JOP_BYTES_WRITE_F64_BE: return op_bytes_write_f64_be(ctx, ins);
+    case JOP_BITS_WRITE: return op_bits_write(ctx, ins);
+    case JOP_BITS_READ: return op_bits_read(ctx, ins);
+    case JOP_BYTES_BLIT: return op_bytes_blit(ctx, ins);
 
     case JOP_CONST_NULL: return op_const_null(ctx, ins);
     case JOP_CONST_ATOM: return op_const_atom(ctx, ins);
