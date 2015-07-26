@@ -59,6 +59,9 @@ op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins) {
     [JOP_BYTES_NEW] = &&L_BYTES_NEW, [JOP_BYTES_LEN] = &&L_BYTES_LEN,
     [JOP_BYTES_GET_U8] = &&L_BYTES_GET_U8, [JOP_BYTES_SET_U8] = &&L_BYTES_SET_U8,
 
+    [JOP_BYTES_CONCAT2] = &&L_BYTES_CONCAT2, [JOP_BYTES_EQ] = &&L_BYTES_EQ,
+    [JOP_BYTES_BITAND2] = &&L_BYTES_BITAND2, [JOP_BYTES_BITOR2] = &&L_BYTES_BITOR2,
+    [JOP_BYTES_BITXOR2] = &&L_BYTES_BITXOR2,
     [JOP_BYTES_READ_U16_LE] = &&L_BYTES_READ_U16_LE, [JOP_BYTES_READ_U16_BE] = &&L_BYTES_READ_U16_BE,
     [JOP_BYTES_READ_U32_LE] = &&L_BYTES_READ_U32_LE, [JOP_BYTES_READ_U32_BE] = &&L_BYTES_READ_U32_BE,
     [JOP_BYTES_READ_I32_LE] = &&L_BYTES_READ_I32_LE, [JOP_BYTES_READ_I32_BE] = &&L_BYTES_READ_I32_BE,
@@ -159,6 +162,11 @@ op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins) {
   L_BYTES_GET_U8: return op_bytes_get_u8(ctx, ins);
   L_BYTES_SET_U8: return op_bytes_set_u8(ctx, ins);
 
+  L_BYTES_CONCAT2: return op_bytes_concat2(ctx, ins);
+  L_BYTES_EQ: return op_bytes_eq(ctx, ins);
+  L_BYTES_BITAND2: return op_bytes_bitand2(ctx, ins);
+  L_BYTES_BITOR2: return op_bytes_bitor2(ctx, ins);
+  L_BYTES_BITXOR2: return op_bytes_bitxor2(ctx, ins);
   L_BYTES_READ_U16_LE: return op_bytes_read_u16_le(ctx, ins);
   L_BYTES_READ_U16_BE: return op_bytes_read_u16_be(ctx, ins);
   L_BYTES_READ_U32_LE: return op_bytes_read_u32_le(ctx, ins);
@@ -280,6 +288,11 @@ op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins) {
     case JOP_BYTES_GET_U8: return op_bytes_get_u8(ctx, ins);
     case JOP_BYTES_SET_U8: return op_bytes_set_u8(ctx, ins);
 
+    case JOP_BYTES_CONCAT2: return op_bytes_concat2(ctx, ins);
+    case JOP_BYTES_EQ: return op_bytes_eq(ctx, ins);
+    case JOP_BYTES_BITAND2: return op_bytes_bitand2(ctx, ins);
+    case JOP_BYTES_BITOR2: return op_bytes_bitor2(ctx, ins);
+    case JOP_BYTES_BITXOR2: return op_bytes_bitxor2(ctx, ins);
     case JOP_BYTES_READ_U16_LE: return op_bytes_read_u16_le(ctx, ins);
     case JOP_BYTES_READ_U16_BE: return op_bytes_read_u16_be(ctx, ins);
     case JOP_BYTES_READ_U32_LE: return op_bytes_read_u32_le(ctx, ins);

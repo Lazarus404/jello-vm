@@ -306,6 +306,11 @@ op_result op_bytes_get_u8(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_set_u8(exec_ctx* ctx, const jello_insn* ins);
 
 /* -- Bytes memory/layout opcode handlers (ops_bytes.c) -- */
+op_result op_bytes_concat2(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_eq(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_bitand2(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_bitor2(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_bitxor2(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_read_u16_le(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_read_u16_be(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_read_u32_le(exec_ctx* ctx, const jello_insn* ins);

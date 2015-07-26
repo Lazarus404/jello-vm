@@ -87,6 +87,78 @@ static int bytes_access_in_range(const jello_bytes* b, uint32_t offset, uint32_t
   return (uint64_t)offset + (uint64_t)width <= (uint64_t)b->length;
 }
 
+op_result op_bytes_concat2(exec_ctx* ctx, const jello_insn* ins) {
+  call_frame* fr = current_frame(ctx);
+  jello_bytes* b = bytes_arg(ctx, fr, ins->b);
+  if(!b) return OP_TRAP;
+  jello_bytes* c = bytes_arg(ctx, fr, ins->c);
+  if(!c) return OP_TRAP;
+  uint64_t total = (uint64_t)b->length + (uint64_t)c->length;
+  if(total > (uint64_t)UINT32_MAX) {
+    ctx->vm->trap_code = JELLO_TRAP_BOUNDS;
+    return OP_TRAP;
+  }
+  jello_bytes* dst = jello_bytes_new(ctx->vm, (uint32_t)total);
+  memcpy(dst->data, b->data, b->length);
+  memcpy(dst->data + b->length, c->data, c->length);
+  vm_store_ptr(&fr->rf, ins->a, dst);
+  return OP_CONTINUE;
+}
+
+op_result op_bytes_eq(exec_ctx* ctx, const jello_insn* ins) {
+  call_frame* fr = current_frame(ctx);
+  jello_bytes* b = (jello_bytes*)vm_load_ptr(&fr->rf, ins->b);
+  jello_bytes* c = (jello_bytes*)vm_load_ptr(&fr->rf, ins->c);
+  int eq;
+  if(b == c) eq = 1;
+  else if(!b || !c) eq = 0;
+  else eq = b->length == c->length && memcmp(b->data, c->data, b->length) == 0;
+  vm_store_u32(&fr->rf, ins->a, (uint32_t)(eq ? 1 : 0));
+  return OP_CONTINUE;
+}
+
+static op_result bytes_bitwise2(exec_ctx* ctx, const jello_insn* ins, int op_kind) {
+  call_frame* fr = current_frame(ctx);
+  jello_bytes* b = bytes_arg(ctx, fr, ins->b);
+  if(!b) return OP_TRAP;
+  jello_bytes* c = bytes_arg(ctx, fr, ins->c);
+  if(!c) return OP_TRAP;
+  if(b->length != c->length) {
+    ctx->vm->trap_code = JELLO_TRAP_BOUNDS;
+    return OP_TRAP;
+  }
+  jello_bytes* dst = jello_bytes_new(ctx->vm, b->length);
+  uint32_t n = b->length;
+  const uint8_t* bd = b->data;
+  const uint8_t* cd = c->data;
+  uint8_t* dd = dst->data;
+  uint32_t i = 0;
+  for(; i + 8u <= n; i += 8u) {
+    uint64_t wb, wc, wr;
+    memcpy(&wb, bd + i, 8);
+    memcpy(&wc, cd + i, 8);
+    switch(op_kind) {
+      case 0: wr = wb & wc; break;
+      case 1: wr = wb | wc; break;
+      default: wr = wb ^ wc; break;
+    }
+    memcpy(dd + i, &wr, 8);
+  }
+  for(; i < n; i++) {
+    switch(op_kind) {
+      case 0: dd[i] = (uint8_t)(bd[i] & cd[i]); break;
+      case 1: dd[i] = (uint8_t)(bd[i] | cd[i]); break;
+      default: dd[i] = (uint8_t)(bd[i] ^ cd[i]); break;
+    }
+  }
+  vm_store_ptr(&fr->rf, ins->a, dst);
+  return OP_CONTINUE;
+}
+
+op_result op_bytes_bitand2(exec_ctx* ctx, const jello_insn* ins) { return bytes_bitwise2(ctx, ins, 0); }
+op_result op_bytes_bitor2(exec_ctx* ctx, const jello_insn* ins) { return bytes_bitwise2(ctx, ins, 1); }
+op_result op_bytes_bitxor2(exec_ctx* ctx, const jello_insn* ins) { return bytes_bitwise2(ctx, ins, 2); }
+
 static uint64_t rd_le(const uint8_t* p, uint32_t width) {
   uint64_t v = 0;
   for(uint32_t i = width; i-- > 0;) v = (v << 8) | p[i];

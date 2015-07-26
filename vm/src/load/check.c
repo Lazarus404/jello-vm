@@ -495,6 +495,29 @@ jello_bc_result jello_bc_validate_insn(
       }
       return ok();
 
+    case JOP_BYTES_CONCAT2:
+      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) return err(JELLO_BC_BAD_FORMAT, "bytes_concat2 reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_BYTES || reg_kind(m, reg_types, ins->b) != JELLO_T_BYTES ||
+         reg_kind(m, reg_types, ins->c) != JELLO_T_BYTES) {
+        return err(JELLO_BC_BAD_FORMAT, "bytes_concat2 types required", 0);
+      }
+      return ok();
+    case JOP_BYTES_EQ:
+      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) return err(JELLO_BC_BAD_FORMAT, "bytes_eq reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_BOOL || reg_kind(m, reg_types, ins->b) != JELLO_T_BYTES ||
+         reg_kind(m, reg_types, ins->c) != JELLO_T_BYTES) {
+        return err(JELLO_BC_BAD_FORMAT, "bytes_eq types required", 0);
+      }
+      return ok();
+    case JOP_BYTES_BITAND2:
+    case JOP_BYTES_BITOR2:
+    case JOP_BYTES_BITXOR2:
+      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) return err(JELLO_BC_BAD_FORMAT, "bytes bitwise2 reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_BYTES || reg_kind(m, reg_types, ins->b) != JELLO_T_BYTES ||
+         reg_kind(m, reg_types, ins->c) != JELLO_T_BYTES) {
+        return err(JELLO_BC_BAD_FORMAT, "bytes_bitwise2 types required", 0);
+      }
+      return ok();
     case JOP_BYTES_READ_U16_LE:
     case JOP_BYTES_READ_U16_BE:
     case JOP_BYTES_READ_U32_LE:
