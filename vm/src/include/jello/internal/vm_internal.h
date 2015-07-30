@@ -75,11 +75,25 @@ jello_bc_result jello_bc_validate_insn(
     uint32_t nfuncs);
 
 /* -- interpreter core -- */
+#define REG_SLOT_BYTES 8u
+
 typedef struct reg_frame {
   uint8_t* mem;
-  const uint32_t* off;
+  const uint8_t* kind;
+  const uint8_t* wide;
   uint32_t size;
 } reg_frame;
+
+static inline uint8_t* vm_reg_ptr(reg_frame* rf, uint32_t r) {
+  return rf->mem + (size_t)r * REG_SLOT_BYTES;
+}
+
+static inline jello_type_kind vm_reg_kind_fast(const reg_frame* rf, uint32_t r) {
+  return (jello_type_kind)rf->kind[r];
+}
+static inline int vm_reg_is_wide(const reg_frame* rf, uint32_t r) {
+  return rf->wide[r] != 0;
+}
 
 typedef struct call_frame {
   const jello_bc_function* f;
@@ -93,8 +107,9 @@ typedef struct call_frame {
 
 typedef struct frame_layout {
   const jello_bc_function* f; /* cache key */
-  uint32_t* off;
-  uint32_t total; /* 8-byte aligned, so the next bump-allocated frame stays aligned too */
+  uint8_t* kind; /* fl->kind[r] == vm_reg_kind(m, f, r), precomputed once per function */
+  uint8_t* wide;
+  uint32_t total;
   int has_pointer;
 } frame_layout;
 
@@ -110,7 +125,7 @@ typedef struct jello_gc_hdr {
 
 /* -- the shared heap -- */
 typedef struct jello_heap {
-  jello_gc_hdr* gc_objects;                      /* every live object, singly linked */
+  jello_gc_hdr* gc_objects; /* every live object, singly linked */
   jello_gc_hdr* gc_free_classes[GC_NUM_SIZE_CLASSES]; /* one free-list head per size class */
   uint32_t gc_bytes_live;
   uint32_t gc_next_collect;
@@ -143,25 +158,19 @@ struct jello_vm {
   call_frame* call_frames;
   uint32_t call_frames_len;
   uint32_t call_frames_cap;
-
   frame_layout* frame_layouts;
   uint32_t frame_layouts_len;
   uint32_t frame_layouts_cap;
-  const jello_bc_module* frame_layouts_mod; /* cache invalidates when the module changes */
 
   jello_trap_code trap_code;
   const jello_bc_module* running_module;
-
+  
   /* -- quiescent tracking -- */
   atomic_int quiescent_depth;
-
   atomic_int in_exec;
 };
 
 /* -- register load/store: static inline for the hot dispatch path -- */
-static inline uint8_t* vm_reg_ptr(reg_frame* rf, uint32_t r) {
-  return rf->mem + rf->off[r];
-}
 static inline uint32_t vm_load_u32(reg_frame* rf, uint32_t r) {
   return *(const uint32_t*)vm_reg_ptr(rf, r);
 }
@@ -382,19 +391,15 @@ op_result op_obj_copy(exec_ctx* ctx, const jello_insn* ins);
 
 /* -- threads + the shared heap (thread/thread.c) -- */
 jello_vm* jello_vm_create_joined(jello_vm* existing);
-
 void vm_go_quiescent(jello_vm* vm);
 void vm_wait_for_resume(jello_vm* vm);
 void vm_leave_quiescent(jello_vm* vm);
-
 void vm_safepoint_check(jello_vm* vm);
-
 int vm_heap_stop_the_world(jello_vm* vm);
 void vm_heap_resume_the_world(jello_vm* vm);
 
 /* -- the JDLL ABI (jdll/loader.c, jdll/marshal.c, jdll/call_native.c) -- */
 typedef struct jello_jdll_handle jello_jdll_handle;
-
 jello_jdll_handle* jello_jdll_load(const char* library_name);
 void jello_jdll_unload(jello_jdll_handle* h);
 const struct jello_jdll_export* jello_jdll_find_export(const jello_jdll_handle* h, const char* name);

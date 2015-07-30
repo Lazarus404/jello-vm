@@ -2,7 +2,6 @@
 // Copyright (c) Jahred Love. All rights reserved.
 
 #include <jello/internal.h>
-#include <string.h>
 
 /* -- the dispatch loop -- */
 
@@ -21,7 +20,7 @@ jello_exec_status vm_exec_loop(exec_ctx* ctx) {
         break;
 
       case JOP_RET: {
-        jello_type_kind k = vm_reg_kind(m, f, ins->a);
+        jello_type_kind k = vm_reg_kind_fast(rf, ins->a);
         uint8_t has_caller = fr->has_caller;
         uint32_t caller_dst = fr->caller_dst;
 
@@ -39,12 +38,15 @@ jello_exec_status vm_exec_loop(exec_ctx* ctx) {
           return JELLO_EXEC_OK;
         }
 
-        uint8_t tmp[8];
-        size_t sz = jello_slot_size(k);
-        memcpy(tmp, vm_reg_ptr(rf, ins->a), sz);
+        uint64_t tmp;
+        int is_wide = vm_reg_is_wide(rf, ins->a);
+        if(is_wide) tmp = *(const uint64_t*)vm_reg_ptr(rf, ins->a);
+        else tmp = *(const uint32_t*)vm_reg_ptr(rf, ins->a);
         vm_pop_frame(vm);
         call_frame* caller = &vm->call_frames[vm->call_frames_len - 1u];
-        memcpy(vm_reg_ptr(&caller->rf, caller_dst), tmp, sz);
+        uint8_t* dst = vm_reg_ptr(&caller->rf, caller_dst);
+        if(is_wide) *(uint64_t*)dst = tmp;
+        else *(uint32_t*)dst = (uint32_t)tmp;
         break;
       }
 
@@ -61,8 +63,8 @@ jello_exec_status vm_exec_loop(exec_ctx* ctx) {
         break;
 
       case JOP_MOV: {
-        jello_type_kind k = vm_reg_kind(m, f, ins->a);
-        memcpy(vm_reg_ptr(rf, ins->a), vm_reg_ptr(rf, ins->b), jello_slot_size(k));
+        if(vm_reg_is_wide(rf, ins->a)) vm_store_i64(rf, ins->a, vm_load_i64(rf, ins->b));
+        else vm_store_u32(rf, ins->a, vm_load_u32(rf, ins->b));
         break;
       }
 
@@ -75,7 +77,7 @@ jello_exec_status vm_exec_loop(exec_ctx* ctx) {
       }
 
       case JOP_CONST_I8_IMM: {
-        jello_type_kind k = vm_reg_kind(m, f, ins->a);
+        jello_type_kind k = vm_reg_kind_fast(rf, ins->a);
         vm_store_u32_masked(rf, ins->a, ins->imm, k);
         break;
       }
@@ -99,40 +101,40 @@ jello_exec_status vm_exec_loop(exec_ctx* ctx) {
         break;
 
       case JOP_ADD_I32: {
-        jello_type_kind k = vm_reg_kind(m, f, ins->a);
+        jello_type_kind k = vm_reg_kind_fast(rf, ins->a);
         uint32_t a = vm_load_u32(rf, ins->b);
         uint32_t b = vm_load_u32(rf, ins->c);
         vm_store_u32_masked(rf, ins->a, a + b, k);
         break;
       }
       case JOP_SUB_I32: {
-        jello_type_kind k = vm_reg_kind(m, f, ins->a);
+        jello_type_kind k = vm_reg_kind_fast(rf, ins->a);
         uint32_t a = vm_load_u32(rf, ins->b);
         uint32_t b = vm_load_u32(rf, ins->c);
         vm_store_u32_masked(rf, ins->a, a - b, k);
         break;
       }
       case JOP_MUL_I32: {
-        jello_type_kind k = vm_reg_kind(m, f, ins->a);
+        jello_type_kind k = vm_reg_kind_fast(rf, ins->a);
         uint32_t a = vm_load_u32(rf, ins->b);
         uint32_t b = vm_load_u32(rf, ins->c);
         vm_store_u32_masked(rf, ins->a, a * b, k);
         break;
       }
       case JOP_ADD_I32_IMM: {
-        jello_type_kind k = vm_reg_kind(m, f, ins->a);
+        jello_type_kind k = vm_reg_kind_fast(rf, ins->a);
         int32_t a = (int32_t)vm_load_u32(rf, ins->b);
         vm_store_u32_masked(rf, ins->a, (uint32_t)(a + (int32_t)ins->imm), k);
         break;
       }
       case JOP_SUB_I32_IMM: {
-        jello_type_kind k = vm_reg_kind(m, f, ins->a);
+        jello_type_kind k = vm_reg_kind_fast(rf, ins->a);
         int32_t a = (int32_t)vm_load_u32(rf, ins->b);
         vm_store_u32_masked(rf, ins->a, (uint32_t)(a - (int32_t)ins->imm), k);
         break;
       }
       case JOP_MUL_I32_IMM: {
-        jello_type_kind k = vm_reg_kind(m, f, ins->a);
+        jello_type_kind k = vm_reg_kind_fast(rf, ins->a);
         int32_t a = (int32_t)vm_load_u32(rf, ins->b);
         vm_store_u32_masked(rf, ins->a, (uint32_t)(a * (int32_t)ins->imm), k);
         break;

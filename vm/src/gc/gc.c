@@ -225,7 +225,7 @@ static void scan_typed_frames(jello_vm* vm, mark_stack* ms) {
     const jello_bc_function* f = fr->f;
     reg_frame* rf = &fr->rf;
     for(uint32_t r = 0; r < f->nregs; r++) {
-      jello_type_kind k = m->types[f->reg_types[r]].kind;
+      jello_type_kind k = vm_reg_kind_fast(rf, r);
       if(k == JELLO_T_BYTES || k == JELLO_T_STRUCT || k == JELLO_T_OBJECT) {
         void* p = NULL;
         memcpy(&p, vm_reg_ptr(rf, r), sizeof(void*));

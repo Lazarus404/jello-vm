@@ -11,10 +11,6 @@
 #define FRAME_STACK_MAX (64u * 1024u * 1024u)
 #define CALL_FRAMES_MAX 200000u
 
-static uint32_t align_up(uint32_t x, uint32_t a) {
-  return (a == 0u) ? x : (x + (a - 1u)) & ~(a - 1u);
-}
-
 jello_type_kind vm_reg_kind(const jello_bc_module* m, const jello_bc_function* f, uint32_t r) {
   return m->types[f->reg_types[r]].kind;
 }
@@ -27,38 +23,36 @@ static frame_layout* find_layout(jello_vm* vm, const jello_bc_function* f) {
 }
 
 void vm_free_layouts(jello_vm* vm) {
-  for(uint32_t i = 0; i < vm->frame_layouts_len; i++) free(vm->frame_layouts[i].off);
+  for(uint32_t i = 0; i < vm->frame_layouts_len; i++) {
+    free(vm->frame_layouts[i].kind);
+    free(vm->frame_layouts[i].wide);
+  }
   free(vm->frame_layouts);
   vm->frame_layouts = NULL;
   vm->frame_layouts_len = 0;
   vm->frame_layouts_cap = 0;
-  vm->frame_layouts_mod = NULL;
 }
 
 static int is_pointer_kind(jello_type_kind k) {
   return k == JELLO_T_BYTES || k == JELLO_T_STRUCT || k == JELLO_T_OBJECT || k == JELLO_T_DYNAMIC;
 }
 
-static void null_init_dynamic_regs(const jello_bc_module* m, const jello_bc_function* f,
-                                    reg_frame* rf) {
-  for(uint32_t r = 0; r < f->nregs; r++) {
-    if(vm_reg_kind(m, f, r) == JELLO_T_DYNAMIC) vm_store_val(rf, r, jello_make_null());
+static void null_init_dynamic_regs(uint32_t nregs, reg_frame* rf) {
+  for(uint32_t r = 0; r < nregs; r++) {
+    if(vm_reg_kind_fast(rf, r) == JELLO_T_DYNAMIC) vm_store_val(rf, r, jello_make_null());
   }
 }
 
 static frame_layout* build_layout(jello_vm* vm, const jello_bc_module* m, const jello_bc_function* f) {
-  uint32_t* off = f->nregs ? (uint32_t*)malloc((size_t)f->nregs * sizeof(uint32_t)) : NULL;
-  uint32_t cursor = 0;
+  uint8_t* kind = f->nregs ? (uint8_t*)malloc((size_t)f->nregs * sizeof(uint8_t)) : NULL;
+  uint8_t* wide = f->nregs ? (uint8_t*)malloc((size_t)f->nregs * sizeof(uint8_t)) : NULL;
   int has_pointer = 0;
   for(uint32_t r = 0; r < f->nregs; r++) {
     jello_type_kind k = vm_reg_kind(m, f, r);
-    uint32_t sz = (uint32_t)jello_slot_size(k);
-    cursor = align_up(cursor, sz);
-    off[r] = cursor;
-    cursor += sz;
+    kind[r] = (uint8_t)k;
+    wide[r] = (uint8_t)(jello_slot_size(k) == 8u);
     if(is_pointer_kind(k)) has_pointer = 1;
   }
-  cursor = align_up(cursor, 8u);
 
   if(vm->frame_layouts_len == vm->frame_layouts_cap) {
     vm->frame_layouts_cap = vm->frame_layouts_cap ? vm->frame_layouts_cap * 2u : 8u;
@@ -66,17 +60,14 @@ static frame_layout* build_layout(jello_vm* vm, const jello_bc_module* m, const 
   }
   frame_layout* fl = &vm->frame_layouts[vm->frame_layouts_len++];
   fl->f = f;
-  fl->off = off;
-  fl->total = cursor;
+  fl->kind = kind;
+  fl->wide = wide;
+  fl->total = f->nregs * REG_SLOT_BYTES;
   fl->has_pointer = has_pointer;
   return fl;
 }
 
 static frame_layout* get_layout(jello_vm* vm, const jello_bc_module* m, const jello_bc_function* f) {
-  if(vm->frame_layouts_mod != m) {
-    vm_free_layouts(vm);
-    vm->frame_layouts_mod = m;
-  }
   frame_layout* fl = find_layout(vm, f);
   return fl ? fl : build_layout(vm, m, f);
 }
@@ -132,7 +123,8 @@ int vm_push_frame(jello_vm* vm, const jello_bc_module* m, uint32_t func_index,
   fr->func_index = func_index;
   fr->pc = 0;
   fr->rf.mem = mem;
-  fr->rf.off = fl->off;
+  fr->rf.kind = fl->kind;
+  fr->rf.wide = fl->wide;
   fr->rf.size = fl->total;
   fr->has_caller = has_caller;
   fr->has_pointer = (uint8_t)fl->has_pointer;
@@ -140,11 +132,11 @@ int vm_push_frame(jello_vm* vm, const jello_bc_module* m, uint32_t func_index,
 
   if(fl->has_pointer) {
     memset(mem, 0, fl->total);
-    null_init_dynamic_regs(m, f, &fr->rf);
+    null_init_dynamic_regs(f->nregs, &fr->rf);
   }
 
   for(uint32_t i = 0; i < arg_count; i++) {
-    if(jello_slot_size(vm_reg_kind(m, f, i)) == 8u) {
+    if(fl->wide[i]) {
       vm_store_i64(&fr->rf, i, vm_load_i64(&caller->rf, arg_first + i));
     } else {
       vm_store_u32(&fr->rf, i, vm_load_u32(&caller->rf, arg_first + i));
@@ -165,4 +157,5 @@ void vm_frame_reset(jello_vm* vm) {
   vm->frame_stack_top = 0;
   vm->call_frames_len = 0;
   vm->trap_code = JELLO_TRAP_NONE;
+  vm_free_layouts(vm);
 }
