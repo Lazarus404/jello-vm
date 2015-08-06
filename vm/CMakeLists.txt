@@ -15,6 +15,7 @@ option(JELLO_USE_COMPUTED_GOTO "Use computed-goto dispatch on GCC/Clang (Chapter
 add_library(jello_vm STATIC
   src/load/loader.c
   src/load/check.c
+  src/load/op_table.c
   src/interp/frame.c
   src/interp/dispatch.c
   src/interp/exec_loop.c

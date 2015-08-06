@@ -164,6 +164,16 @@ jello_exec_status vm_exec_loop(exec_ctx* ctx) {
         vm_store_f64(rf, ins->a, a / b);
         break;
       }
+      case JOP_NEG_F64: {
+        double x = vm_load_f64(rf, ins->b);
+        vm_store_f64(rf, ins->a, -x);
+        break;
+      }
+      case JOP_F64_FROM_I32: {
+        int32_t x = (int32_t)vm_load_u32(rf, ins->b);
+        vm_store_f64(rf, ins->a, (double)x);
+        break;
+      }
       case JOP_NOT_BOOL: {
         uint32_t x = vm_load_u32(rf, ins->b);
         vm_store_u32(rf, ins->a, x ? 0u : 1u);

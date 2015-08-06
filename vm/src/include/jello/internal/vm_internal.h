@@ -284,7 +284,6 @@ op_result op_sub_f32(exec_ctx* ctx, const jello_insn* ins);
 op_result op_mul_f32(exec_ctx* ctx, const jello_insn* ins);
 op_result op_div_f32(exec_ctx* ctx, const jello_insn* ins);
 op_result op_neg_f32(exec_ctx* ctx, const jello_insn* ins);
-op_result op_neg_f64(exec_ctx* ctx, const jello_insn* ins);
 op_result op_eq_f32(exec_ctx* ctx, const jello_insn* ins);
 op_result op_lt_f32(exec_ctx* ctx, const jello_insn* ins);
 
@@ -293,7 +292,6 @@ op_result op_sext_i16(exec_ctx* ctx, const jello_insn* ins);
 op_result op_trunc_i8(exec_ctx* ctx, const jello_insn* ins);
 op_result op_trunc_i16(exec_ctx* ctx, const jello_insn* ins);
 op_result op_i32_from_i64(exec_ctx* ctx, const jello_insn* ins);
-op_result op_f64_from_i32(exec_ctx* ctx, const jello_insn* ins);
 op_result op_i32_from_f64(exec_ctx* ctx, const jello_insn* ins);
 op_result op_f64_from_i64(exec_ctx* ctx, const jello_insn* ins);
 op_result op_i64_from_f64(exec_ctx* ctx, const jello_insn* ins);

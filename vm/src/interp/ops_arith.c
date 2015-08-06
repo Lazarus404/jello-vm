@@ -238,13 +238,6 @@ op_result op_neg_f32(exec_ctx* ctx, const jello_insn* ins) {
   return OP_CONTINUE;
 }
 
-op_result op_neg_f64(exec_ctx* ctx, const jello_insn* ins) {
-  call_frame* fr = current_frame(ctx);
-  double x = vm_load_f64(&fr->rf, ins->b);
-  vm_store_f64(&fr->rf, ins->a, -x);
-  return OP_CONTINUE;
-}
-
 op_result op_eq_f32(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   float a = vm_load_f32(&fr->rf, ins->b);
@@ -295,13 +288,6 @@ op_result op_i32_from_i64(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   int64_t x = vm_load_i64(&fr->rf, ins->b);
   vm_store_u32(&fr->rf, ins->a, (uint32_t)(int32_t)x);
-  return OP_CONTINUE;
-}
-
-op_result op_f64_from_i32(exec_ctx* ctx, const jello_insn* ins) {
-  call_frame* fr = current_frame(ctx);
-  int32_t x = (int32_t)vm_load_u32(&fr->rf, ins->b);
-  vm_store_f64(&fr->rf, ins->a, (double)x);
   return OP_CONTINUE;
 }
 
