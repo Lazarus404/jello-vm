@@ -31,6 +31,7 @@ add_library(jello_vm STATIC
   src/jdll/loader.c
   src/jdll/marshal.c
   src/jdll/call_native.c
+  src/jit/ir.c
 )
 target_include_directories(jello_vm PUBLIC src/include)
 if(JELLO_USE_COMPUTED_GOTO)

@@ -62,3 +62,15 @@ add_test(NAME chapter7_threads_and_stop_the_world
 set_tests_properties(chapter7_threads_and_stop_the_world PROPERTIES
   ENVIRONMENT "JELLO_JDLL_PATH=$<TARGET_FILE_DIR:test_native_jdll>:$<TARGET_FILE_DIR:jello_std_jdll>;${JELLO_JDLL_ASAN_OPTIONS}"
   TIMEOUT 60)
+
+add_executable(chapter9_jir_tests csrc/chapter9_jir_tests.c)
+target_link_libraries(chapter9_jir_tests PRIVATE jello_vm)
+jello_enable_warnings(chapter9_jir_tests)
+if(JELLO_WARNINGS_AS_ERRORS)
+  target_compile_options(chapter9_jir_tests PRIVATE -Werror)
+endif()
+
+add_test(NAME chapter9_jir_verify
+  COMMAND chapter9_jir_tests
+  WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
