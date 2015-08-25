@@ -1169,6 +1169,234 @@ static int cmd_run(const char* in_path, int repeat, int gc_stats) {
   return 0;
 }
 
+/* -- dumpir -- */
+
+static const char* jir_op_name(jello_jit_ir_op op) {
+  switch(op) {
+    case JIR_NOP: return "NOP";
+    case JIR_RET: return "RET";
+    case JIR_JMP: return "JMP";
+    case JIR_JMP_IF: return "JMP_IF";
+    case JIR_MOV: return "MOV";
+    case JIR_SAFEPOINT: return "SAFEPOINT";
+    case JIR_SLOW: return "SLOW";
+    case JIR_CALL_SELF: return "CALL_SELF";
+    case JIR_CALL_DIRECT: return "CALL_DIRECT";
+    case JIR_CALL_NATIVE: return "CALL_NATIVE";
+    case JIR_CONST_I8_IMM: return "CONST_I8_IMM";
+    case JIR_CONST_I32: return "CONST_I32";
+    case JIR_CONST_I64: return "CONST_I64";
+    case JIR_CONST_F16: return "CONST_F16";
+    case JIR_CONST_F32: return "CONST_F32";
+    case JIR_CONST_F64: return "CONST_F64";
+    case JIR_CONST_BOOL: return "CONST_BOOL";
+    case JIR_CONST_NULL: return "CONST_NULL";
+    case JIR_CONST_ATOM: return "CONST_ATOM";
+    case JIR_BIN_I32: return "BIN_I32";
+    case JIR_BIN_I64: return "BIN_I64";
+    case JIR_BIN_F16: return "BIN_F16";
+    case JIR_BIN_F32: return "BIN_F32";
+    case JIR_BIN_F64: return "BIN_F64";
+    case JIR_ADD_I32_IMM: return "ADD_I32_IMM";
+    case JIR_SUB_I32_IMM: return "SUB_I32_IMM";
+    case JIR_MUL_I32_IMM: return "MUL_I32_IMM";
+    case JIR_NEG_I32: return "NEG_I32";
+    case JIR_NEG_I64: return "NEG_I64";
+    case JIR_NEG_F32: return "NEG_F32";
+    case JIR_NEG_F64: return "NEG_F64";
+    case JIR_NOT_BOOL: return "NOT_BOOL";
+    case JIR_CMP_I32: return "CMP_I32";
+    case JIR_CMP_I64: return "CMP_I64";
+    case JIR_CMP_F32: return "CMP_F32";
+    case JIR_CMP_F64: return "CMP_F64";
+    case JIR_EQ_I32_IMM: return "EQ_I32_IMM";
+    case JIR_LT_I32_IMM: return "LT_I32_IMM";
+    case JIR_CONV: return "CONV";
+    case JIR_TO_DYN: return "TO_DYN";
+    case JIR_FROM_DYN: return "FROM_DYN";
+    case JIR_KINDOF: return "KINDOF";
+    case JIR_PHYSEQ: return "PHYSEQ";
+    case JIR_BYTES_NEW: return "BYTES_NEW";
+    case JIR_BYTES_LEN: return "BYTES_LEN";
+    case JIR_BYTES_GET_U8: return "BYTES_GET_U8";
+    case JIR_BYTES_SET_U8: return "BYTES_SET_U8";
+    case JIR_BYTES_EQ: return "BYTES_EQ";
+    case JIR_BYTES_CONCAT2: return "BYTES_CONCAT2";
+    case JIR_BYTES_BITOP: return "BYTES_BITOP";
+    case JIR_BYTES_READ: return "BYTES_READ";
+    case JIR_BYTES_WRITE: return "BYTES_WRITE";
+    case JIR_BYTES_BLIT: return "BYTES_BLIT";
+    case JIR_BITS_WRITE: return "BITS_WRITE";
+    case JIR_BITS_READ: return "BITS_READ";
+    case JIR_STRUCT_NEW: return "STRUCT_NEW";
+    case JIR_STRUCT_GET: return "STRUCT_GET";
+    case JIR_STRUCT_SET: return "STRUCT_SET";
+    case JIR_OBJ_NEW: return "OBJ_NEW";
+    case JIR_OBJ_HAS_ATOM: return "OBJ_HAS_ATOM";
+    case JIR_OBJ_GET_ATOM: return "OBJ_GET_ATOM";
+    case JIR_OBJ_SET_ATOM: return "OBJ_SET_ATOM";
+    case JIR_OBJ_GET: return "OBJ_GET";
+    case JIR_OBJ_SET: return "OBJ_SET";
+    case JIR_OBJ_HAS: return "OBJ_HAS";
+    case JIR_OBJ_REMOVE: return "OBJ_REMOVE";
+    case JIR_OBJ_CLEAR: return "OBJ_CLEAR";
+    case JIR_OBJ_COPY: return "OBJ_COPY";
+    default: return "?";
+  }
+}
+
+static const char* jir_bin_name(uint32_t v) {
+  switch((jello_jir_bin)v) {
+    case JIR_BIN_ADD: return "ADD"; case JIR_BIN_SUB: return "SUB"; case JIR_BIN_MUL: return "MUL";
+    case JIR_BIN_DIV: return "DIV"; case JIR_BIN_MOD: return "MOD"; case JIR_BIN_SHL: return "SHL";
+    case JIR_BIN_SHR: return "SHR"; case JIR_BIN_AND: return "AND"; case JIR_BIN_OR: return "OR";
+    case JIR_BIN_XOR: return "XOR"; default: return "?";
+  }
+}
+static const char* jir_cmp_name(uint32_t v) {
+  switch((jello_jir_cmp)v) { case JIR_CMP_EQ: return "EQ"; case JIR_CMP_LT: return "LT"; default: return "?"; }
+}
+static const char* jir_conv_name(uint32_t v) {
+  switch((jello_jir_conv)v) {
+    case JIR_CONV_SEXT_I64: return "SEXT_I64"; case JIR_CONV_SEXT_I16: return "SEXT_I16";
+    case JIR_CONV_TRUNC_I8: return "TRUNC_I8"; case JIR_CONV_TRUNC_I16: return "TRUNC_I16";
+    case JIR_CONV_I32_FROM_I64: return "I32_FROM_I64"; case JIR_CONV_F64_FROM_I32: return "F64_FROM_I32";
+    case JIR_CONV_I32_FROM_F64: return "I32_FROM_F64"; case JIR_CONV_F64_FROM_I64: return "F64_FROM_I64";
+    case JIR_CONV_I64_FROM_F64: return "I64_FROM_F64"; case JIR_CONV_F32_FROM_I32: return "F32_FROM_I32";
+    case JIR_CONV_I32_FROM_F32: return "I32_FROM_F32"; case JIR_CONV_F64_FROM_F32: return "F64_FROM_F32";
+    case JIR_CONV_F32_FROM_F64: return "F32_FROM_F64"; case JIR_CONV_F32_FROM_I64: return "F32_FROM_I64";
+    case JIR_CONV_I64_FROM_F32: return "I64_FROM_F32"; case JIR_CONV_F16_FROM_F32: return "F16_FROM_F32";
+    case JIR_CONV_F32_FROM_F16: return "F32_FROM_F16"; case JIR_CONV_F16_FROM_I32: return "F16_FROM_I32";
+    case JIR_CONV_I32_FROM_F16: return "I32_FROM_F16"; default: return "?";
+  }
+}
+static const char* jir_brw_name(uint32_t v) {
+  switch((jello_jir_bytes_rw)v) {
+    case JIR_BRW_U16_LE: return "U16_LE"; case JIR_BRW_U16_BE: return "U16_BE";
+    case JIR_BRW_U32_LE: return "U32_LE"; case JIR_BRW_U32_BE: return "U32_BE";
+    case JIR_BRW_I32_LE: return "I32_LE"; case JIR_BRW_I32_BE: return "I32_BE";
+    case JIR_BRW_F32_LE: return "F32_LE"; case JIR_BRW_F32_BE: return "F32_BE";
+    case JIR_BRW_I64_LE: return "I64_LE"; case JIR_BRW_I64_BE: return "I64_BE";
+    case JIR_BRW_F64_LE: return "F64_LE"; case JIR_BRW_F64_BE: return "F64_BE";
+    default: return "?";
+  }
+}
+
+typedef enum jir_imm_kind { JIRSHAPE_NONE, JIRSHAPE_BIN, JIRSHAPE_CMP, JIRSHAPE_CONV, JIRSHAPE_BRW, JIRSHAPE_KIND, JIRSHAPE_RAW } jir_imm_kind;
+typedef struct jir_shape {
+  int has_a, has_b, has_c, has_imm;
+  jir_imm_kind imm_kind;
+  int has_c_literal;
+} jir_shape;
+
+static jir_shape jir_shape_of(jello_jit_ir_op op) {
+  unsigned mask = jello_jit_ir_op_reg_mask(op);
+  jir_shape s;
+  s.has_a = (mask & JELLO_JIR_REG_A) != 0;
+  s.has_b = (mask & JELLO_JIR_REG_B) != 0;
+  s.has_c = (mask & JELLO_JIR_REG_C) != 0;
+  s.has_imm = 0;
+  s.imm_kind = JIRSHAPE_NONE;
+  s.has_c_literal = (op == JIR_BITS_WRITE || op == JIR_BITS_READ);
+
+  switch(op) {
+    case JIR_JMP: case JIR_JMP_IF: case JIR_CONST_I8_IMM: case JIR_CONST_I32:
+    case JIR_CONST_I64: case JIR_CONST_F16: case JIR_CONST_F32: case JIR_CONST_F64:
+    case JIR_CONST_BOOL: case JIR_CONST_ATOM: case JIR_ADD_I32_IMM: case JIR_SUB_I32_IMM:
+    case JIR_MUL_I32_IMM: case JIR_EQ_I32_IMM: case JIR_LT_I32_IMM: case JIR_STRUCT_GET:
+    case JIR_STRUCT_SET: case JIR_OBJ_HAS_ATOM: case JIR_OBJ_GET_ATOM: case JIR_OBJ_SET_ATOM:
+    case JIR_BITS_WRITE: case JIR_BITS_READ: case JIR_CALL_DIRECT: case JIR_CALL_NATIVE:
+    case JIR_SLOW:
+      s.has_imm = 1; s.imm_kind = JIRSHAPE_RAW;
+      break;
+    case JIR_BIN_I32: case JIR_BIN_I64: case JIR_BIN_F16: case JIR_BIN_F32: case JIR_BIN_F64:
+    case JIR_BYTES_BITOP:
+      s.has_imm = 1; s.imm_kind = JIRSHAPE_BIN;
+      break;
+    case JIR_CMP_I32: case JIR_CMP_I64: case JIR_CMP_F32: case JIR_CMP_F64:
+      s.has_imm = 1; s.imm_kind = JIRSHAPE_CMP;
+      break;
+    case JIR_CONV:
+      s.has_imm = 1; s.imm_kind = JIRSHAPE_CONV;
+      break;
+    case JIR_FROM_DYN:
+      s.has_imm = 1; s.imm_kind = JIRSHAPE_KIND;
+      break;
+    case JIR_BYTES_READ: case JIR_BYTES_WRITE:
+      s.has_imm = 1; s.imm_kind = JIRSHAPE_BRW;
+      break;
+    default:
+      break;
+  }
+  return s;
+}
+
+static void print_jir_imm(FILE* out, jir_imm_kind imm_kind, uint32_t imm) {
+  switch(imm_kind) {
+    case JIRSHAPE_BIN: fprintf(out, "imm=%s", jir_bin_name(imm)); break;
+    case JIRSHAPE_CMP: fprintf(out, "imm=%s", jir_cmp_name(imm)); break;
+    case JIRSHAPE_CONV: fprintf(out, "imm=%s", jir_conv_name(imm)); break;
+    case JIRSHAPE_BRW: fprintf(out, "imm=%s", jir_brw_name(imm)); break;
+    case JIRSHAPE_KIND: fprintf(out, "imm=%s", kind_name_of((jello_type_kind)imm)); break;
+    default: fprintf(out, "imm=%d", (int32_t)imm); break;
+  }
+}
+
+static void print_jir_function(const jello_jit_ir_function* jf, uint32_t fi, FILE* out) {
+  fprintf(out, "jir fn[%u] nregs=%u flags=[%s] nslow=%u\n", fi, jf->nregs,
+      (jf->flags & JELLO_JIR_FLAG_NUMERIC_FAST) ? "numeric_fast" : "", jf->nslow);
+  for(uint32_t i = 0; i < jf->ninsns; i++) {
+    const jello_jit_ir_insn* ins = &jf->insns[i];
+    jello_jit_ir_op op = (jello_jit_ir_op)ins->op;
+    jir_shape shape = jir_shape_of(op);
+    fprintf(out, "  bc_pc=%u  %s", ins->bc_pc, jir_op_name(op));
+    if(shape.has_a) fprintf(out, " a=r%u", ins->a);
+    if(shape.has_b) fprintf(out, " b=r%u", ins->b);
+    if(shape.has_c_literal) fprintf(out, " width=%u", ins->c);
+    if(shape.has_c) fprintf(out, " c=r%u", ins->c);
+    if(shape.has_imm) { fprintf(out, " "); print_jir_imm(out, shape.imm_kind, ins->imm); }
+    fprintf(out, "\n");
+  }
+}
+
+static int cmd_dumpir(const char* in_path, int func_filter, int has_func_filter) {
+  FILE* f = fopen(in_path, "rb");
+  if(!f) { fprintf(stderr, "%s: cannot open\n", in_path); return 1; }
+  if(fseek(f, 0, SEEK_END) != 0) { fclose(f); return 1; }
+  long size = ftell(f);
+  if(size < 0) { fclose(f); return 1; }
+  fseek(f, 0, SEEK_SET);
+  uint8_t* data = (uint8_t*)malloc(size > 0 ? (size_t)size : 1);
+  size_t n = fread(data, 1, (size_t)size, f);
+  fclose(f);
+
+  jello_bc_module* m = NULL;
+  jello_bc_result rr = jello_bc_read(data, n, &m);
+  free(data);
+  if(rr.err) {
+    fprintf(stderr, "%s: %s (offset %zu)\n", in_path, rr.msg, rr.offset);
+    return 1;
+  }
+
+  uint32_t nfuncs = m->nfuncs;
+  for(uint32_t fi = 0; fi < nfuncs; fi++) {
+    if(has_func_filter && (uint32_t)func_filter != fi) continue;
+    jello_jit_ir_function* jf = jello_jit_ir_build(m, fi);
+    if(!jf) { fprintf(stderr, "%s: jello_jit_ir_build failed for fn[%u]\n", in_path, fi); jello_bc_free(m); return 1; }
+    if(!jello_jit_ir_verify(jf, &m->funcs[fi])) {
+      fprintf(stderr, "%s: jello_jit_ir_verify rejected fn[%u]\n", in_path, fi);
+      jello_jit_ir_free(jf);
+      jello_bc_free(m);
+      return 1;
+    }
+    print_jir_function(jf, fi, stdout);
+    jello_jit_ir_free(jf);
+  }
+
+  jello_bc_free(m);
+  return 0;
+}
+
 /* -- file I/O helpers -- */
 
 static char* read_whole_file(const char* path, size_t* out_len) {
@@ -1193,6 +1421,7 @@ static void usage(const char* prog) {
   fprintf(stderr, "usage: %s asm <in.jlo.txt> -o <out.jlo>\n", prog);
   fprintf(stderr, "       %s disasm <in.jlo> [-o <out.jlo.txt>]\n", prog);
   fprintf(stderr, "       %s run <in.jlo> [--repeat N] [--gc-stats]\n", prog);
+  fprintf(stderr, "       %s dumpir <in.jlo> [--func N]\n", prog);
 }
 
 static int cmd_asm(const char* in_path, const char* out_path) {
@@ -1252,10 +1481,13 @@ int main(int argc, char** argv) {
   const char* out_path = NULL;
   int repeat = 1;
   int gc_stats = 0;
+  int func_filter = 0;
+  int has_func_filter = 0;
   for(int i = 3; i < argc; i++) {
     if(strcmp(argv[i], "-o") == 0 && i + 1 < argc) { out_path = argv[i + 1]; i++; }
     else if(strcmp(argv[i], "--repeat") == 0 && i + 1 < argc) { repeat = atoi(argv[i + 1]); i++; }
     else if(strcmp(argv[i], "--gc-stats") == 0) { gc_stats = 1; }
+    else if(strcmp(argv[i], "--func") == 0 && i + 1 < argc) { func_filter = atoi(argv[i + 1]); has_func_filter = 1; i++; }
   }
 
   if(strcmp(subcmd, "asm") == 0) {
@@ -1267,6 +1499,9 @@ int main(int argc, char** argv) {
   }
   if(strcmp(subcmd, "run") == 0) {
     return cmd_run(in_path, repeat > 0 ? repeat : 1, gc_stats);
+  }
+  if(strcmp(subcmd, "dumpir") == 0) {
+    return cmd_dumpir(in_path, func_filter, has_func_filter);
   }
   usage(argv[0]);
   return 1;
