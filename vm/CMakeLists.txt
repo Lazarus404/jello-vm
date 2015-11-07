@@ -11,6 +11,7 @@ include(CompilerWarnings)
 
 option(JELLO_WARNINGS_AS_ERRORS "Treat warnings as errors" ON)
 option(JELLO_USE_COMPUTED_GOTO "Use computed-goto dispatch on GCC/Clang (Chapter 4)" ON)
+option(JELLO_ENABLE_JIT "Compile the JIT backend into jello_vm (Chapter 9a)" ON)
 
 add_library(jello_vm STATIC
   src/load/loader.c
@@ -33,6 +34,13 @@ add_library(jello_vm STATIC
   src/jdll/call_native.c
   src/jit/ir.c
 )
+if(JELLO_ENABLE_JIT)
+  target_sources(jello_vm PRIVATE
+    src/jit/emit_common.c
+    src/jit/frame.c
+    src/jit/emit_x64.c
+  )
+endif()
 target_include_directories(jello_vm PUBLIC src/include)
 if(JELLO_USE_COMPUTED_GOTO)
   target_compile_definitions(jello_vm PRIVATE JELLO_USE_COMPUTED_GOTO)

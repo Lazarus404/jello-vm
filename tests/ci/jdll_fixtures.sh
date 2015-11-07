@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) Jahred Love. All rights reserved.
+
 set -euo pipefail
 
 JLO_TOOL="${1:?usage: jdll_fixtures.sh <path-to-jlo_tool>}"

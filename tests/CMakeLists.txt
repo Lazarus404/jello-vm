@@ -78,3 +78,19 @@ add_test(NAME chapter9_jir_verify
   COMMAND chapter9_jir_tests
   WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 
+if(JELLO_ENABLE_JIT)
+  add_executable(jit_frame_abi_tests csrc/jit_frame_abi_tests.c)
+  target_link_libraries(jit_frame_abi_tests PRIVATE jello_vm)
+  jello_enable_warnings(jit_frame_abi_tests)
+  if(JELLO_WARNINGS_AS_ERRORS)
+    target_compile_options(jit_frame_abi_tests PRIVATE -Werror)
+  endif()
+
+  add_test(NAME chapter10_jit_frame_abi
+    COMMAND jit_frame_abi_tests
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+  add_test(NAME chapter10_jit_frame_abi_x64
+    COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/jit_frame_abi_x64.sh"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+endif()

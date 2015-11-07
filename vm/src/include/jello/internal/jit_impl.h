@@ -185,5 +185,26 @@ jello_jit_ir_function* jello_jit_ir_build(const jello_bc_module* m, uint32_t fi)
 int jello_jit_ir_verify(const jello_jit_ir_function* f, const jello_bc_function* src);
 
 void jello_jit_ir_free(jello_jit_ir_function* f);
+/* -- the private JIT-to-JIT calling convention -- */
+typedef enum jit_x64_reg {
+  JIT_REG_VM = 12,   /* R12 */
+  JIT_REG_BASE = 13, /* R13 */
+} jit_x64_reg;
+
+/* -- the minimal W^X proof mechanism -- */
+typedef struct jit_exec_buf {
+  uint8_t* mem;  /* NULL if allocation failed */
+  size_t cap;
+  size_t len;    /* bytes written so far -- grows as the emitter writes, capped at `cap` */
+  int finalized; /* 1 once jit_finalize_exec_buf has mprotect'd this region RX */
+} jit_exec_buf;
+
+jit_exec_buf jit_alloc_exec_buf(size_t cap);
+int jit_exec_buf_write(jit_exec_buf* buf, const void* bytes, size_t n);
+int jit_finalize_exec_buf(jit_exec_buf* buf);
+void jit_free_exec_buf(jit_exec_buf* buf);
+
+/* -- the JIT frame is Chapter 3's frame, unmodified (jit/frame.c) -- */
+uint8_t* jit_frame_entry_base(jello_vm* vm);
 
 #endif /* JELLO_JIT_IMPL_H */
