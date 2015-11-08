@@ -51,45 +51,74 @@ static void test_noop_function_compiles(jello_jit_code* code, const jello_bc_mod
   printf("test_noop_function_compiles: PASS\n");
 }
 
+static int bytes_contain(const uint8_t* hay, size_t hay_len,
+                         const uint8_t* needle, size_t needle_len) {
+  if(needle_len > hay_len) return 0;
+  for(size_t i = 0; i + needle_len <= hay_len; i++) {
+    if(memcmp(hay + i, needle, needle_len) == 0) return 1;
+  }
+  return 0;
+}
+
 static void test_emitted_bytes_match_golden_sequence(const jello_jit_code* code) {
   static const uint8_t expected_prologue[] = {
     0x41, 0x54,             /* push r12 */
     0x41, 0x55,             /* push r13 */
+    0x53,                   /* push rbx */
     0x49, 0x89, 0xFC,       /* mov r12, rdi */
     0x49, 0x89, 0xF5,       /* mov r13, rsi */
+    0x48, 0x89, 0xD3,       /* mov rbx, rdx */
   };
-  static const uint8_t expected_epilogue_before_addr[] = {
-    0xC7, 0x02, 0x00, 0x00, 0x00, 0x00, /* mov dword [rdx], 0 */
-    0x4C, 0x89, 0xE7,                   /* mov rdi, r12 */
-    0x48, 0x83, 0xEC, 0x08,             /* sub rsp, 8 */
-    0x48, 0xB8,                         /* movabs rax, imm64 -- imm64 bytes follow, checked separately */
+  static const uint8_t void_kind_write[] = {
+    0xC7, 0x83, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
   };
-  static const uint8_t expected_epilogue_after_addr[] = {
-    0xFF, 0xD0,             /* call rax */
-    0x48, 0x83, 0xC4, 0x08, /* add rsp, 8 */
-    0x41, 0x5D,             /* pop r13 */
-    0x41, 0x5C,             /* pop r12 */
-    0xC3,                   /* ret */
-  };
+  static const uint8_t mov_rdi_r12[] = { 0x4C, 0x89, 0xE7 };
+  static const uint8_t call_rax[] = { 0xFF, 0xD0 };
+  static const uint8_t restore_pops[] = { 0x5B, 0x41, 0x5D, 0x41, 0x5C };
+  static const uint8_t mov_eax_ok[] = { 0xB8, 0x00, 0x00, 0x00, 0x00 };
+  static const uint8_t sub_rsp8[] = { 0x48, 0x83, 0xEC, 0x08 };
+  static const uint8_t add_rsp8[] = { 0x48, 0x83, 0xC4, 0x08 };
 
+  assert(code->body_off == 14);
   assert(code->body_off == sizeof(expected_prologue));
   assert(memcmp(code->buf.mem, expected_prologue, sizeof(expected_prologue)) == 0);
 
-  size_t off = code->body_off;
-  assert(memcmp(code->buf.mem + off, expected_epilogue_before_addr, sizeof(expected_epilogue_before_addr)) == 0);
-  off += sizeof(expected_epilogue_before_addr);
+  size_t ep_end = code->body_off;
+  int found_ret = 0;
+  for(size_t i = code->body_off; i < code->buf.len; i++) {
+    if(code->buf.mem[i] == 0xC3) {
+      ep_end = i + 1;
+      found_ret = 1;
+      break;
+    }
+  }
+  assert(found_ret);
 
-  uint64_t embedded_addr;
-  memcpy(&embedded_addr, code->buf.mem + off, sizeof(embedded_addr));
-  uint64_t real_addr;
-  void (*pop_frame_fn)(jello_vm*) = vm_pop_frame;
-  memcpy(&real_addr, &pop_frame_fn, sizeof(real_addr));
-  assert(embedded_addr == real_addr);
-  off += sizeof(embedded_addr);
+  const uint8_t* ep = code->buf.mem + code->body_off;
+  size_t ep_len = ep_end - code->body_off;
 
-  assert(memcmp(code->buf.mem + off, expected_epilogue_after_addr, sizeof(expected_epilogue_after_addr)) == 0);
-  off += sizeof(expected_epilogue_after_addr);
-  assert(off == sizeof(expected_prologue) + sizeof(expected_epilogue_before_addr) + sizeof(embedded_addr) + sizeof(expected_epilogue_after_addr));
+  assert(bytes_contain(ep, ep_len, void_kind_write, sizeof(void_kind_write)));
+  assert(bytes_contain(ep, ep_len, mov_rdi_r12, sizeof(mov_rdi_r12)));
+  assert(bytes_contain(ep, ep_len, call_rax, sizeof(call_rax)));
+  assert(bytes_contain(ep, ep_len, restore_pops, sizeof(restore_pops)));
+  assert(bytes_contain(ep, ep_len, mov_eax_ok, sizeof(mov_eax_ok)));
+  assert(!bytes_contain(ep, ep_len, sub_rsp8, sizeof(sub_rsp8)));
+  assert(!bytes_contain(ep, ep_len, add_rsp8, sizeof(add_rsp8)));
+
+  int found_movabs = 0;
+  for(size_t i = 0; i + 10 <= ep_len; i++) {
+    if(ep[i] == 0x48 && ep[i + 1] == 0xB8) {
+      uint64_t embedded;
+      memcpy(&embedded, ep + i + 2, 8);
+      uint64_t real;
+      void (*pop_frame_fn)(jello_vm*) = vm_pop_frame;
+      memcpy(&real, &pop_frame_fn, sizeof(real));
+      assert(embedded == real);
+      found_movabs = 1;
+      break;
+    }
+  }
+  assert(found_movabs);
 
   printf("test_emitted_bytes_match_golden_sequence: PASS\n");
 }
@@ -110,8 +139,9 @@ static void test_noop_function_called_through_private_abi(jello_jit_code* code, 
   jello_jit_entry_fn entry = (jello_jit_entry_fn)(void*)(code->buf.mem + code->entry_off);
 
   jello_numeric_result out;
-  out.kind = JELLO_NUM_I32; /* deliberately not VOID -- proves the epilogue itself writes it */
-  entry(vm, frame_base, &out);
+  out.kind = JELLO_NUM_I32;
+  jello_exec_status st = entry(vm, frame_base, &out);
+  assert(st == JELLO_EXEC_OK);
 
   atomic_store(&vm->in_exec, 0);
 
@@ -126,8 +156,7 @@ static void test_noop_function_called_through_private_abi(jello_jit_code* code, 
 static void test_noop_function_called_through_private_abi(jello_jit_code* code, const jello_bc_module* m) {
   (void)code;
   (void)m;
-  printf("test_noop_function_called_through_private_abi: SKIPPED (host is not x86_64 -- "
-         "emitted bytes are real x64 machine code and must not be executed here)\n");
+  printf("test_noop_function_called_through_private_abi: SKIPPED (host is not x86_64)\n");
 }
 #endif
 

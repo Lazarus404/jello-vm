@@ -38,6 +38,7 @@ if(JELLO_ENABLE_JIT)
   target_sources(jello_vm PRIVATE
     src/jit/emit_common.c
     src/jit/frame.c
+    src/jit/regalloc.c
     src/jit/emit_x64.c
   )
 endif()

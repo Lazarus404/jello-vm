@@ -187,6 +187,7 @@ int jello_jit_ir_verify(const jello_jit_ir_function* f, const jello_bc_function*
 void jello_jit_ir_free(jello_jit_ir_function* f);
 /* -- the private JIT-to-JIT calling convention -- */
 typedef enum jit_x64_reg {
+  JIT_REG_OUT = 3,
   JIT_REG_VM = 12,   /* R12 */
   JIT_REG_BASE = 13, /* R13 */
 } jit_x64_reg;
@@ -203,6 +204,52 @@ jit_exec_buf jit_alloc_exec_buf(size_t cap);
 int jit_exec_buf_write(jit_exec_buf* buf, const void* bytes, size_t n);
 int jit_finalize_exec_buf(jit_exec_buf* buf);
 void jit_free_exec_buf(jit_exec_buf* buf);
+
+enum {
+  JIT_PREG_NONE = -1,
+  JIT_PREG_XMM0 = 64,
+};
+
+typedef struct jit_reg_emit_ctx {
+  jit_exec_buf* buf;
+} jit_reg_emit_ctx;
+
+typedef struct jit_reg_state {
+  uint32_t nregs;
+  int8_t* current;
+  int8_t gpr_vreg[11];
+  int8_t xmm_vreg[6];
+  uint8_t gpr_pinned[11];
+  uint8_t xmm_pinned[8];
+  unsigned next_gpr_victim;
+  unsigned next_xmm_victim;
+  jit_reg_emit_ctx emit;
+} jit_reg_state;
+
+extern uint32_t jit_reg_reload_count;
+
+void jit_reg_state_init(jit_reg_state* st, uint32_t nregs, jit_reg_emit_ctx emit);
+void jit_reg_state_free(jit_reg_state* st);
+void jit_reg_state_clobber_call(jit_reg_state* st);
+int jit_reg_alloc_gpr(jit_reg_state* st, uint8_t vreg, int and_load);
+int jit_reg_alloc_xmm(jit_reg_state* st, uint8_t vreg, int and_load, int wide);
+int jit_reg_get_gpr(jit_reg_state* st, uint8_t vreg, int and_load);
+int jit_reg_get_xmm(jit_reg_state* st, uint8_t vreg, int and_load, int wide);
+void jit_reg_bind(jit_reg_state* st, uint8_t vreg, int preg);
+void jit_reg_unbind_vreg(jit_reg_state* st, uint8_t vreg);
+void jit_reg_unbind_preg(jit_reg_state* st, int preg);
+void jit_reg_store_home_gpr32(jit_reg_state* st, uint8_t vreg, int preg);
+void jit_reg_store_home_gpr64(jit_reg_state* st, uint8_t vreg, int preg);
+void jit_reg_store_home_xmm32(jit_reg_state* st, uint8_t vreg, int preg);
+void jit_reg_store_home_xmm64(jit_reg_state* st, uint8_t vreg, int preg);
+void jit_reg_unpin_all(jit_reg_state* st);
+
+void jit_trap_arithmetic(jello_vm* vm);
+
+enum {
+  JIT_EMIT_BUF_MIN_CAP = 65536u,
+  JIT_EMIT_PER_INSN_BUDGET = 128u,
+};
 
 /* -- the JIT frame is Chapter 3's frame, unmodified (jit/frame.c) -- */
 uint8_t* jit_frame_entry_base(jello_vm* vm);

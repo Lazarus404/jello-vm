@@ -15,7 +15,7 @@ typedef struct jello_jit_code {
   size_t body_off;
 } jello_jit_code;
 
-typedef void (*jello_jit_entry_fn)(jello_vm* vm, uint8_t* frame_base, jello_numeric_result* out);
+typedef jello_exec_status (*jello_jit_entry_fn)(jello_vm* vm, uint8_t* frame_base, jello_numeric_result* out);
 
 int jello_jit_compile_function(const jello_bc_module* m, uint32_t fi, jello_jit_code* out_code);
 void jello_jit_code_free(jello_jit_code* code);

@@ -93,4 +93,19 @@ if(JELLO_ENABLE_JIT)
   add_test(NAME chapter10_jit_frame_abi_x64
     COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/jit_frame_abi_x64.sh"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+  add_executable(jit_numeric_tests csrc/jit_numeric_tests.c)
+  target_link_libraries(jit_numeric_tests PRIVATE jello_vm)
+  jello_enable_warnings(jit_numeric_tests)
+  if(JELLO_WARNINGS_AS_ERRORS)
+    target_compile_options(jit_numeric_tests PRIVATE -Werror)
+  endif()
+
+  add_test(NAME chapter10_jit_numeric
+    COMMAND jit_numeric_tests
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+  add_test(NAME chapter10_jit_numeric_x64
+    COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/jit_numeric_x64.sh"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 endif()
