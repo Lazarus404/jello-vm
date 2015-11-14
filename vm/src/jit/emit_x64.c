@@ -550,8 +550,8 @@ static int jir_op_allowed(jello_jit_ir_op op) {
   switch(op) {
     case JIR_NOP: case JIR_RET: case JIR_MOV:
     case JIR_CONST_I8_IMM: case JIR_CONST_I32: case JIR_CONST_I64:
-    case JIR_CONST_F32: case JIR_CONST_F64: case JIR_CONST_BOOL:
-    case JIR_BIN_I32: case JIR_BIN_I64: case JIR_BIN_F32: case JIR_BIN_F64:
+    case JIR_CONST_F16: case JIR_CONST_F32: case JIR_CONST_F64: case JIR_CONST_BOOL:
+    case JIR_BIN_I32: case JIR_BIN_I64: case JIR_BIN_F16: case JIR_BIN_F32: case JIR_BIN_F64:
     case JIR_ADD_I32_IMM: case JIR_SUB_I32_IMM: case JIR_MUL_I32_IMM:
     case JIR_NEG_I32: case JIR_NEG_I64: case JIR_NEG_F32: case JIR_NEG_F64: case JIR_NOT_BOOL:
     case JIR_CMP_I32: case JIR_CMP_I64: case JIR_CMP_F32: case JIR_CMP_F64:
@@ -666,6 +666,71 @@ static void emit_imul_r32_imm32(jit_exec_buf* buf, unsigned dst, uint32_t imm) {
   memcpy(&bytes[n], &imm, 4);
   n += 4;
   jit_exec_buf_write(buf, bytes, n);
+}
+
+static void emit_load_u32_slot_to_edi(jit_exec_buf* buf, uint8_t vreg) {
+  uint32_t disp = (uint32_t)vreg * REG_SLOT_BYTES;
+  uint8_t bytes[8];
+  bytes[0] = 0x41; /* REX.B: base R13 */
+  bytes[1] = 0x8B;
+  bytes[2] = (uint8_t)(0x80u | (X64_RDI << 3) | 5u);
+  memcpy(&bytes[3], &disp, 4);
+  jit_exec_buf_write(buf, bytes, 7);
+}
+
+static void emit_rsp_adjust_local(jit_exec_buf* buf, int is_add, uint8_t imm8) {
+  uint8_t bytes[4];
+  bytes[0] = 0x48;
+  bytes[1] = 0x83;
+  bytes[2] = (uint8_t)(0xC0u | (is_add ? 0x00u : 0x28u) | (unsigned)X64_RSP);
+  bytes[3] = imm8;
+  jit_exec_buf_write(buf, bytes, 4);
+}
+
+static void emit_movss_xmm_mem_rsp(jit_exec_buf* buf, unsigned xmm, uint8_t disp) {
+  uint8_t bytes[8];
+  size_t n = 0;
+  bytes[n++] = 0xF3;
+  if(xmm >= 8) bytes[n++] = 0x44;
+  bytes[n++] = 0x0F;
+  bytes[n++] = 0x11;
+  bytes[n++] = (uint8_t)(0x44u | ((xmm & 7u) << 3)); /* mod=01, rm=RSP -> SIB */
+  bytes[n++] = 0x24; /* SIB: base=RSP, index=none */
+  bytes[n++] = disp;
+  jit_exec_buf_write(buf, bytes, n);
+}
+
+static void emit_movss_xmm_from_mem_rsp(jit_exec_buf* buf, unsigned xmm, uint8_t disp) {
+  uint8_t bytes[8];
+  size_t n = 0;
+  bytes[n++] = 0xF3;
+  if(xmm >= 8) bytes[n++] = 0x44;
+  bytes[n++] = 0x0F;
+  bytes[n++] = 0x10;
+  bytes[n++] = (uint8_t)(0x44u | ((xmm & 7u) << 3));
+  bytes[n++] = 0x24;
+  bytes[n++] = disp;
+  jit_exec_buf_write(buf, bytes, n);
+}
+
+static void emit_f16_binop(emit_ctx* ctx, const jello_jit_ir_insn* ins, uint8_t sse_op) {
+  /* Spill the first converted float across the second C call -- all XMMs
+   * are caller-saved under SysV. */
+  emit_rsp_adjust_local(ctx->buf, 0, 16); /* sub rsp, 16 */
+  emit_load_u32_slot_to_edi(ctx->buf, ins->b);
+  emit_call_fn(ctx->buf, (void*)vm_f16_to_f32);
+  emit_movss_xmm_mem_rsp(ctx->buf, 0, 0); /* movss [rsp], xmm0 */
+  emit_load_u32_slot_to_edi(ctx->buf, ins->c);
+  emit_call_fn(ctx->buf, (void*)vm_f16_to_f32);
+  emit_movss_xmm_from_mem_rsp(ctx->buf, 1, 0); /* movss xmm1, [rsp] */
+  emit_binss_xmm_xmm(ctx->buf, sse_op, 1, 0);
+  emit_movss_xmm_xmm(ctx->buf, 0, 1);
+  emit_call_fn(ctx->buf, (void*)vm_f32_to_f16);
+  emit_rsp_adjust_local(ctx->buf, 1, 16); /* add rsp, 16 */
+  jit_reg_state_clobber_call(ctx->ra);
+  int dst = jit_reg_alloc_gpr(ctx->ra, ins->a, 0);
+  emit_mov_r32_r32(ctx->buf, (unsigned)dst, X64_RAX);
+  jit_reg_store_home_gpr32(ctx->ra, ins->a, dst);
 }
 
 static void emit_bin_f32(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
@@ -838,6 +903,46 @@ static int emit_conv(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
       jit_reg_store_home_gpr64(ctx->ra, ins->a, d);
       return 1;
     }
+    case JIR_CONV_F32_FROM_F16: {
+      int s = jit_reg_get_gpr(ctx->ra, ins->b, 1);
+      emit_mov_r64_r64(ctx->buf, X64_RDI, (unsigned)s);
+      emit_call_fn(ctx->buf, (void*)vm_f16_to_f32);
+      int x = jit_reg_alloc_xmm(ctx->ra, ins->a, 0, 0);
+      emit_movss_xmm_xmm(ctx->buf, (unsigned)(x - (int)JIT_PREG_XMM0), 0);
+      jit_reg_store_home_xmm32(ctx->ra, ins->a, x);
+      jit_reg_state_clobber_call(ctx->ra);
+      return 1;
+    }
+    case JIR_CONV_F16_FROM_F32: {
+      int sx = jit_reg_get_xmm(ctx->ra, ins->b, 1, 0);
+      emit_movss_xmm_xmm(ctx->buf, 0, (unsigned)(sx - (int)JIT_PREG_XMM0));
+      emit_call_fn(ctx->buf, (void*)vm_f32_to_f16);
+      int d = jit_reg_alloc_gpr(ctx->ra, ins->a, 0);
+      emit_mov_r32_r32(ctx->buf, (unsigned)d, X64_RAX);
+      jit_reg_store_home_gpr32(ctx->ra, ins->a, d);
+      jit_reg_state_clobber_call(ctx->ra);
+      return 1;
+    }
+    case JIR_CONV_F16_FROM_I32: {
+      int s = jit_reg_get_gpr(ctx->ra, ins->b, 1);
+      emit_cvtsi2ss(ctx->buf, 0, (unsigned)s, 0);
+      emit_call_fn(ctx->buf, (void*)vm_f32_to_f16);
+      int d = jit_reg_alloc_gpr(ctx->ra, ins->a, 0);
+      emit_mov_r32_r32(ctx->buf, (unsigned)d, X64_RAX);
+      jit_reg_store_home_gpr32(ctx->ra, ins->a, d);
+      jit_reg_state_clobber_call(ctx->ra);
+      return 1;
+    }
+    case JIR_CONV_I32_FROM_F16: {
+      int s = jit_reg_get_gpr(ctx->ra, ins->b, 1);
+      emit_mov_r64_r64(ctx->buf, X64_RDI, (unsigned)s);
+      emit_call_fn(ctx->buf, (void*)vm_f16_to_f32);
+      int d = jit_reg_alloc_gpr(ctx->ra, ins->a, 0);
+      emit_cvttss2si(ctx->buf, (unsigned)d, 0, 0);
+      jit_reg_store_home_gpr32(ctx->ra, ins->a, d);
+      jit_reg_state_clobber_call(ctx->ra);
+      return 1;
+    }
     default:
       return 0;
   }
@@ -873,6 +978,12 @@ static int emit_insn(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
       int d = jit_reg_alloc_gpr(ctx->ra, ins->a, 0);
       emit_mov_r64_imm64(ctx->buf, (unsigned)d, (uint64_t)ctx->m->const_i64[ins->imm]);
       jit_reg_store_home_gpr64(ctx->ra, ins->a, d);
+      break;
+    }
+    case JIR_CONST_F16: {
+      int d = jit_reg_alloc_gpr(ctx->ra, ins->a, 0);
+      emit_mov_r32_imm32(ctx->buf, (unsigned)d, ins->imm & 0xFFFFu);
+      jit_reg_store_home_gpr32(ctx->ra, ins->a, d);
       break;
     }
     case JIR_CONST_F32: {
@@ -965,6 +1076,12 @@ static int emit_insn(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
       jit_reg_store_home_gpr64(ctx->ra, ins->a, dst);
       break;
     }
+    case JIR_BIN_F16:
+      if((jello_jir_bin)ins->imm == JIR_BIN_ADD) emit_f16_binop(ctx, ins, 0x58);
+      else if((jello_jir_bin)ins->imm == JIR_BIN_SUB) emit_f16_binop(ctx, ins, 0x5C);
+      else if((jello_jir_bin)ins->imm == JIR_BIN_MUL) emit_f16_binop(ctx, ins, 0x59);
+      else return 0;
+      break;
     case JIR_BIN_F32:
       emit_bin_f32(ctx, ins);
       break;
