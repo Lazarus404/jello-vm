@@ -8,6 +8,7 @@
 /* -- HashLink-style home/current read side -- */
 
 uint32_t jit_reg_reload_count;
+uint32_t jit_reg_discard_count;
 
 static const uint8_t jit_gpr_pool[] = {6, 7, 8, 9, 10, 11, 14, 15};
 
@@ -155,6 +156,11 @@ void jit_reg_state_clobber_call(jit_reg_state* st) {
       st->current[v] = (int8_t)JIT_PREG_NONE;
     }
   }
+}
+
+void jit_reg_state_discard_currents(jit_reg_state* st) {
+  jit_reg_discard_count++;
+  jit_reg_state_clobber_call(st);
 }
 
 void jit_reg_unbind_preg(jit_reg_state* st, int preg) {

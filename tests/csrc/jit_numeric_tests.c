@@ -139,7 +139,7 @@ static void test_div_i32_min_neg1_trap(void) {
 #endif
 }
 
-static void test_reject_jmp_function(void) {
+static void test_accept_jmp_function(void) {
   jello_type_entry types[1];
   jello_type_id reg_types[1];
   jello_insn insns[2];
@@ -153,9 +153,29 @@ static void test_reject_jmp_function(void) {
 
   jello_jit_code code;
   memset(&code, 0, sizeof(code));
+  assert(jello_jit_compile_function(&m, 0, &code) == 1);
+  assert(code.buf.mem != NULL);
+  jello_jit_code_free(&code);
+  printf("test_accept_jmp_function: PASS\n");
+}
+
+static void test_reject_call_function(void) {
+  jello_type_entry types[1];
+  jello_type_id reg_types[2];
+  jello_insn insns[2];
+  jello_bc_function func;
+
+  init_i32_reg_types(reg_types, 2);
+  insns[0].op = (uint8_t)JOP_CALL; insns[0].a = 0; insns[0].b = 0; insns[0].imm = 0;
+  insns[1].op = (uint8_t)JOP_RET; insns[1].a = 0;
+
+  jello_bc_module m = make_i32_module(types, reg_types, insns, &func, 2, 2);
+
+  jello_jit_code code;
+  memset(&code, 0, sizeof(code));
   assert(jello_jit_compile_function(&m, 0, &code) == 0);
   assert(code.buf.mem == NULL);
-  printf("test_reject_jmp_function: PASS\n");
+  printf("test_reject_call_function: PASS\n");
 }
 
 static void test_reload_count_const_add_add(void) {
@@ -185,7 +205,8 @@ int main(void) {
   test_add_i32();
   test_div_i32_by_zero_trap();
   test_div_i32_min_neg1_trap();
-  test_reject_jmp_function();
+  test_accept_jmp_function();
+  test_reject_call_function();
   test_reload_count_const_add_add();
   printf("jit_numeric_tests: all tests passed\n");
   return 0;

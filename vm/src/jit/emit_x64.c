@@ -4,6 +4,7 @@
 #include <jello/internal/jit_internal.h>
 #include <limits.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* -- x86-64 byte encoding -- */
@@ -260,12 +261,23 @@ static void emit_test_r32_r32(jit_exec_buf* buf, unsigned a, unsigned b) {
   jit_exec_buf_write(buf, bytes, n);
 }
 
-static void emit_jcc_rel32(jit_exec_buf* buf, uint8_t cc, int32_t rel) {
+static size_t emit_jmp_rel32(jit_exec_buf* buf, int32_t rel) {
+  size_t at = buf->len;
+  uint8_t bytes[5];
+  bytes[0] = 0xE9;
+  memcpy(&bytes[1], &rel, 4);
+  jit_exec_buf_write(buf, bytes, sizeof(bytes));
+  return at;
+}
+
+static size_t emit_jcc_rel32(jit_exec_buf* buf, uint8_t cc, int32_t rel) {
+  size_t at = buf->len;
   uint8_t bytes[6];
   bytes[0] = 0x0F;
   bytes[1] = (uint8_t)(0x80u | (cc & 0xFu));
   memcpy(&bytes[2], &rel, 4);
   jit_exec_buf_write(buf, bytes, sizeof(bytes));
+  return at;
 }
 
 static void patch_jcc_rel32(jit_exec_buf* buf, size_t at, int32_t rel) {
@@ -478,6 +490,12 @@ static void emit_call_fn(jit_exec_buf* buf, void* fn) {
   emit_call_rax(buf);
 }
 
+typedef struct jit_branch_patch {
+  size_t at;
+  uint32_t bc_tgt;
+  uint8_t is_jcc;
+} jit_branch_patch;
+
 typedef struct emit_ctx {
   jit_exec_buf* buf;
   jit_reg_state* ra;
@@ -486,11 +504,17 @@ typedef struct emit_ctx {
   size_t* trap_jumps;
   size_t trap_jump_cap;
   size_t trap_jump_count;
+  jit_branch_patch* branches;
+  size_t branch_cap;
+  size_t branch_count;
+  size_t* ret_jumps;
+  size_t ret_jump_cap;
+  size_t ret_jump_count;
+  jello_type_kind ret_kind;
 } emit_ctx;
 
 static void emit_jcc_trap(emit_ctx* ctx, uint8_t cc) {
-  size_t at = ctx->buf->len;
-  emit_jcc_rel32(ctx->buf, cc, 0);
+  size_t at = emit_jcc_rel32(ctx->buf, cc, 0);
   if(ctx->trap_jump_count < ctx->trap_jump_cap) ctx->trap_jumps[ctx->trap_jump_count++] = at;
 }
 
@@ -501,6 +525,28 @@ static void patch_trap_jumps(emit_ctx* ctx, size_t trap_off) {
     if(op == 0xE9) patch_jmp_rel32(ctx->buf, at, (int32_t)(trap_off - (at + 5)));
     else patch_jcc_rel32(ctx->buf, at, (int32_t)(trap_off - (at + 6)));
   }
+}
+
+static int push_branch(emit_ctx* ctx, size_t at, uint32_t bc_tgt, uint8_t is_jcc) {
+  if(ctx->branch_count >= ctx->branch_cap) return 0;
+  ctx->branches[ctx->branch_count].at = at;
+  ctx->branches[ctx->branch_count].bc_tgt = bc_tgt;
+  ctx->branches[ctx->branch_count].is_jcc = is_jcc;
+  ctx->branch_count++;
+  return 1;
+}
+
+static int push_ret_jump(emit_ctx* ctx, size_t at) {
+  if(ctx->ret_jump_count >= ctx->ret_jump_cap) return 0;
+  ctx->ret_jumps[ctx->ret_jump_count++] = at;
+  return 1;
+}
+
+static int resolve_target_bc(uint32_t bc_pc, int32_t imm, uint32_t ninsns, uint32_t* out) {
+  int64_t t = (int64_t)(int32_t)bc_pc + 1 + (int64_t)imm;
+  if(t < 0 || t >= (int64_t)ninsns) return 0;
+  *out = (uint32_t)t;
+  return 1;
 }
 
 static void emit_divmod_guard_i32(emit_ctx* ctx, unsigned div_gpr, unsigned lhs_gpr) {
@@ -549,6 +595,7 @@ static void emit_divmod_guard_i64(emit_ctx* ctx, unsigned div_gpr, unsigned lhs_
 static int jir_op_allowed(jello_jit_ir_op op) {
   switch(op) {
     case JIR_NOP: case JIR_RET: case JIR_MOV:
+    case JIR_JMP: case JIR_JMP_IF:
     case JIR_CONST_I8_IMM: case JIR_CONST_I32: case JIR_CONST_I64:
     case JIR_CONST_F16: case JIR_CONST_F32: case JIR_CONST_F64: case JIR_CONST_BOOL:
     case JIR_BIN_I32: case JIR_BIN_I64: case JIR_BIN_F16: case JIR_BIN_F32: case JIR_BIN_F64:
@@ -566,17 +613,26 @@ static int ir_shape_ok(const jello_jit_ir_function* ir, const jello_bc_module* m
                        const jello_bc_function* f, jello_type_kind* out_ret_kind) {
   if(ir->nslow > 0) return 0;
   int saw_ret = 0;
+  jello_type_kind ret_kind = JELLO_T_VOID;
   for(uint32_t i = 0; i < ir->ninsns; i++) {
     jello_jit_ir_op op = (jello_jit_ir_op)ir->insns[i].op;
     if(!jir_op_allowed(op)) return 0;
+    if(op == JIR_JMP || op == JIR_JMP_IF) {
+      uint32_t tgt = 0;
+      if(!resolve_target_bc(ir->insns[i].bc_pc, (int32_t)ir->insns[i].imm, f->ninsns, &tgt))
+        return 0;
+    }
     if(op == JIR_RET) {
-      if(saw_ret) return 0;
+      jello_type_kind k = vm_reg_kind(m, f, ir->insns[i].a);
+      if(k == JELLO_T_F16) return 0;
+      if(saw_ret && k != ret_kind) return 0;
+      ret_kind = k;
       saw_ret = 1;
-      *out_ret_kind = vm_reg_kind(m, f, ir->insns[i].a);
-      if(*out_ret_kind == JELLO_T_F16) return 0;
     }
   }
-  return saw_ret;
+  if(!saw_ret) return 0;
+  *out_ret_kind = ret_kind;
+  return 1;
 }
 
 /* -- entry_off + body_off -- */
@@ -596,7 +652,7 @@ static void emit_restore_callee_saved(jit_exec_buf* buf) {
   emit_pop_r64(buf, (unsigned)JIT_REG_VM);
 }
 
-static void emit_epilogue_ok(emit_ctx* ctx, jello_type_kind ret_kind, uint8_t ret_vreg) {
+static void emit_store_out(emit_ctx* ctx, jello_type_kind ret_kind, uint8_t ret_vreg) {
   jit_exec_buf* buf = ctx->buf;
   emit_mov_dword_rbx_disp_imm32(buf, (uint32_t)offsetof(jello_numeric_result, kind), (uint32_t)JELLO_NUM_VOID);
   if(ret_kind == JELLO_T_BOOL) {
@@ -620,6 +676,10 @@ static void emit_epilogue_ok(emit_ctx* ctx, jello_type_kind ret_kind, uint8_t re
     emit_mov_dword_rbx_disp_imm32(buf, (uint32_t)offsetof(jello_numeric_result, kind), (uint32_t)JELLO_NUM_F64);
     emit_mov_qword_rbx_disp_r64(buf, (uint32_t)offsetof(jello_numeric_result, as), (unsigned)r);
   }
+}
+
+static void emit_epilogue_ok_tail(emit_ctx* ctx) {
+  jit_exec_buf* buf = ctx->buf;
   emit_mov_r64_r64(buf, X64_RDI, (unsigned)JIT_REG_VM);
   emit_call_fn(buf, (void*)vm_pop_frame);
   emit_restore_callee_saved(buf);
@@ -1232,10 +1292,38 @@ int jello_jit_compile_function(const jello_bc_module* m, uint32_t fi, jello_jit_
   jello_type_kind ret_kind = JELLO_T_VOID;
   if(!ir_shape_ok(ir, m, f, &ret_kind)) { jello_jit_ir_free(ir); return 0; }
 
+  uint8_t* is_target = (uint8_t*)calloc(f->ninsns, 1);
+  uint8_t* discarded = (uint8_t*)calloc(f->ninsns, 1);
+  size_t* native_off = (size_t*)malloc(sizeof(size_t) * (size_t)f->ninsns);
+  if(!is_target || !discarded || !native_off) {
+    free(is_target); free(discarded); free(native_off);
+    jello_jit_ir_free(ir);
+    return 0;
+  }
+  for(uint32_t i = 0; i < f->ninsns; i++) native_off[i] = (size_t)-1;
+
+  for(uint32_t i = 0; i < ir->ninsns; i++) {
+    jello_jit_ir_op op = (jello_jit_ir_op)ir->insns[i].op;
+    if(op != JIR_JMP && op != JIR_JMP_IF) continue;
+    uint32_t tgt = 0;
+    if(!resolve_target_bc(ir->insns[i].bc_pc, (int32_t)ir->insns[i].imm, f->ninsns, &tgt)) {
+      free(is_target); free(discarded); free(native_off);
+      jello_jit_ir_free(ir);
+      return 0;
+    }
+    is_target[tgt] = 1;
+  }
+
   jit_exec_buf buf = jit_alloc_exec_buf(emit_buf_cap(ir->ninsns));
-  if(!buf.mem) { jello_jit_ir_free(ir); return 0; }
+  if(!buf.mem) {
+    free(is_target); free(discarded); free(native_off);
+    jello_jit_ir_free(ir);
+    return 0;
+  }
 
   size_t trap_jumps[256];
+  jit_branch_patch branches[256];
+  size_t ret_jumps[64];
   emit_ctx ctx;
   ctx.buf = &buf;
   ctx.m = m;
@@ -1243,6 +1331,13 @@ int jello_jit_compile_function(const jello_bc_module* m, uint32_t fi, jello_jit_
   ctx.trap_jumps = trap_jumps;
   ctx.trap_jump_cap = 256;
   ctx.trap_jump_count = 0;
+  ctx.branches = branches;
+  ctx.branch_cap = 256;
+  ctx.branch_count = 0;
+  ctx.ret_jumps = ret_jumps;
+  ctx.ret_jump_cap = 64;
+  ctx.ret_jump_count = 0;
+  ctx.ret_kind = ret_kind;
 
   jit_reg_state ra;
   jit_reg_emit_ctx re;
@@ -1252,24 +1347,74 @@ int jello_jit_compile_function(const jello_bc_module* m, uint32_t fi, jello_jit_
 
   size_t body_off = 0;
   emit_prologue(&buf, &body_off);
-  uint8_t ret_vreg = 0;
+
   int ok = 1;
   for(uint32_t i = 0; i < ir->ninsns && ok; i++) {
     const jello_jit_ir_insn* ins = &ir->insns[i];
-    if(ins->op == (uint16_t)JIR_RET) { ret_vreg = ins->a; continue; }
+    uint32_t bc = ins->bc_pc;
+    if(bc < f->ninsns && is_target[bc] && !discarded[bc]) {
+      jit_reg_state_discard_currents(&ra);
+      discarded[bc] = 1;
+    }
+    if(bc < f->ninsns && native_off[bc] == (size_t)-1) native_off[bc] = buf.len;
+
+    jello_jit_ir_op op = (jello_jit_ir_op)ins->op;
+    if(op == JIR_RET) {
+      emit_store_out(&ctx, ret_kind, ins->a);
+      size_t at = emit_jmp_rel32(&buf, 0);
+      if(!push_ret_jump(&ctx, at)) ok = 0;
+      continue;
+    }
+    if(op == JIR_JMP) {
+      uint32_t tgt = 0;
+      if(!resolve_target_bc(bc, (int32_t)ins->imm, f->ninsns, &tgt)) { ok = 0; break; }
+      size_t at = emit_jmp_rel32(&buf, 0);
+      if(!push_branch(&ctx, at, tgt, 0)) ok = 0;
+      continue;
+    }
+    if(op == JIR_JMP_IF) {
+      uint32_t tgt = 0;
+      if(!resolve_target_bc(bc, (int32_t)ins->imm, f->ninsns, &tgt)) { ok = 0; break; }
+      int cond = jit_reg_get_gpr(&ra, ins->a, 1);
+      emit_test_r32_r32(&buf, (unsigned)cond, (unsigned)cond);
+      size_t at = emit_jcc_rel32(&buf, 0x85, 0); /* jnz */
+      if(!push_branch(&ctx, at, tgt, 1)) ok = 0;
+      continue;
+    }
     ok = emit_insn(&ctx, ins);
     jit_reg_unpin_all(&ra);
   }
 
+  size_t epilogue_ok_off = 0;
+  size_t trap_off = 0;
+
   if(ok) {
-    emit_epilogue_ok(&ctx, ret_kind, ret_vreg);
-    size_t trap_off = buf.len;
+    epilogue_ok_off = buf.len;
+    emit_epilogue_ok_tail(&ctx);
+    trap_off = buf.len;
     emit_epilogue_trap(&ctx);
     patch_trap_jumps(&ctx, trap_off);
+    for(size_t i = 0; i < ctx.ret_jump_count; i++) {
+      size_t at = ctx.ret_jumps[i];
+      patch_jmp_rel32(&buf, at, (int32_t)(epilogue_ok_off - (at + 5)));
+    }
+    for(size_t i = 0; i < ctx.branch_count; i++) {
+      size_t at = ctx.branches[i].at;
+      uint32_t tgt = ctx.branches[i].bc_tgt;
+      if(tgt >= f->ninsns || native_off[tgt] == (size_t)-1) { ok = 0; break; }
+      size_t tgt_off = native_off[tgt];
+      if(ctx.branches[i].is_jcc)
+        patch_jcc_rel32(&buf, at, (int32_t)(tgt_off - (at + 6)));
+      else
+        patch_jmp_rel32(&buf, at, (int32_t)(tgt_off - (at + 5)));
+    }
   }
 
   jit_reg_state_free(&ra);
   jello_jit_ir_free(ir);
+  free(is_target);
+  free(discarded);
+  free(native_off);
 
   if(!ok || !jit_finalize_exec_buf(&buf)) {
     jit_free_exec_buf(&buf);

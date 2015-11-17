@@ -227,10 +227,12 @@ typedef struct jit_reg_state {
 } jit_reg_state;
 
 extern uint32_t jit_reg_reload_count;
+extern uint32_t jit_reg_discard_count;
 
 void jit_reg_state_init(jit_reg_state* st, uint32_t nregs, jit_reg_emit_ctx emit);
 void jit_reg_state_free(jit_reg_state* st);
 void jit_reg_state_clobber_call(jit_reg_state* st);
+void jit_reg_state_discard_currents(jit_reg_state* st);
 int jit_reg_alloc_gpr(jit_reg_state* st, uint8_t vreg, int and_load);
 int jit_reg_alloc_xmm(jit_reg_state* st, uint8_t vreg, int and_load, int wide);
 int jit_reg_get_gpr(jit_reg_state* st, uint8_t vreg, int and_load);

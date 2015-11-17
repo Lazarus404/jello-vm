@@ -32,11 +32,11 @@ fail() {
   failures=$((failures + 1))
 }
 
-echo "== JIT numeric conform (x64): straight-line interp fixtures =="
+echo "== JIT numeric/cfg conform (x64): interp fixtures (incl. jmp) =="
 for fixture in "${FIXDIR}"/*.jlo.txt; do
   base="$(basename "${fixture}" .jlo.txt)"
-  if [[ "${base}" == *jmp* || "${base}" == *call* || "${base}" == "stack_overflow" ]]; then
-    echo "jit_numeric_conform_x64: ${base} -> SKIPPED (control flow / non-numeric)"
+  if [[ "${base}" == *call* || "${base}" == "stack_overflow" ]]; then
+    echo "jit_numeric_conform_x64: ${base} -> SKIPPED (call / non-numeric)"
     continue
   fi
   expect_file="${FIXDIR}/${base}.expect"
