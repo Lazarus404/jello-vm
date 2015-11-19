@@ -595,7 +595,7 @@ static void emit_divmod_guard_i64(emit_ctx* ctx, unsigned div_gpr, unsigned lhs_
 static int jir_op_allowed(jello_jit_ir_op op) {
   switch(op) {
     case JIR_NOP: case JIR_RET: case JIR_MOV:
-    case JIR_JMP: case JIR_JMP_IF:
+    case JIR_JMP: case JIR_JMP_IF: case JIR_SAFEPOINT:
     case JIR_CONST_I8_IMM: case JIR_CONST_I32: case JIR_CONST_I64:
     case JIR_CONST_F16: case JIR_CONST_F32: case JIR_CONST_F64: case JIR_CONST_BOOL:
     case JIR_BIN_I32: case JIR_BIN_I64: case JIR_BIN_F16: case JIR_BIN_F32: case JIR_BIN_F64:
@@ -1379,6 +1379,12 @@ int jello_jit_compile_function(const jello_bc_module* m, uint32_t fi, jello_jit_
       emit_test_r32_r32(&buf, (unsigned)cond, (unsigned)cond);
       size_t at = emit_jcc_rel32(&buf, 0x85, 0); /* jnz */
       if(!push_branch(&ctx, at, tgt, 1)) ok = 0;
+      continue;
+    }
+    if(op == JIR_SAFEPOINT) {
+      emit_mov_r64_r64(&buf, X64_RDI, (unsigned)JIT_REG_VM);
+      emit_call_fn(&buf, (void*)vm_safepoint_check);
+      jit_reg_state_clobber_call(&ra);
       continue;
     }
     ok = emit_insn(&ctx, ins);

@@ -132,6 +132,51 @@ static jello_exec_status run_jit_entry(const jello_bc_module* m,
   return st;
 }
 
+static void test_hot_loop_execute(void) {
+  jello_type_entry types[2];
+  jello_type_id reg_types[3];
+  jello_insn insns[7];
+  jello_bc_function func;
+
+  types[0].kind = JELLO_T_I32;
+  memset(&types[0].as, 0, sizeof(types[0].as));
+  types[1].kind = JELLO_T_BOOL;
+  memset(&types[1].as, 0, sizeof(types[1].as));
+  reg_types[0] = 0;
+  reg_types[1] = 0;
+  reg_types[2] = 1;
+
+  insns[0].op = (uint8_t)JOP_CONST_I32; insns[0].a = 0; insns[0].imm = 0;
+  insns[1].op = (uint8_t)JOP_CONST_I32; insns[1].a = 1; insns[1].imm = 1;
+  insns[2].op = (uint8_t)JOP_ADD_I32; insns[2].a = 0; insns[2].b = 0; insns[2].c = 1;
+  insns[3].op = (uint8_t)JOP_MOV; insns[3].a = 1; insns[3].b = 0;
+  insns[4].op = (uint8_t)JOP_LT_I32_IMM; insns[4].a = 2; insns[4].b = 0; insns[4].imm = 10;
+  insns[5].op = (uint8_t)JOP_JMP_IF; insns[5].a = 2; insns[5].imm = (uint32_t)-5;
+  insns[6].op = (uint8_t)JOP_RET; insns[6].a = 0;
+
+  func.nregs = 3;
+  func.cap_start = 0;
+  func.reg_types = reg_types;
+  func.ninsns = 7;
+  func.insns = insns;
+
+  jello_bc_module m;
+  memset(&m, 0, sizeof(m));
+  m.ntypes = 2;
+  m.types = types;
+  m.nfuncs = 1;
+  m.funcs = &func;
+  m.entry = 0;
+
+  jello_numeric_result out;
+  memset(&out, 0, sizeof(out));
+  jello_exec_status st = run_jit_entry(&m, &out);
+  assert(st == JELLO_EXEC_OK);
+  assert(out.kind == JELLO_NUM_I32);
+  assert(out.as.i32 == 10);
+  printf("test_hot_loop_execute: PASS\n");
+}
+
 static void test_jmp_if_taken_execute(void) {
   jello_type_entry types[2];
   jello_type_id reg_types[3];
@@ -181,8 +226,10 @@ int main(void) {
   test_prologue_unchanged();
   test_jmp_forward_patches();
 #if defined(__x86_64__)
+  test_hot_loop_execute();
   test_jmp_if_taken_execute();
 #else
+  printf("test_hot_loop_execute: SKIPPED (host is not x86_64)\n");
   printf("test_jmp_if_taken_execute: SKIPPED (host is not x86_64)\n");
 #endif
   printf("jit_cfg_tests: all tests passed\n");
