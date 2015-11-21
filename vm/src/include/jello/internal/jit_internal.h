@@ -13,6 +13,9 @@ typedef struct jello_jit_code {
   jit_exec_buf buf;
   size_t entry_off;
   size_t body_off;
+  uint32_t* loop_anchor_pcs;
+  size_t* loop_anchor_offs;
+  uint32_t nloop_anchors;
 } jello_jit_code;
 
 typedef jello_exec_status (*jello_jit_entry_fn)(jello_vm* vm, uint8_t* frame_base, jello_numeric_result* out);

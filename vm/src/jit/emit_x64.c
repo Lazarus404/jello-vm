@@ -1283,6 +1283,9 @@ int jello_jit_compile_function(const jello_bc_module* m, uint32_t fi, jello_jit_
   out_code->buf.finalized = 0;
   out_code->entry_off = 0;
   out_code->body_off = 0;
+  out_code->loop_anchor_pcs = NULL;
+  out_code->loop_anchor_offs = NULL;
+  out_code->nloop_anchors = 0;
 
   if(fi >= m->nfuncs) return 0;
   const jello_bc_function* f = &m->funcs[fi];
@@ -1295,28 +1298,34 @@ int jello_jit_compile_function(const jello_bc_module* m, uint32_t fi, jello_jit_
   uint8_t* is_target = (uint8_t*)calloc(f->ninsns, 1);
   uint8_t* discarded = (uint8_t*)calloc(f->ninsns, 1);
   size_t* native_off = (size_t*)malloc(sizeof(size_t) * (size_t)f->ninsns);
-  if(!is_target || !discarded || !native_off) {
-    free(is_target); free(discarded); free(native_off);
+  uint8_t* is_loop_anchor = (uint8_t*)calloc(f->ninsns, 1);
+  if(!is_target || !discarded || !native_off || !is_loop_anchor) {
+    free(is_target); free(discarded); free(native_off); free(is_loop_anchor);
     jello_jit_ir_free(ir);
     return 0;
   }
   for(uint32_t i = 0; i < f->ninsns; i++) native_off[i] = (size_t)-1;
 
+  uint32_t nloop_anchors = 0;
   for(uint32_t i = 0; i < ir->ninsns; i++) {
     jello_jit_ir_op op = (jello_jit_ir_op)ir->insns[i].op;
     if(op != JIR_JMP && op != JIR_JMP_IF) continue;
     uint32_t tgt = 0;
     if(!resolve_target_bc(ir->insns[i].bc_pc, (int32_t)ir->insns[i].imm, f->ninsns, &tgt)) {
-      free(is_target); free(discarded); free(native_off);
+      free(is_target); free(discarded); free(native_off); free(is_loop_anchor);
       jello_jit_ir_free(ir);
       return 0;
     }
     is_target[tgt] = 1;
+    if(tgt <= ir->insns[i].bc_pc && !is_loop_anchor[tgt]) {
+      is_loop_anchor[tgt] = 1;
+      nloop_anchors++;
+    }
   }
 
   jit_exec_buf buf = jit_alloc_exec_buf(emit_buf_cap(ir->ninsns));
   if(!buf.mem) {
-    free(is_target); free(discarded); free(native_off);
+    free(is_target); free(discarded); free(native_off); free(is_loop_anchor);
     jello_jit_ir_free(ir);
     return 0;
   }
@@ -1416,13 +1425,40 @@ int jello_jit_compile_function(const jello_bc_module* m, uint32_t fi, jello_jit_
     }
   }
 
+  if(ok && nloop_anchors > 0) {
+    out_code->loop_anchor_pcs = (uint32_t*)malloc(sizeof(uint32_t) * nloop_anchors);
+    out_code->loop_anchor_offs = (size_t*)malloc(sizeof(size_t) * nloop_anchors);
+    if(!out_code->loop_anchor_pcs || !out_code->loop_anchor_offs) {
+      free(out_code->loop_anchor_pcs);
+      free(out_code->loop_anchor_offs);
+      out_code->loop_anchor_pcs = NULL;
+      out_code->loop_anchor_offs = NULL;
+      ok = 0;
+    } else {
+      uint32_t w = 0;
+      for(uint32_t pc = 0; pc < f->ninsns; pc++) {
+        if(!is_loop_anchor[pc]) continue;
+        out_code->loop_anchor_pcs[w] = pc;
+        out_code->loop_anchor_offs[w] = native_off[pc];
+        w++;
+      }
+      out_code->nloop_anchors = w;
+    }
+  }
+
   jit_reg_state_free(&ra);
   jello_jit_ir_free(ir);
   free(is_target);
   free(discarded);
   free(native_off);
+  free(is_loop_anchor);
 
   if(!ok || !jit_finalize_exec_buf(&buf)) {
+    free(out_code->loop_anchor_pcs);
+    free(out_code->loop_anchor_offs);
+    out_code->loop_anchor_pcs = NULL;
+    out_code->loop_anchor_offs = NULL;
+    out_code->nloop_anchors = 0;
     jit_free_exec_buf(&buf);
     return 0;
   }
@@ -1434,5 +1470,10 @@ int jello_jit_compile_function(const jello_bc_module* m, uint32_t fi, jello_jit_
 }
 
 void jello_jit_code_free(jello_jit_code* code) {
+  free(code->loop_anchor_pcs);
+  free(code->loop_anchor_offs);
+  code->loop_anchor_pcs = NULL;
+  code->loop_anchor_offs = NULL;
+  code->nloop_anchors = 0;
   jit_free_exec_buf(&code->buf);
 }

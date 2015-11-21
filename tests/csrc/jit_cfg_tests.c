@@ -38,6 +38,15 @@ static void init_i32_reg_types(jello_type_id* reg_types, uint32_t nregs) {
   for(uint32_t i = 0; i < nregs; i++) reg_types[i] = 0;
 }
 
+static int bytes_contain(const uint8_t* hay, size_t hay_len,
+                         const uint8_t* needle, size_t needle_len) {
+  if(needle_len > hay_len) return 0;
+  for(size_t i = 0; i + needle_len <= hay_len; i++) {
+    if(memcmp(hay + i, needle, needle_len) == 0) return 1;
+  }
+  return 0;
+}
+
 static void test_prologue_unchanged(void) {
   jello_type_entry types[1];
   jello_type_id reg_types[1];
@@ -106,6 +115,69 @@ static void test_jmp_forward_patches(void) {
   assert(found_e9 == 1);
   jello_jit_code_free(&code);
   printf("test_jmp_forward_patches: PASS\n");
+}
+
+static void test_hot_loop_anchors_and_discard(void) {
+  jello_type_entry types[2];
+  jello_type_id reg_types[3];
+  jello_insn insns[7];
+  jello_bc_function func;
+
+  types[0].kind = JELLO_T_I32;
+  memset(&types[0].as, 0, sizeof(types[0].as));
+  types[1].kind = JELLO_T_BOOL;
+  memset(&types[1].as, 0, sizeof(types[1].as));
+  reg_types[0] = 0;
+  reg_types[1] = 0;
+  reg_types[2] = 1;
+
+  insns[0].op = (uint8_t)JOP_CONST_I32; insns[0].a = 0; insns[0].imm = 0;
+  insns[1].op = (uint8_t)JOP_CONST_I32; insns[1].a = 1; insns[1].imm = 1;
+  insns[2].op = (uint8_t)JOP_ADD_I32; insns[2].a = 0; insns[2].b = 0; insns[2].c = 1;
+  insns[3].op = (uint8_t)JOP_MOV; insns[3].a = 1; insns[3].b = 0;
+  insns[4].op = (uint8_t)JOP_LT_I32_IMM; insns[4].a = 2; insns[4].b = 0; insns[4].imm = 10;
+  insns[5].op = (uint8_t)JOP_JMP_IF; insns[5].a = 2; insns[5].imm = (uint32_t)-5;
+  insns[6].op = (uint8_t)JOP_RET; insns[6].a = 0;
+
+  func.nregs = 3;
+  func.cap_start = 0;
+  func.reg_types = reg_types;
+  func.ninsns = 7;
+  func.insns = insns;
+
+  jello_bc_module m;
+  memset(&m, 0, sizeof(m));
+  m.ntypes = 2;
+  m.types = types;
+  m.nfuncs = 1;
+  m.funcs = &func;
+  m.entry = 0;
+
+  jit_reg_discard_count = 0;
+  jello_jit_code code;
+  memset(&code, 0, sizeof(code));
+  assert(jello_jit_compile_function(&m, 0, &code) == 1);
+  assert(jit_reg_discard_count >= 1);
+  assert(code.nloop_anchors >= 1);
+  assert(code.loop_anchor_pcs != NULL);
+  assert(code.loop_anchor_offs != NULL);
+  for(uint32_t i = 0; i < code.nloop_anchors; i++) {
+    assert(code.loop_anchor_offs[i] >= code.body_off);
+    assert(code.loop_anchor_offs[i] < code.buf.len);
+  }
+
+  static const uint8_t call_rax[] = { 0xFF, 0xD0 };
+  assert(bytes_contain(code.buf.mem, code.buf.len, call_rax, sizeof(call_rax)));
+
+  uint64_t safepoint_addr = (uint64_t)(uintptr_t)vm_safepoint_check;
+  uint8_t movabs[10];
+  movabs[0] = 0x48;
+  movabs[1] = 0xB8;
+  memcpy(&movabs[2], &safepoint_addr, 8);
+  assert(bytes_contain(code.buf.mem, code.buf.len, movabs, sizeof(movabs)));
+
+  jello_jit_code_free(&code);
+  printf("test_hot_loop_anchors_and_discard: PASS\n");
 }
 
 #if defined(__x86_64__)
@@ -225,6 +297,7 @@ static void test_jmp_if_taken_execute(void) {
 int main(void) {
   test_prologue_unchanged();
   test_jmp_forward_patches();
+  test_hot_loop_anchors_and_discard();
 #if defined(__x86_64__)
   test_hot_loop_execute();
   test_jmp_if_taken_execute();

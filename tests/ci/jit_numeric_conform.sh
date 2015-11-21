@@ -20,7 +20,7 @@ fail() {
   failures=$((failures + 1))
 }
 
-echo "== JIT numeric conform: straight-line interp fixtures (no jmp/call) =="
+echo "== JIT numeric/cfg conform: interp fixtures (incl. jmp / hot_loop; skip call) =="
 for fixture in "${FIXDIR}"/*.jlo.txt; do
   base="$(basename "${fixture}" .jlo.txt)"
   if [[ "${base}" == *jmp* || "${base}" == *call* || "${base}" == "stack_overflow" ]]; then
