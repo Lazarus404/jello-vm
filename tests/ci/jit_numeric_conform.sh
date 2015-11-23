@@ -23,8 +23,8 @@ fail() {
 echo "== JIT numeric/cfg conform: interp fixtures (incl. jmp / hot_loop; skip call) =="
 for fixture in "${FIXDIR}"/*.jlo.txt; do
   base="$(basename "${fixture}" .jlo.txt)"
-  if [[ "${base}" == *jmp* || "${base}" == *call* || "${base}" == "stack_overflow" ]]; then
-    echo "jit_numeric_conform: ${base} -> SKIPPED (control flow / non-numeric)"
+  if [[ "${base}" == *call* || "${base}" == "stack_overflow" ]]; then
+    echo "jit_numeric_conform: ${base} -> SKIPPED (call / non-numeric)"
     continue
   fi
   expect_file="${FIXDIR}/${base}.expect"

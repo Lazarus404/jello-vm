@@ -230,7 +230,7 @@ jello_exec_status jello_vm_exec_numeric(jello_vm* vm, const jello_bc_module* m, 
   vm_frame_reset(vm);
   out->kind = JELLO_NUM_VOID;
 
-  vm->running_module = m; /* GC root-scanning needs this to resolve register kinds */
+  vm->running_module = m;
 
   if(!vm_push_frame(vm, m, jello_bc_get_entry(m), 0, 0, 0, 0)) {
     atomic_store(&vm->in_exec, 0);

@@ -115,22 +115,6 @@ if(JELLO_ENABLE_JIT)
     target_compile_options(jit_cfg_tests PRIVATE -Werror)
   endif()
 
-  add_test(NAME chapter10_jit_numeric
-    COMMAND jit_numeric_tests
-    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
-
-  add_test(NAME chapter10_jit_numeric_x64
-    COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/jit_numeric_x64.sh"
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-
-  add_test(NAME chapter12_jit_cfg
-    COMMAND jit_cfg_tests
-    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
-
-  add_test(NAME chapter12_jit_cfg_x64
-    COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/jit_cfg_x64.sh"
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-
   if(TARGET jlo_tool)
     add_test(NAME chapter10_jit_conform
       COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/jit_numeric_conform.sh"
@@ -141,4 +125,20 @@ if(JELLO_ENABLE_JIT)
       WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     set_tests_properties(chapter10_jit_conform_x64 PROPERTIES TIMEOUT 300)
   endif()
+
+  add_test(NAME chapter11_jit_numeric
+    COMMAND jit_numeric_tests
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+  add_test(NAME chapter11_jit_numeric_x64
+    COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/jit_numeric_x64.sh"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+  add_test(NAME chapter12_jit_cfg
+    COMMAND jit_cfg_tests
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+  add_test(NAME chapter12_jit_cfg_x64
+    COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/jit_cfg_x64.sh"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 endif()

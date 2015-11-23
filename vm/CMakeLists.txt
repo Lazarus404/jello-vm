@@ -10,8 +10,8 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 include(CompilerWarnings)
 
 option(JELLO_WARNINGS_AS_ERRORS "Treat warnings as errors" ON)
-option(JELLO_USE_COMPUTED_GOTO "Use computed-goto dispatch on GCC/Clang (Chapter 4)" ON)
-option(JELLO_ENABLE_JIT "Compile the JIT backend into jello_vm (Chapter 9a)" ON)
+option(JELLO_USE_COMPUTED_GOTO "Use computed-goto dispatch on GCC/Clang" ON)
+option(JELLO_ENABLE_JIT "Compile the JIT backend into jello_vm" ON)
 
 add_library(jello_vm STATIC
   src/load/loader.c
@@ -50,7 +50,6 @@ jello_enable_warnings(jello_vm)
 if(JELLO_WARNINGS_AS_ERRORS)
   target_compile_options(jello_vm PRIVATE -Werror)
 endif()
-
 find_package(Threads REQUIRED)
 target_link_libraries(jello_vm PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
 

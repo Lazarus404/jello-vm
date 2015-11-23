@@ -82,7 +82,6 @@ static void emit_mov_dword_rbx_disp_imm32(jit_exec_buf* buf, uint32_t disp, uint
 static void emit_mov_dword_rbx_disp_r32(jit_exec_buf* buf, uint32_t disp, unsigned src) {
   uint8_t bytes[10];
   size_t n = 0;
-  /* Opcode 0x89: ModRM.reg=src, ModRM.rm=RBX -- high src needs REX.R (0x44). */
   if(src >= 8) bytes[n++] = 0x44;
   bytes[n++] = 0x89;
   bytes[n++] = (uint8_t)(0x83u | ((src & 7u) << 3));
@@ -150,7 +149,6 @@ static void emit_neg_r32(jit_exec_buf* buf, unsigned dst) {
 }
 
 static void emit_cmp_r32_r32(jit_exec_buf* buf, unsigned a, unsigned b) {
-  /* CMP r32, r/m32 (0x3B): flags from a - b */
   uint8_t bytes[3];
   size_t n = 0;
   if((a >= 8) || (b >= 8)) bytes[n++] = (uint8_t)(0x40u | ((a >= 8) ? 0x04u : 0) | ((b >= 8) ? 0x01u : 0));
@@ -171,7 +169,6 @@ static void emit_cmp_r32_imm32(jit_exec_buf* buf, unsigned dst, uint32_t imm) {
 }
 
 static void emit_setcc(jit_exec_buf* buf, uint8_t cc_opcode, unsigned dst) {
-  /* REX required for r8-r15 and for sil/dil/bpl/spl (regs 4-7). */
   uint8_t bytes[4];
   size_t n = 0;
   if(dst >= 4) bytes[n++] = (uint8_t)(0x40u | ((dst >= 8) ? 0x01u : 0));
@@ -312,7 +309,6 @@ static void emit_movsxd_r64_r32(jit_exec_buf* buf, unsigned dst, unsigned src) {
 }
 
 static void emit_cmp_r64_r64(jit_exec_buf* buf, unsigned a, unsigned b) {
-  /* CMP r64, r/m64 (0x3B): flags from a - b */
   uint8_t bytes[4];
   bytes[0] = (uint8_t)(0x48u | ((a >= 8) ? 0x04u : 0) | ((b >= 8) ? 0x01u : 0));
   bytes[1] = 0x3B;
@@ -389,7 +385,6 @@ static void emit_ucomisd(jit_exec_buf* buf, unsigned a, unsigned b) {
   jit_exec_buf_write(buf, bytes, n);
 }
 
-/* CVTSI2SS xmm, r32/r64 -- ModRM.reg=xmm, ModRM.rm=gpr. wide=1 adds REX.W. */
 static void emit_cvtsi2ss(jit_exec_buf* buf, unsigned xmm, unsigned gpr, int wide) {
   uint8_t bytes[6];
   size_t n = 0;
@@ -414,7 +409,6 @@ static void emit_cvtsi2sd(jit_exec_buf* buf, unsigned xmm, unsigned gpr, int wid
   jit_exec_buf_write(buf, bytes, n);
 }
 
-/* CVTTSS2SI r32/r64, xmm -- ModRM.reg=gpr, ModRM.rm=xmm. */
 static void emit_cvttss2si(jit_exec_buf* buf, unsigned gpr, unsigned xmm, int wide) {
   uint8_t bytes[6];
   size_t n = 0;
@@ -584,7 +578,6 @@ static void emit_divmod_guard_i64(emit_ctx* ctx, unsigned div_gpr, unsigned lhs_
   emit_cmp_r64_imm8(ctx->buf, div_gpr, (int8_t)-1);
   size_t jne = ctx->buf->len;
   emit_jcc_rel32(ctx->buf, 0x85, 0);
-  /* RAX is free scratch here -- DIV/MOD reloads it from lhs next. */
   emit_mov_r64_imm64(ctx->buf, X64_RAX, (uint64_t)INT64_MIN);
   emit_cmp_r64_r64(ctx->buf, lhs_gpr, X64_RAX);
   emit_jcc_trap(ctx, 0x84);
@@ -635,7 +628,6 @@ static int ir_shape_ok(const jello_jit_ir_function* ir, const jello_bc_module* m
   return 1;
 }
 
-/* -- entry_off + body_off -- */
 static void emit_prologue(jit_exec_buf* buf, size_t* out_body_off) {
   emit_push_r64(buf, (unsigned)JIT_REG_VM);
   emit_push_r64(buf, (unsigned)JIT_REG_BASE);
@@ -774,8 +766,6 @@ static void emit_movss_xmm_from_mem_rsp(jit_exec_buf* buf, unsigned xmm, uint8_t
 }
 
 static void emit_f16_binop(emit_ctx* ctx, const jello_jit_ir_insn* ins, uint8_t sse_op) {
-  /* Spill the first converted float across the second C call -- all XMMs
-   * are caller-saved under SysV. */
   emit_rsp_adjust_local(ctx->buf, 0, 16); /* sub rsp, 16 */
   emit_load_u32_slot_to_edi(ctx->buf, ins->b);
   emit_call_fn(ctx->buf, (void*)vm_f16_to_f32);
@@ -837,7 +827,6 @@ static void emit_cmp_float(emit_ctx* ctx, const jello_jit_ir_insn* ins, int is_f
   if(is_f64) emit_ucomisd(ctx->buf, li, ri);
   else emit_ucomiss(ctx->buf, li, ri);
   int d = jit_reg_alloc_gpr(ctx->ra, ins->a, 0);
-  /* UCOMISS/D only define ZF/PF/CF -- use sete (EQ) / setb (LT), not setl. */
   emit_setcc(ctx->buf, (jello_jir_cmp)ins->imm == JIR_CMP_EQ ? 0x94 : 0x92, (unsigned)d);
   emit_movzx_r32_r8(ctx->buf, (unsigned)d, (unsigned)d);
   jit_reg_store_home_gpr32(ctx->ra, ins->a, d);
@@ -1386,7 +1375,7 @@ int jello_jit_compile_function(const jello_bc_module* m, uint32_t fi, jello_jit_
       if(!resolve_target_bc(bc, (int32_t)ins->imm, f->ninsns, &tgt)) { ok = 0; break; }
       int cond = jit_reg_get_gpr(&ra, ins->a, 1);
       emit_test_r32_r32(&buf, (unsigned)cond, (unsigned)cond);
-      size_t at = emit_jcc_rel32(&buf, 0x85, 0); /* jnz */
+      size_t at = emit_jcc_rel32(&buf, 0x85, 0);
       if(!push_branch(&ctx, at, tgt, 1)) ok = 0;
       continue;
     }
