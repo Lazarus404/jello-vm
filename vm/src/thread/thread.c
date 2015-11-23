@@ -3,6 +3,7 @@
 
 #include <jello/internal.h>
 #include <stdlib.h>
+#include <sys/mman.h>
 
 /* -- the shared heap: lifecycle + registration -- */
 
@@ -85,7 +86,7 @@ void jello_vm_destroy(jello_vm* vm) {
       free(heap);
     }
   }
-  free(vm->frame_stack);
+  if(vm->frame_stack) munmap(vm->frame_stack, vm->frame_stack_cap);
   free(vm->call_frames);
   vm_free_layouts(vm);
   free(vm);

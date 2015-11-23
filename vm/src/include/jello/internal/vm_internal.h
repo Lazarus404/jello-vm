@@ -170,6 +170,9 @@ struct jello_vm {
   atomic_int in_exec;
 };
 
+#define JIT_FRAME_STACK_MAX (64u * 1024u * 1024u)
+#define JIT_CALL_FRAMES_MAX 200000u
+
 /* -- register load/store: static inline for the hot dispatch path -- */
 static inline uint32_t vm_load_u32(reg_frame* rf, uint32_t r) {
   return *(const uint32_t*)vm_reg_ptr(rf, r);

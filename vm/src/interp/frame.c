@@ -4,12 +4,18 @@
 #include <jello/internal.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 
 /* -- frame stack + per-function layout cache -- */
 
-#define FRAME_STACK_INITIAL (64u * 1024u)
-#define FRAME_STACK_MAX (64u * 1024u * 1024u)
-#define CALL_FRAMES_MAX 200000u
+static int frame_stack_reserve(jello_vm* vm) {
+  if(vm->frame_stack) return 1;
+  void* mem = mmap(NULL, JIT_FRAME_STACK_MAX, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if(mem == MAP_FAILED) return 0;
+  vm->frame_stack = (uint8_t*)mem;
+  vm->frame_stack_cap = JIT_FRAME_STACK_MAX;
+  return 1;
+}
 
 jello_type_kind vm_reg_kind(const jello_bc_module* m, const jello_bc_function* f, uint32_t r) {
   return m->types[f->reg_types[r]].kind;
@@ -73,21 +79,8 @@ static frame_layout* get_layout(jello_vm* vm, const jello_bc_module* m, const je
 }
 
 static int frame_stack_grow(jello_vm* vm, uint32_t need) {
-  if((uint64_t)vm->frame_stack_top + need <= vm->frame_stack_cap) return 1;
-  uint32_t new_cap = vm->frame_stack_cap ? vm->frame_stack_cap * 4u : FRAME_STACK_INITIAL;
-  while((uint64_t)new_cap < (uint64_t)vm->frame_stack_top + need) new_cap *= 4u;
-  uint8_t* old = vm->frame_stack;
-  uint8_t* p = (uint8_t*)realloc(vm->frame_stack, new_cap);
-  if(!p) return 0;
-  vm->frame_stack = p;
-  vm->frame_stack_cap = new_cap;
-  if(p != old && old != NULL) {
-    for(uint32_t i = 0; i < vm->call_frames_len; i++) {
-      call_frame* fr = &vm->call_frames[i];
-      fr->rf.mem = p + (fr->rf.mem - old);
-    }
-  }
-  return 1;
+  (void)need;
+  return frame_stack_reserve(vm);
 }
 
 int vm_push_frame(jello_vm* vm, const jello_bc_module* m, uint32_t func_index,
@@ -95,7 +88,7 @@ int vm_push_frame(jello_vm* vm, const jello_bc_module* m, uint32_t func_index,
   const jello_bc_function* f = &m->funcs[func_index];
   frame_layout* fl = get_layout(vm, m, f);
 
-  if((uint64_t)vm->frame_stack_top + fl->total > FRAME_STACK_MAX || vm->call_frames_len >= CALL_FRAMES_MAX) {
+  if((uint64_t)vm->frame_stack_top + fl->total > JIT_FRAME_STACK_MAX || vm->call_frames_len >= JIT_CALL_FRAMES_MAX) {
     vm->trap_code = JELLO_TRAP_STACK_OVERFLOW;
     return 0;
   }
