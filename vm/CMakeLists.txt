@@ -40,6 +40,7 @@ if(JELLO_ENABLE_JIT)
     src/jit/frame.c
     src/jit/regalloc.c
     src/jit/emit_x64.c
+    src/jit/module.c
   )
 endif()
 target_include_directories(jello_vm PUBLIC src/include)
