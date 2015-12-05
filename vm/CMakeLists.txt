@@ -42,6 +42,7 @@ if(JELLO_ENABLE_JIT)
     src/jit/emit_x64.c
     src/jit/module.c
   )
+  target_compile_definitions(jello_vm PRIVATE JELLO_ENABLE_JIT)
 endif()
 target_include_directories(jello_vm PUBLIC src/include)
 if(JELLO_USE_COMPUTED_GOTO)

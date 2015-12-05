@@ -2,6 +2,7 @@
 // Copyright (c) Jahred Love. All rights reserved.
 
 #include <jello/internal.h>
+#include <stdlib.h>
 
 /* -- the dispatch loop -- */
 
@@ -236,6 +237,23 @@ jello_exec_status jello_vm_exec_numeric(jello_vm* vm, const jello_bc_module* m, 
     atomic_store(&vm->in_exec, 0);
     return JELLO_EXEC_TRAP;
   }
+
+#if defined(JELLO_ENABLE_JIT) && defined(__x86_64__)
+  {
+    const char* jit_off = getenv("JELLO_JIT_DISABLE");
+    if(!(jit_off && jit_off[0] != '\0')) {
+      jello_jit_module jm;
+      memset(&jm, 0, sizeof(jm));
+      jello_exec_status jit_st = JELLO_EXEC_OK;
+      if(jello_jit_module_prepare(m, &jm) && jello_jit_try_enter(vm, &jm, out, &jit_st)) {
+        jello_jit_module_free(&jm);
+        atomic_store(&vm->in_exec, 0);
+        return jit_st;
+      }
+      jello_jit_module_free(&jm);
+    }
+  }
+#endif
 
   exec_ctx ctx;
   ctx.vm = vm;
