@@ -25,6 +25,12 @@ typedef struct jello_jit_func_code {
   uint32_t nloop_anchors;
 } jello_jit_func_code;
 
+typedef struct jello_jit_call_patch {
+  uint32_t caller_fi;
+  uint32_t callee_fi;
+  size_t site_off;
+} jello_jit_call_patch;
+
 typedef struct jello_jit_module {
   jit_exec_buf blob;
   jello_jit_func_code* funcs;
@@ -44,6 +50,9 @@ int jello_jit_try_enter(jello_vm* vm, jello_jit_module* jm, jello_numeric_result
 extern uint32_t jit_try_enter_count;
 
 int jello_jit_emit_function_into(const jello_bc_module* m, uint32_t fi, jit_exec_buf* buf,
-    jello_jit_func_code* out_fc);
+    jello_jit_func_code* out_fc, jello_jit_call_patch** patches, uint32_t* npatch, uint32_t* patch_cap,
+    int allow_calls);
+
+void jello_jit_patch_call_rel32(jit_exec_buf* buf, size_t at, int32_t rel);
 
 #endif /* JELLO_JIT_INTERNAL_H */

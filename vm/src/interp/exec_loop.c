@@ -242,6 +242,7 @@ jello_exec_status jello_vm_exec_numeric(jello_vm* vm, const jello_bc_module* m, 
   {
     const char* jit_off = getenv("JELLO_JIT_DISABLE");
     if(!(jit_off && jit_off[0] != '\0')) {
+      vm_warm_jit_layouts(vm, m);
       jello_jit_module jm;
       memset(&jm, 0, sizeof(jm));
       jello_exec_status jit_st = JELLO_EXEC_OK;

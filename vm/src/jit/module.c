@@ -10,7 +10,7 @@ static size_t module_emit_cap(const jello_bc_module* m) {
   for(uint32_t fi = 0; fi < m->nfuncs; fi++) {
     jello_jit_ir_function* ir = jello_jit_ir_build(m, fi);
     if(!ir) continue;
-    cap += (size_t)ir->ninsns * JIT_EMIT_PER_INSN_BUDGET + 512u;
+    cap += (size_t)ir->ninsns * JIT_EMIT_CALL_INSN_BUDGET + 512u;
     jello_jit_ir_free(ir);
   }
   if(cap < JIT_EMIT_BUF_MIN_CAP) cap = JIT_EMIT_BUF_MIN_CAP;
@@ -32,12 +32,32 @@ int jello_jit_module_prepare(const jello_bc_module* m, jello_jit_module* out) {
     return 0;
   }
 
+  jello_jit_call_patch* patches = NULL;
+  uint32_t npatch = 0;
+  uint32_t patch_cap = 0;
+
   for(uint32_t fi = 0; fi < m->nfuncs; fi++) {
-    if(!jello_jit_emit_function_into(m, fi, &out->blob, &out->funcs[fi])) {
+    if(!jello_jit_emit_function_into(m, fi, &out->blob, &out->funcs[fi],
+            &patches, &npatch, &patch_cap, 1)) {
       jello_jit_module_free(out);
+      free(patches);
       return 0;
     }
   }
+
+  for(uint32_t pi = 0; pi < npatch; pi++) {
+    jello_jit_call_patch* p = &patches[pi];
+    if(p->callee_fi >= m->nfuncs) {
+      jello_jit_module_free(out);
+      free(patches);
+      return 0;
+    }
+    size_t callee = out->funcs[p->callee_fi].blob_off + out->funcs[p->callee_fi].body_off;
+    int32_t rel = (int32_t)(callee - (p->site_off + 5));
+    jello_jit_patch_call_rel32(&out->blob, p->site_off, rel);
+  }
+
+  free(patches);
 
   if(!jit_finalize_exec_buf(&out->blob)) {
     jello_jit_module_free(out);

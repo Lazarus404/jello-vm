@@ -37,6 +37,9 @@ void vm_free_layouts(jello_vm* vm) {
   vm->frame_layouts = NULL;
   vm->frame_layouts_len = 0;
   vm->frame_layouts_cap = 0;
+  free(vm->jit_layout_by_func);
+  vm->jit_layout_by_func = NULL;
+  vm->jit_layout_by_func_len = 0;
 }
 
 static int is_pointer_kind(jello_type_kind k) {
@@ -81,6 +84,57 @@ static frame_layout* get_layout(jello_vm* vm, const jello_bc_module* m, const je
 static int frame_stack_grow(jello_vm* vm, uint32_t need) {
   (void)need;
   return frame_stack_reserve(vm);
+}
+
+void vm_warm_jit_layouts(jello_vm* vm, const jello_bc_module* m) {
+  free(vm->jit_layout_by_func);
+  vm->jit_layout_by_func = NULL;
+  vm->jit_layout_by_func_len = 0;
+  if(!m || m->nfuncs == 0) return;
+  vm->jit_layout_by_func = (frame_layout**)calloc(m->nfuncs, sizeof(frame_layout*));
+  if(!vm->jit_layout_by_func) return;
+  vm->jit_layout_by_func_len = m->nfuncs;
+  for(uint32_t fi = 0; fi < m->nfuncs; fi++)
+    (void)get_layout(vm, m, &m->funcs[fi]);
+  for(uint32_t fi = 0; fi < m->nfuncs; fi++)
+    vm->jit_layout_by_func[fi] = find_layout(vm, &m->funcs[fi]);
+}
+
+int jit_try_grow_call_frames(jello_vm* vm) {
+  if(vm->call_frames_len < vm->call_frames_cap) return 1;
+  uint32_t new_cap = vm->call_frames_cap ? vm->call_frames_cap * 2u : 64u;
+  call_frame* p = (call_frame*)realloc(vm->call_frames, (size_t)new_cap * sizeof(call_frame));
+  if(!p) return 0;
+  vm->call_frames = p;
+  vm->call_frames_cap = new_cap;
+  return 1;
+}
+
+uint32_t jit_layout_total_or_zero(jello_vm* vm, uint32_t fi) {
+  if(!vm || fi >= vm->jit_layout_by_func_len || !vm->jit_layout_by_func) return 0;
+  frame_layout* fl = vm->jit_layout_by_func[fi];
+  return fl ? fl->total : 0;
+}
+
+frame_layout* jit_layout_ptr_or_null(jello_vm* vm, uint32_t fi) {
+  if(!vm || fi >= vm->jit_layout_by_func_len || !vm->jit_layout_by_func) return NULL;
+  return vm->jit_layout_by_func[fi];
+}
+
+int jit_call_push_numeric(jello_vm* vm, uint32_t callee_fi, uint32_t caller_dst,
+                          uint32_t arg_first, uint32_t nargs) {
+  if(!vm || !vm->running_module) return 0;
+  return vm_push_frame(vm, vm->running_module, callee_fi, caller_dst, arg_first, nargs, 1);
+}
+
+int jit_try_grow_frame_stack(jello_vm* vm, uint32_t need) {
+  if((uint64_t)vm->frame_stack_top + need > JIT_FRAME_STACK_MAX) return 0;
+  return frame_stack_grow(vm, need);
+}
+
+uint8_t* jit_current_frame_mem(jello_vm* vm) {
+  if(!vm || vm->call_frames_len == 0) return vm ? vm->frame_stack : NULL;
+  return vm->call_frames[vm->call_frames_len - 1u].rf.mem;
 }
 
 int vm_push_frame(jello_vm* vm, const jello_bc_module* m, uint32_t func_index,

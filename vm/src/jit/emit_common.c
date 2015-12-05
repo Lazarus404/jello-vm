@@ -68,3 +68,7 @@ void jit_free_exec_buf(jit_exec_buf* buf) {
 void jit_trap_arithmetic(jello_vm* vm) {
   vm->trap_code = JELLO_TRAP_ARITHMETIC;
 }
+
+void jit_trap_stack_overflow(jello_vm* vm) {
+  vm->trap_code = JELLO_TRAP_STACK_OVERFLOW;
+}

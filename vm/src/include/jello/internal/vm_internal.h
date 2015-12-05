@@ -168,10 +168,23 @@ struct jello_vm {
   /* -- quiescent tracking -- */
   atomic_int quiescent_depth;
   atomic_int in_exec;
+
+  frame_layout** jit_layout_by_func;
+  uint32_t jit_layout_by_func_len;
 };
 
 #define JIT_FRAME_STACK_MAX (64u * 1024u * 1024u)
 #define JIT_CALL_FRAMES_MAX 200000u
+
+void vm_warm_jit_layouts(jello_vm* vm, const jello_bc_module* m);
+int jit_try_grow_call_frames(jello_vm* vm);
+uint32_t jit_layout_total_or_zero(jello_vm* vm, uint32_t fi);
+frame_layout* jit_layout_ptr_or_null(jello_vm* vm, uint32_t fi);
+int jit_call_push_numeric(jello_vm* vm, uint32_t callee_fi, uint32_t caller_dst,
+                          uint32_t arg_first, uint32_t nargs);
+int jit_try_grow_frame_stack(jello_vm* vm, uint32_t need);
+
+uint8_t* jit_current_frame_mem(jello_vm* vm);
 
 /* -- register load/store: static inline for the hot dispatch path -- */
 static inline uint32_t vm_load_u32(reg_frame* rf, uint32_t r) {

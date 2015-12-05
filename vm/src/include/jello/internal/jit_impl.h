@@ -247,10 +247,12 @@ void jit_reg_store_home_xmm64(jit_reg_state* st, uint8_t vreg, int preg);
 void jit_reg_unpin_all(jit_reg_state* st);
 
 void jit_trap_arithmetic(jello_vm* vm);
+void jit_trap_stack_overflow(jello_vm* vm);
 
 enum {
   JIT_EMIT_BUF_MIN_CAP = 65536u,
   JIT_EMIT_PER_INSN_BUDGET = 128u,
+  JIT_EMIT_CALL_INSN_BUDGET = 512u,
 };
 
 /* -- the JIT frame is Chapter 3's frame, unmodified (jit/frame.c) -- */
