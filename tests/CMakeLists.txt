@@ -115,6 +115,21 @@ if(JELLO_ENABLE_JIT)
     target_compile_options(jit_cfg_tests PRIVATE -Werror)
   endif()
 
+  add_executable(jit_calls_tests csrc/jit_calls_tests.c)
+  target_link_libraries(jit_calls_tests PRIVATE jello_vm)
+  jello_enable_warnings(jit_calls_tests)
+  if(JELLO_WARNINGS_AS_ERRORS)
+    target_compile_options(jit_calls_tests PRIVATE -Werror)
+  endif()
+
+  add_test(NAME chapter9d_jit_calls
+    COMMAND jit_calls_tests
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+  add_test(NAME chapter9d_jit_calls_x64
+    COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/jit_calls_x86.sh"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
   if(TARGET jlo_tool)
     add_test(NAME chapter10_jit_conform
       COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/jit_numeric_conform.sh"
