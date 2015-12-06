@@ -248,6 +248,9 @@ void jit_reg_unpin_all(jit_reg_state* st);
 
 void jit_trap_arithmetic(jello_vm* vm);
 void jit_trap_stack_overflow(jello_vm* vm);
+void jit_trap_null_deref(jello_vm* vm);
+void jit_trap_bounds(jello_vm* vm);
+void jit_trap_type_mismatch(jello_vm* vm);
 
 enum {
   JIT_EMIT_BUF_MIN_CAP = 65536u,

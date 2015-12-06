@@ -629,6 +629,20 @@ typedef struct jit_branch_patch {
   uint8_t is_jcc;
 } jit_branch_patch;
 
+typedef enum jit_trap_kind {
+  JIT_TRAP_ARITH = 0,
+  JIT_TRAP_NULL,
+  JIT_TRAP_BOUNDS,
+  JIT_TRAP_TYPE,
+  JIT_TRAP_PASSTHROUGH,
+  JIT_TRAP_KIND_COUNT,
+} jit_trap_kind;
+
+typedef struct jit_trap_jump {
+  size_t at;
+  uint8_t kind; /* jit_trap_kind */
+} jit_trap_jump;
+
 typedef struct emit_ctx {
   jit_exec_buf* buf;
   jit_reg_state* ra;
@@ -636,12 +650,9 @@ typedef struct emit_ctx {
   const jello_bc_function* f;
   uint32_t fi;
   int allow_calls;
-  size_t* trap_jumps;
+  jit_trap_jump* trap_jumps;
   size_t trap_jump_cap;
   size_t trap_jump_count;
-  size_t* trap_passthrough_jumps;
-  size_t trap_passthrough_jump_cap;
-  size_t trap_passthrough_jump_count;
   jit_branch_patch* branches;
   size_t branch_cap;
   size_t branch_count;
@@ -691,29 +702,19 @@ static void patch_stack_overflow_jumps(emit_ctx* ctx, size_t so_off) {
   }
 }
 
-static void emit_jcc_trap(emit_ctx* ctx, uint8_t cc) {
+static void emit_jcc_trap(emit_ctx* ctx, uint8_t cc, uint8_t kind) {
   size_t at = emit_jcc_rel32(ctx->buf, cc, 0);
-  if(ctx->trap_jump_count < ctx->trap_jump_cap) ctx->trap_jumps[ctx->trap_jump_count++] = at;
-}
-
-static void patch_trap_jumps(emit_ctx* ctx, size_t trap_off) {
-  for(size_t i = 0; i < ctx->trap_jump_count; i++) {
-    size_t at = ctx->trap_jumps[i];
-    uint8_t op = ctx->buf->mem[at];
-    if(op == 0xE9) patch_jmp_rel32(ctx->buf, at, (int32_t)(trap_off - (at + 5)));
-    else patch_jcc_rel32(ctx->buf, at, (int32_t)(trap_off - (at + 6)));
+  if(ctx->trap_jump_count < ctx->trap_jump_cap) {
+    ctx->trap_jumps[ctx->trap_jump_count].at = at;
+    ctx->trap_jumps[ctx->trap_jump_count].kind = kind;
+    ctx->trap_jump_count++;
   }
 }
 
-static void emit_jcc_trap_passthrough(emit_ctx* ctx, uint8_t cc) {
-  size_t at = emit_jcc_rel32(ctx->buf, cc, 0);
-  if(ctx->trap_passthrough_jump_count < ctx->trap_passthrough_jump_cap)
-    ctx->trap_passthrough_jumps[ctx->trap_passthrough_jump_count++] = at;
-}
-
-static void patch_trap_passthrough_jumps(emit_ctx* ctx, size_t trap_off) {
-  for(size_t i = 0; i < ctx->trap_passthrough_jump_count; i++) {
-    size_t at = ctx->trap_passthrough_jumps[i];
+static void patch_trap_jumps(emit_ctx* ctx, const size_t* trap_off_by_kind) {
+  for(size_t i = 0; i < ctx->trap_jump_count; i++) {
+    size_t at = ctx->trap_jumps[i].at;
+    size_t trap_off = trap_off_by_kind[ctx->trap_jumps[i].kind];
     uint8_t op = ctx->buf->mem[at];
     if(op == 0xE9) patch_jmp_rel32(ctx->buf, at, (int32_t)(trap_off - (at + 5)));
     else patch_jcc_rel32(ctx->buf, at, (int32_t)(trap_off - (at + 6)));
@@ -750,12 +751,12 @@ static int resolve_target_bc(uint32_t bc_pc, int32_t imm, uint32_t ninsns, uint3
 
 static void emit_divmod_guard_i32(emit_ctx* ctx, unsigned div_gpr, unsigned lhs_gpr) {
   emit_test_r32_r32(ctx->buf, div_gpr, div_gpr);
-  emit_jcc_trap(ctx, 0x84);
+  emit_jcc_trap(ctx, 0x84, JIT_TRAP_ARITH);
   emit_cmp_r32_imm32(ctx->buf, div_gpr, (uint32_t)-1);
   size_t jne = ctx->buf->len;
   emit_jcc_rel32(ctx->buf, 0x85, 0);
   emit_cmp_r32_imm32(ctx->buf, lhs_gpr, (uint32_t)INT32_MIN);
-  emit_jcc_trap(ctx, 0x84);
+  emit_jcc_trap(ctx, 0x84, JIT_TRAP_ARITH);
   size_t ok = ctx->buf->len;
   patch_jcc_rel32(ctx->buf, jne, (int32_t)(ok - (jne + 6)));
 }
@@ -779,13 +780,13 @@ static void emit_cmp_r64_imm8(jit_exec_buf* buf, unsigned reg, int8_t imm) {
 
 static void emit_divmod_guard_i64(emit_ctx* ctx, unsigned div_gpr, unsigned lhs_gpr) {
   emit_test_r64_r64(ctx->buf, div_gpr, div_gpr);
-  emit_jcc_trap(ctx, 0x84);
+  emit_jcc_trap(ctx, 0x84, JIT_TRAP_ARITH);
   emit_cmp_r64_imm8(ctx->buf, div_gpr, (int8_t)-1);
   size_t jne = ctx->buf->len;
   emit_jcc_rel32(ctx->buf, 0x85, 0);
   emit_mov_r64_imm64(ctx->buf, X64_RAX, (uint64_t)INT64_MIN);
   emit_cmp_r64_r64(ctx->buf, lhs_gpr, X64_RAX);
-  emit_jcc_trap(ctx, 0x84);
+  emit_jcc_trap(ctx, 0x84, JIT_TRAP_ARITH);
   size_t ok = ctx->buf->len;
   patch_jcc_rel32(ctx->buf, jne, (int32_t)(ok - (jne + 6)));
 }
@@ -905,12 +906,15 @@ static void emit_epilogue_ok_tail(emit_ctx* ctx) {
 
 static void emit_trap_tail_x64(emit_ctx* ctx);
 
-static void emit_epilogue_trap(emit_ctx* ctx) {
+static void emit_epilogue_trap_generic(emit_ctx* ctx, void* trap_fn) {
   jit_exec_buf* buf = ctx->buf;
-  emit_mov_r64_r64(buf, X64_RDI, (unsigned)JIT_REG_VM);
-  emit_call_fn(buf, (void*)jit_trap_arithmetic);
+  if(trap_fn) {
+    emit_mov_r64_r64(buf, X64_RDI, (unsigned)JIT_REG_VM);
+    emit_call_fn(buf, trap_fn);
+  }
   emit_trap_tail_x64(ctx);
 }
+
 
 static void emit_epilogue_stack_overflow(emit_ctx* ctx) {
   jit_exec_buf* buf = ctx->buf;
@@ -1174,7 +1178,7 @@ static int emit_call_insn(emit_ctx* ctx, const jello_jit_ir_insn* ins, jello_jit
 
   emit_mov_r32_from_r12_disp(buf, X64_RAX, (uint32_t)offsetof(jello_vm, trap_code));
   emit_test_r32_r32(buf, X64_RAX, X64_RAX);
-  emit_jcc_trap_passthrough(ctx, 0x85);
+  emit_jcc_trap(ctx, 0x85, JIT_TRAP_PASSTHROUGH);
 
   jit_reg_state_discard_currents(ctx->ra);
   (void)jit_reg_get_gpr(ctx->ra, ins->a, 1);
@@ -1797,8 +1801,7 @@ int jello_jit_emit_function_into(const jello_bc_module* m, uint32_t fi, jit_exec
   }
 
   size_t blob_start = buf->len;
-  size_t trap_jumps[256];
-  size_t trap_passthrough_jumps[64];
+  jit_trap_jump trap_jumps[256];
   jit_branch_patch branches[256];
   size_t ret_jumps[64];
   size_t caller_ret_jumps[64];
@@ -1812,8 +1815,6 @@ int jello_jit_emit_function_into(const jello_bc_module* m, uint32_t fi, jit_exec
   ctx.allow_calls = allow_calls;
   ctx.trap_jumps = trap_jumps;
   ctx.trap_jump_cap = 256;
-  ctx.trap_passthrough_jumps = trap_passthrough_jumps;
-  ctx.trap_passthrough_jump_cap = 64;
   ctx.branches = branches;
   ctx.branch_cap = 256;
   ctx.ret_jumps = ret_jumps;
@@ -1882,9 +1883,8 @@ int jello_jit_emit_function_into(const jello_bc_module* m, uint32_t fi, jit_exec
   }
 
   size_t epilogue_ok_off = 0;
-  size_t trap_off = 0;
-  size_t trap_passthrough_off = 0;
   size_t stack_overflow_off = 0;
+  size_t trap_off_by_kind[JIT_TRAP_KIND_COUNT];
   if(ok) {
     epilogue_ok_off = buf->len;
     emit_epilogue_ok_tail(&ctx);
@@ -1894,14 +1894,19 @@ int jello_jit_emit_function_into(const jello_bc_module* m, uint32_t fi, jit_exec
       size_t at = ctx.caller_ret_jumps[i];
       patch_jcc_rel32(buf, at, (int32_t)(caller_ret_off - (at + 6)));
     }
-    trap_off = buf->len;
-    emit_epilogue_trap(&ctx);
+    trap_off_by_kind[JIT_TRAP_ARITH] = buf->len;
+    emit_epilogue_trap_generic(&ctx, (void*)jit_trap_arithmetic);
+    trap_off_by_kind[JIT_TRAP_NULL] = buf->len;
+    emit_epilogue_trap_generic(&ctx, (void*)jit_trap_null_deref);
+    trap_off_by_kind[JIT_TRAP_BOUNDS] = buf->len;
+    emit_epilogue_trap_generic(&ctx, (void*)jit_trap_bounds);
+    trap_off_by_kind[JIT_TRAP_TYPE] = buf->len;
+    emit_epilogue_trap_generic(&ctx, (void*)jit_trap_type_mismatch);
+    trap_off_by_kind[JIT_TRAP_PASSTHROUGH] = buf->len;
+    emit_epilogue_trap_generic(&ctx, NULL);
     stack_overflow_off = buf->len;
     emit_epilogue_stack_overflow(&ctx);
-    trap_passthrough_off = buf->len;
-    emit_trap_tail_x64(&ctx);
-    patch_trap_jumps(&ctx, trap_off);
-    patch_trap_passthrough_jumps(&ctx, trap_passthrough_off);
+    patch_trap_jumps(&ctx, trap_off_by_kind);
     patch_stack_overflow_jumps(&ctx, stack_overflow_off);
     for(size_t i = 0; i < ctx.ret_jump_count; i++) {
       size_t at = ctx.ret_jumps[i];

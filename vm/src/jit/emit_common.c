@@ -72,3 +72,15 @@ void jit_trap_arithmetic(jello_vm* vm) {
 void jit_trap_stack_overflow(jello_vm* vm) {
   vm->trap_code = JELLO_TRAP_STACK_OVERFLOW;
 }
+
+void jit_trap_null_deref(jello_vm* vm) {
+  vm->trap_code = JELLO_TRAP_NULL_DEREF;
+}
+
+void jit_trap_bounds(jello_vm* vm) {
+  vm->trap_code = JELLO_TRAP_BOUNDS;
+}
+
+void jit_trap_type_mismatch(jello_vm* vm) {
+  vm->trap_code = JELLO_TRAP_TYPE_MISMATCH;
+}
