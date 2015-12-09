@@ -811,15 +811,6 @@ static int jir_op_allowed(jello_jit_ir_op op, int allow_calls) {
   }
 }
 
-static int callee_has_pointer(const jello_bc_module* m, const jello_bc_function* f) {
-  for(uint32_t r = 0; r < f->nregs; r++) {
-    jello_type_kind k = vm_reg_kind(m, f, r);
-    if(k == JELLO_T_BYTES || k == JELLO_T_STRUCT || k == JELLO_T_OBJECT || k == JELLO_T_DYNAMIC)
-      return 1;
-  }
-  return 0;
-}
-
 static int ir_shape_ok(const jello_jit_ir_function* ir, const jello_bc_module* m,
                        const jello_bc_function* f, uint32_t fi, jello_type_kind* out_ret_kind,
                        int allow_calls) {
@@ -833,7 +824,6 @@ static int ir_shape_ok(const jello_jit_ir_function* ir, const jello_bc_module* m
       uint32_t callee = (op == JIR_CALL_SELF) ? fi : ir->insns[i].imm;
       if(!allow_calls) return 0;
       if(callee >= m->nfuncs) return 0;
-      if(callee_has_pointer(m, &m->funcs[callee])) return 0;
     }
     if(op == JIR_JMP || op == JIR_JMP_IF) {
       uint32_t tgt = 0;
@@ -891,6 +881,14 @@ static void emit_store_out(emit_ctx* ctx, jello_type_kind ret_kind, uint8_t ret_
   } else if(ret_kind == JELLO_T_F64) {
     int r = jit_reg_get_gpr(ctx->ra, ret_vreg, 1);
     emit_mov_dword_rbx_disp_imm32(buf, (uint32_t)offsetof(jello_numeric_result, kind), (uint32_t)JELLO_NUM_F64);
+    emit_mov_qword_rbx_disp_r64(buf, (uint32_t)offsetof(jello_numeric_result, as), (unsigned)r);
+  } else if(ret_kind == JELLO_T_BYTES || ret_kind == JELLO_T_STRUCT || ret_kind == JELLO_T_OBJECT) {
+    int r = jit_reg_get_gpr(ctx->ra, ret_vreg, 1);
+    emit_mov_dword_rbx_disp_imm32(buf, (uint32_t)offsetof(jello_numeric_result, kind), (uint32_t)JELLO_NUM_PTR);
+    emit_mov_qword_rbx_disp_r64(buf, (uint32_t)offsetof(jello_numeric_result, as), (unsigned)r);
+  } else if(ret_kind == JELLO_T_DYNAMIC) {
+    int r = jit_reg_get_gpr(ctx->ra, ret_vreg, 1);
+    emit_mov_dword_rbx_disp_imm32(buf, (uint32_t)offsetof(jello_numeric_result, kind), (uint32_t)JELLO_NUM_DYN);
     emit_mov_qword_rbx_disp_r64(buf, (uint32_t)offsetof(jello_numeric_result, as), (unsigned)r);
   }
 }
@@ -1119,6 +1117,23 @@ static int emit_call_insn(emit_ctx* ctx, const jello_jit_ir_insn* ins, jello_jit
   emit_add_r64_r64(buf, X64_RAX, X64_R11);
   emit_mov_r64_r64(buf, X64_R11, X64_RAX);
 
+  emit_mov_r32_from_r64_disp(buf, X64_RDX, X64_R14, (uint32_t)offsetof(frame_layout, has_pointer));
+  emit_test_r32_r32(buf, X64_RDX, X64_RDX);
+  size_t j_no_ptr = emit_jcc_rel32(buf, 0x84, 0); /* JE: has_pointer == 0 */
+  emit_mov_r64_r64(buf, X64_RDI, X64_R11);
+  emit_mov_r32_from_r64_disp(buf, X64_RSI, X64_R14, (uint32_t)offsetof(frame_layout, total));
+  emit_mov_r64_from_r64_disp(buf, X64_RDX, X64_R14, (uint32_t)offsetof(frame_layout, kind));
+  emit_mov_r32_imm32(buf, X64_RCX, callee_f->nregs);
+  emit_call_fn(buf, (void*)jit_frame_zero_and_null_init);
+  emit_mov_r64_from_r12_disp(buf, X64_RAX, (uint32_t)offsetof(jello_vm, frame_stack));
+  emit_mov_r32_from_r12_disp(buf, X64_RCX, (uint32_t)offsetof(jello_vm, frame_stack_top));
+  emit_add_r64_r64(buf, X64_RAX, X64_RCX);
+  emit_mov_r64_r64(buf, X64_R11, X64_RAX);
+  size_t after_zero = buf->len;
+  patch_jcc_rel32(buf, j_no_ptr, (int32_t)(after_zero - (j_no_ptr + 6)));
+
+  emit_mov_r32_from_r12_disp(buf, X64_RCX, (uint32_t)offsetof(jello_vm, frame_stack_top));
+  emit_mov_r32_from_r64_disp(buf, X64_RDX, X64_R14, (uint32_t)offsetof(frame_layout, total));
   emit_add_r32_r32(buf, X64_RCX, X64_RDX);
   emit_store_r32_to_r12_disp(buf, X64_RCX, (uint32_t)offsetof(jello_vm, frame_stack_top));
 
@@ -1138,7 +1153,7 @@ static int emit_call_insn(emit_ctx* ctx, const jello_jit_ir_insn* ins, jello_jit
   emit_store_r32_to_r64_disp(buf, X64_RDX, X64_RAX, (uint32_t)offsetof(call_frame, pc));
   emit_mov_r32_imm32(buf, X64_RDX, 1u);
   emit_store_r32_to_r64_disp(buf, X64_RDX, X64_RAX, (uint32_t)offsetof(call_frame, has_caller));
-  emit_mov_r32_imm32(buf, X64_RDX, 0u);
+  emit_mov_r32_from_r64_disp(buf, X64_RDX, X64_R10, (uint32_t)offsetof(frame_layout, has_pointer));
   emit_store_r32_to_r64_disp(buf, X64_RDX, X64_RAX, (uint32_t)offsetof(call_frame, has_pointer));
   emit_mov_r32_imm32(buf, X64_RDX, caller_dst);
   emit_store_r32_to_r64_disp(buf, X64_RDX, X64_RAX, (uint32_t)offsetof(call_frame, caller_dst));

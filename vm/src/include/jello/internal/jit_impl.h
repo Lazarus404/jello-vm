@@ -261,4 +261,7 @@ enum {
 /* -- the JIT frame is Chapter 3's frame, unmodified (jit/frame.c) -- */
 uint8_t* jit_frame_entry_base(jello_vm* vm);
 
+/* -- Bytes/Bits C helpers (jit/frame.c) -- */
+void jit_frame_zero_and_null_init(uint8_t* mem, uint32_t total, const uint8_t* kind, uint32_t nregs);
+
 #endif /* JELLO_JIT_IMPL_H */

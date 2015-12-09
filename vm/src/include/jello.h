@@ -172,6 +172,8 @@ typedef enum jello_numeric_kind {
   JELLO_NUM_I64,
   JELLO_NUM_F32,
   JELLO_NUM_F64,
+  JELLO_NUM_PTR,
+  JELLO_NUM_DYN,
 } jello_numeric_kind;
 
 typedef struct jello_numeric_result {
@@ -182,6 +184,8 @@ typedef struct jello_numeric_result {
     float f32;
     double f64;
     int b; /* 0/1, for JELLO_NUM_BOOL */
+    void* ptr; /* JELLO_NUM_PTR -- Bytes/Struct/Object, NULL is legal */
+    jello_value dyn; /* JELLO_NUM_DYN -- the raw tagged word */
   } as;
 } jello_numeric_result;
 

@@ -33,6 +33,10 @@ jello_exec_status vm_exec_loop(exec_ctx* ctx) {
             case JELLO_T_I64: out->kind = JELLO_NUM_I64; out->as.i64 = vm_load_i64(rf, ins->a); break;
             case JELLO_T_F32: out->kind = JELLO_NUM_F32; out->as.f32 = vm_load_f32(rf, ins->a); break;
             case JELLO_T_F64: out->kind = JELLO_NUM_F64; out->as.f64 = vm_load_f64(rf, ins->a); break;
+            case JELLO_T_BYTES: case JELLO_T_STRUCT: case JELLO_T_OBJECT:
+              out->kind = JELLO_NUM_PTR; out->as.ptr = vm_load_ptr(rf, ins->a); break;
+            case JELLO_T_DYNAMIC:
+              out->kind = JELLO_NUM_DYN; out->as.dyn = vm_load_val(rf, ins->a); break;
             default: out->kind = JELLO_NUM_VOID; break;
           }
           vm_pop_frame(vm);

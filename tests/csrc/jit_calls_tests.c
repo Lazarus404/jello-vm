@@ -180,6 +180,43 @@ static void test_module_prepare_rejects_call_native(void) {
   printf("test_module_prepare_rejects_call_native: PASS\n");
 }
 
+static void test_module_prepare_accepts_pointer_callee(void) {
+  jello_type_entry types[2];
+  types[0].kind = JELLO_T_I32;
+  types[1].kind = JELLO_T_BYTES;
+  memset(&types[0].as, 0, sizeof(types[0].as));
+  memset(&types[1].as, 0, sizeof(types[1].as));
+
+  jello_type_id r0[2];
+  r0[0] = 1; r0[1] = 1;
+  jello_type_id r1[1];
+  r1[0] = 1;
+
+  jello_insn e0[2];
+  e0[0].op = (uint8_t)JOP_CALL; e0[0].a = 1; e0[0].b = 0; e0[0].c = 1; e0[0].imm = 1;
+  e0[1].op = (uint8_t)JOP_RET; e0[1].a = 1;
+
+  jello_insn e1[1];
+  e1[0].op = (uint8_t)JOP_RET; e1[0].a = 0;
+
+  jello_bc_function funcs[2];
+  funcs[0].nregs = 2; funcs[0].cap_start = 0; funcs[0].reg_types = r0; funcs[0].ninsns = 2; funcs[0].insns = e0;
+  funcs[1].nregs = 1; funcs[1].cap_start = 0; funcs[1].reg_types = r1; funcs[1].ninsns = 1; funcs[1].insns = e1;
+
+  jello_bc_module m;
+  memset(&m, 0, sizeof(m));
+  m.ntypes = 2; m.types = types; m.nfuncs = 2; m.funcs = funcs; m.entry = 0;
+
+  jello_jit_module jm;
+  memset(&jm, 0, sizeof(jm));
+  assert(jello_jit_module_prepare(&m, &jm) == 1);
+  assert(jm.prepared == 1);
+  assert(jm.funcs[0].size > 0);
+  assert(jm.funcs[1].size > 0);
+  jello_jit_module_free(&jm);
+  printf("test_module_prepare_accepts_pointer_callee: PASS\n");
+}
+
 #if defined(__x86_64__)
 
 static jello_exec_status run_module_exec(const jello_bc_module* m, jello_numeric_result* out) {
@@ -335,6 +372,7 @@ int main(void) {
   test_call_rel32_patch_golden();
   test_module_prepare_rejects_call_in_single_compile();
   test_module_prepare_rejects_call_native();
+  test_module_prepare_accepts_pointer_callee();
 #if defined(__x86_64__)
   test_call_self_recursive_sum();
   test_call_direct_executes();

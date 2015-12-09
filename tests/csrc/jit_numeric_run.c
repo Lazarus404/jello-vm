@@ -28,6 +28,18 @@ static void print_numeric_result(const jello_numeric_result* r) {
     case JELLO_NUM_I64: printf("RESULT kind=I64 value=%lld\n", (long long)r->as.i64); break;
     case JELLO_NUM_F32: printf("RESULT kind=F32 value=%.9g\n", (double)r->as.f32); break;
     case JELLO_NUM_F64: printf("RESULT kind=F64 value=%.17g\n", r->as.f64); break;
+    case JELLO_NUM_PTR:
+      printf("RESULT kind=PTR value=%s\n", r->as.ptr ? "NON_NULL" : "NULL");
+      break;
+    case JELLO_NUM_DYN: {
+      jello_value v = r->as.dyn;
+      if(jello_is_null(v)) printf("RESULT kind=DYN tag=NULL\n");
+      else if(jello_is_i32(v)) printf("RESULT kind=DYN tag=I32 value=%d\n", jello_as_i32(v));
+      else if(jello_is_bool(v)) printf("RESULT kind=DYN tag=BOOL value=%d\n", jello_as_bool(v));
+      else if(jello_is_atom(v)) printf("RESULT kind=DYN tag=ATOM value=%u\n", jello_as_atom(v));
+      else printf("RESULT kind=DYN tag=PTR value=%s\n", jello_as_ptr(v) ? "NON_NULL" : "NULL");
+      break;
+    }
   }
 }
 #endif
