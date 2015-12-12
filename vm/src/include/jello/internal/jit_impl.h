@@ -262,6 +262,10 @@ enum {
 uint8_t* jit_frame_entry_base(jello_vm* vm);
 
 /* -- Bytes/Bits C helpers (jit/frame.c) -- */
+jello_bytes* jit_bytes_bitop(jello_vm* vm, jello_bytes* b, jello_bytes* c, int op_kind);
+void jit_bits_write(jello_bytes* b, uint32_t width, uint32_t bit_off, uint32_t value);
+uint32_t jit_bits_read(const jello_bytes* b, uint32_t width, uint32_t bit_off);
 void jit_frame_zero_and_null_init(uint8_t* mem, uint32_t total, const uint8_t* kind, uint32_t nregs);
+jello_bytes* jit_bytes_concat2(jello_vm* vm, jello_bytes* b, jello_bytes* c);
 
 #endif /* JELLO_JIT_IMPL_H */
