@@ -164,6 +164,18 @@ op_result op_obj_clear(exec_ctx* ctx, const jello_insn* ins) {
   return OP_CONTINUE;
 }
 
+/* -- JIT-facing wrappers around this file's own static helpers -- */
+jello_value jit_obj_chain_get(jello_vm* vm, const jello_bc_module* m, jello_object* o, uint32_t atom_id) {
+  vm->trap_code = JELLO_TRAP_NONE;
+  jello_value v;
+  if(!obj_get_chain(vm, m, o, atom_id, &v)) return jello_make_null();
+  return v;
+}
+
+void jit_obj_set_direct(const jello_bc_module* m, jello_object* o, uint32_t atom_id, jello_value v) {
+  obj_set_direct(m, o, atom_id, v);
+}
+
 op_result op_obj_copy(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   jello_object* src = (jello_object*)vm_load_ptr(&fr->rf, ins->b);

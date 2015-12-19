@@ -369,6 +369,10 @@ int vm_store_from_boxed(jello_vm* vm, const jello_bc_module* m, const jello_bc_f
                          reg_frame* rf, uint32_t dst, jello_value v);
 uint32_t vm_kindof_dynamic(jello_value v);
 
+/* -- JIT-facing Object wrappers (ops_obj.c) -- */
+jello_value jit_obj_chain_get(jello_vm* vm, const jello_bc_module* m, jello_object* o, uint32_t atom_id);
+void jit_obj_set_direct(const jello_bc_module* m, jello_object* o, uint32_t atom_id, jello_value v);
+
 /* -- Dynamic boundary opcode handlers (ops_dyn.c) -- */
 op_result op_to_dyn(exec_ctx* ctx, const jello_insn* ins);
 op_result op_from_dyn_i8(exec_ctx* ctx, const jello_insn* ins);
