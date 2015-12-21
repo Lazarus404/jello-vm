@@ -10,10 +10,10 @@
 uint32_t jit_reg_reload_count;
 uint32_t jit_reg_discard_count;
 
-static const uint8_t jit_gpr_pool[] = {6, 7, 8, 9, 10, 11, 14, 15};
+static const uint8_t jit_gpr_pool[] = {6, 7, 8, 9, 10, 11, 14};
 
 enum {
-  JIT_GPR_POOL_LEN = 8,
+  JIT_GPR_POOL_LEN = 7,
   JIT_XMM_POOL_LEN = 6,
 };
 

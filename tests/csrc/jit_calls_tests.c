@@ -272,6 +272,7 @@ static void test_call_direct_executes(void) {
   printf("test_call_direct_executes: PASS\n");
 }
 
+
 static void build_call_self_trap_module(jello_type_entry* types, jello_type_id* r0, jello_type_id* r1,
     jello_insn* e0, jello_insn* e1, jello_bc_function* funcs, jello_bc_module* m) {
   types[0].kind = JELLO_T_I32;

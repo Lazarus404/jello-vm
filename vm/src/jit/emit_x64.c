@@ -1389,6 +1389,28 @@ static void emit_movss_xmm_from_mem_rsp(jit_exec_buf* buf, unsigned xmm, uint8_t
   jit_exec_buf_write(buf, bytes, n);
 }
 
+static void emit_store_r64_to_mem_rsp(jit_exec_buf* buf, unsigned src, uint8_t disp) {
+  uint8_t bytes[8];
+  size_t n = 0;
+  bytes[n++] = (uint8_t)(0x48u | ((src >= 8) ? 0x04u : 0));
+  bytes[n++] = 0x89;
+  bytes[n++] = (uint8_t)(0x44u | ((src & 7u) << 3));
+  bytes[n++] = 0x24;
+  bytes[n++] = disp;
+  jit_exec_buf_write(buf, bytes, n);
+}
+
+static void emit_mov_r64_from_mem_rsp(jit_exec_buf* buf, unsigned dst, uint8_t disp) {
+  uint8_t bytes[8];
+  size_t n = 0;
+  bytes[n++] = (uint8_t)(0x48u | ((dst >= 8) ? 0x04u : 0));
+  bytes[n++] = 0x8B;
+  bytes[n++] = (uint8_t)(0x44u | ((dst & 7u) << 3));
+  bytes[n++] = 0x24;
+  bytes[n++] = disp;
+  jit_exec_buf_write(buf, bytes, n);
+}
+
 static void emit_f16_binop(emit_ctx* ctx, const jello_jit_ir_insn* ins, uint8_t sse_op) {
   emit_rsp_adjust_local(ctx->buf, 0, 16); /* sub rsp, 16 */
   emit_load_u32_slot_to_edi(ctx->buf, ins->b);
@@ -2178,13 +2200,14 @@ static void emit_physeq(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
   emit_current_rf_ptr_into_r11(buf);
   emit_mov_r64_r64(buf, X64_R14, X64_R11);
 
+  emit_rsp_adjust_local(buf, 0, 16); /* sub rsp, 16 */
   emit_mov_r64_r64(buf, X64_RDI, (unsigned)JIT_REG_VM);
   emit_mov_r64_imm64(buf, X64_RSI, (uint64_t)(uintptr_t)ctx->m);
   emit_mov_r64_imm64(buf, X64_RDX, (uint64_t)(uintptr_t)ctx->f);
   emit_mov_r64_r64(buf, X64_RCX, X64_R14);
   emit_mov_r32_imm32(buf, X64_R8, ins->b);
   emit_call_fn(buf, (void*)vm_box_from_typed);
-  emit_mov_r64_r64(buf, X64_R15, X64_RAX);
+  emit_store_r64_to_mem_rsp(buf, X64_RAX, 0);
 
   emit_mov_r64_r64(buf, X64_RDI, (unsigned)JIT_REG_VM);
   emit_mov_r64_imm64(buf, X64_RSI, (uint64_t)(uintptr_t)ctx->m);
@@ -2192,9 +2215,11 @@ static void emit_physeq(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
   emit_mov_r64_r64(buf, X64_RCX, X64_R14);
   emit_mov_r32_imm32(buf, X64_R8, ins->c);
   emit_call_fn(buf, (void*)vm_box_from_typed);
+  emit_mov_r64_from_mem_rsp(buf, X64_RCX, 0);
+  emit_rsp_adjust_local(buf, 1, 16); /* add rsp, 16 */
 
   int dst = jit_reg_alloc_gpr(ctx->ra, ins->a, 0);
-  emit_cmp_r64_r64(buf, X64_R15, X64_RAX);
+  emit_cmp_r64_r64(buf, X64_RCX, X64_RAX);
   emit_setcc(buf, 0x94, (unsigned)dst);
   emit_movzx_r32_r8(buf, (unsigned)dst, (unsigned)dst);
   jit_reg_store_home_gpr32(ctx->ra, ins->a, dst);
@@ -2296,12 +2321,12 @@ static void emit_obj_get(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
   emit_jcc_trap(ctx, 0x83, JIT_TRAP_BOUNDS); /* JAE: atom_id >= natoms */
   jit_reg_state_discard_currents(ctx->ra);
   emit_mov_r64_r64(buf, X64_R14, (unsigned)o);
-  emit_mov_r32_r32(buf, X64_R15, (unsigned)atom);
+  emit_mov_r32_r32(buf, X64_R9, (unsigned)atom);
 
   emit_mov_r64_r64(buf, X64_RDI, (unsigned)JIT_REG_VM);
   emit_mov_r64_imm64(buf, X64_RSI, (uint64_t)(uintptr_t)ctx->m);
   emit_mov_r64_r64(buf, X64_RDX, X64_R14);
-  emit_mov_r32_r32(buf, X64_RCX, X64_R15);
+  emit_mov_r32_r32(buf, X64_RCX, X64_R9);
   emit_call_fn(buf, (void*)jit_obj_chain_get);
   emit_mov_r64_r64(buf, X64_R14, X64_RAX);
 
@@ -2336,7 +2361,9 @@ static void emit_obj_set(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
   emit_jcc_trap(ctx, 0x83, JIT_TRAP_BOUNDS);
   jit_reg_state_discard_currents(ctx->ra);
   emit_mov_r64_r64(buf, X64_R14, (unsigned)o);
-  emit_mov_r32_r32(buf, X64_R15, (unsigned)atom);
+  emit_rsp_adjust_local(buf, 0, 16); /* sub rsp, 16 */
+  emit_mov_r32_r32(buf, X64_R9, (unsigned)atom);
+  emit_store_r64_to_mem_rsp(buf, X64_R9, 0);
   emit_current_rf_ptr_into_r11(buf);
 
   emit_mov_r64_r64(buf, X64_RDI, (unsigned)JIT_REG_VM);
@@ -2345,10 +2372,11 @@ static void emit_obj_set(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
   emit_mov_r64_r64(buf, X64_RCX, X64_R11);
   emit_mov_r32_imm32(buf, X64_R8, ins->a);
   emit_call_fn(buf, (void*)vm_box_from_typed);
+  emit_mov_r64_from_mem_rsp(buf, X64_RDX, 0);
+  emit_rsp_adjust_local(buf, 1, 16); /* add rsp, 16 */
 
   emit_mov_r64_imm64(buf, X64_RDI, (uint64_t)(uintptr_t)ctx->m);
   emit_mov_r64_r64(buf, X64_RSI, X64_R14);
-  emit_mov_r32_r32(buf, X64_RDX, X64_R15);
   emit_mov_r64_r64(buf, X64_RCX, X64_RAX);
   emit_call_fn(buf, (void*)jit_obj_set_direct);
 }

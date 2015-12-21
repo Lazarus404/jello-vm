@@ -190,6 +190,7 @@ typedef enum jit_x64_reg {
   JIT_REG_OUT = 3,
   JIT_REG_VM = 12,   /* R12 */
   JIT_REG_BASE = 13, /* R13 */
+  JIT_REG_SURVIVE = 15, /* R15 */
 } jit_x64_reg;
 
 /* -- the minimal W^X proof mechanism -- */
