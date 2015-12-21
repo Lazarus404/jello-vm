@@ -1104,22 +1104,28 @@ static void emit_caller_ret_tail(emit_ctx* ctx) {
   int wide = (rk == JELLO_T_I64 || rk == JELLO_T_F64);
 
   emit_mov_r32_from_r64_disp(buf, X64_R10, X64_R8, (uint32_t)offsetof(call_frame, caller_dst));
-  emit_imul_r32_imm32(buf, X64_R10, REG_SLOT_BYTES);
-  emit_mov_r32_from_r12_disp(buf, X64_RAX, (uint32_t)offsetof(jello_vm, call_frames_len));
-  emit_mov_r64_from_r12_disp(buf, X64_RCX, (uint32_t)offsetof(jello_vm, call_frames));
-  emit_mov_r32_imm32(buf, X64_RDX, 2u);
-  emit_sub_r32_r32(buf, X64_RAX, X64_RDX);
-  emit_mov_r64_imm64(buf, X64_RDX, sizeof(call_frame));
-  emit_imul_r64_r64(buf, X64_RAX, X64_RDX);
-  emit_add_r64_r64(buf, X64_RAX, X64_RCX);
-  emit_mov_r64_from_r64_disp(buf, X64_R11, X64_RAX, (uint32_t)offsetof(call_frame, rf) + (uint32_t)offsetof(reg_frame, mem));
-  emit_add_r64_r64(buf, X64_R11, X64_R10);
-  if(wide) emit_store_r64_to_r64_disp(buf, X64_R9, X64_R11, 0);
-  else emit_store_r32_to_r64_disp(buf, X64_R9, X64_R11, 0);
+
+  if(wide) emit_mov_r64_r64(buf, X64_R11, X64_R9);
+  else emit_mov_r32_r32(buf, X64_R11, X64_R9);
 
   emit_mov_r64_r64(buf, X64_RDI, (unsigned)JIT_REG_VM);
   emit_call_fn(buf, (void*)vm_pop_frame);
-  emit_reload_jit_reg_base_x64(buf);
+
+  emit_mov_r32_from_r12_disp(buf, X64_RAX, (uint32_t)offsetof(jello_vm, call_frames_len));
+  emit_mov_r64_from_r12_disp(buf, X64_RCX, (uint32_t)offsetof(jello_vm, call_frames));
+  emit_mov_r32_imm32(buf, X64_RDX, 1u);
+  emit_sub_r32_r32(buf, X64_RAX, X64_RDX);
+  emit_mov_r64_imm64(buf, X64_RDX, sizeof(call_frame));
+  emit_mov_r64_r64(buf, X64_R8, X64_RAX);
+  emit_imul_r64_r64(buf, X64_R8, X64_RDX);
+  emit_add_r64_r64(buf, X64_R8, X64_RCX);
+  emit_mov_r64_from_r64_disp(buf, (unsigned)JIT_REG_BASE, X64_R8, (uint32_t)offsetof(call_frame, rf) + (uint32_t)offsetof(reg_frame, mem));
+  emit_imul_r32_imm32(buf, X64_R10, REG_SLOT_BYTES);
+  emit_mov_r64_r64(buf, X64_R8, (unsigned)JIT_REG_BASE);
+  emit_add_r64_r64(buf, X64_R8, X64_R10);
+  if(wide) emit_store_r64_to_r64_disp(buf, X64_R11, X64_R8, 0);
+  else emit_store_r32_to_r64_disp(buf, X64_R11, X64_R8, 0);
+
   emit_ret(buf);
 }
 
