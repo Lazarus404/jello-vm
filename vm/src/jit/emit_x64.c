@@ -2858,6 +2858,13 @@ int jello_jit_emit_function_into(const jello_bc_module* m, uint32_t fi, jit_exec
     }
   }
 
+  jit_survive_plan splan;
+  if(!jit_survive_plan_build(ir, m, f, is_target, &splan)) {
+    free(is_target); free(discarded); free(native_off); free(is_loop_anchor);
+    jello_jit_ir_free(ir);
+    return 0;
+  }
+
   size_t blob_start = buf->len;
   jit_trap_jump trap_jumps[256];
   jit_branch_patch branches[256];
@@ -3008,6 +3015,7 @@ int jello_jit_emit_function_into(const jello_bc_module* m, uint32_t fi, jit_exec
   }
 
   jit_reg_state_free(&ra);
+  jit_survive_plan_free(&splan);
   jello_jit_ir_free(ir);
   free(is_target);
   free(discarded);

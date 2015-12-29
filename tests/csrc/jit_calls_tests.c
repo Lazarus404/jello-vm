@@ -273,6 +273,66 @@ static void test_call_direct_executes(void) {
 }
 
 
+static void build_call_direct_branch_decline_module(jello_type_entry* types,
+    jello_type_id* r0, jello_type_id* r1, jello_type_id* r2,
+    jello_insn* e0, jello_insn* e1, jello_insn* e2,
+    jello_bc_function* funcs, jello_bc_module* m, uint32_t n) {
+  types[0].kind = JELLO_T_I32;
+  types[1].kind = JELLO_T_BOOL;
+  memset(&types[0].as, 0, sizeof(types[0].as));
+  memset(&types[1].as, 0, sizeof(types[1].as));
+
+  r0[0] = 0; r0[1] = 0;
+  r1[0] = 0; r1[1] = 0;
+  r2[0] = 0; r2[1] = 0; r2[2] = 0; r2[3] = 0; r2[4] = 1; r2[5] = 0;
+
+  e0[0].op = (uint8_t)JOP_ADD_I32_IMM; e0[0].a = 1; e0[0].b = 0; e0[0].imm = 100; /* leaf(x) = x+100 */
+  e0[1].op = (uint8_t)JOP_RET; e0[1].a = 1;
+
+  e1[0].op = (uint8_t)JOP_CONST_I32; e1[0].a = 0; e1[0].imm = n;
+  e1[1].op = (uint8_t)JOP_CALL; e1[1].a = 1; e1[1].b = 0; e1[1].c = 1; e1[1].imm = 2; /* -> func[2] */
+  e1[2].op = (uint8_t)JOP_RET; e1[2].a = 1;
+
+  e2[0].op = (uint8_t)JOP_CALL; e2[0].a = 1; e2[0].b = 0; e2[0].c = 1; e2[0].imm = 0; /* r1 = leaf(n) -- candidate */
+  e2[1].op = (uint8_t)JOP_SUB_I32_IMM; e2[1].a = 2; e2[1].b = 0; e2[1].imm = 1; /* r2 = n-1 */
+  e2[2].op = (uint8_t)JOP_CALL; e2[2].a = 3; e2[2].b = 2; e2[2].c = 1; e2[2].imm = 0; /* r3 = leaf(n-1) */
+  e2[3].op = (uint8_t)JOP_EQ_I32_IMM; e2[3].a = 4; e2[3].b = 0; e2[3].imm = 0; /* r4 = (n == 0), unrelated to r1 */
+  e2[4].op = (uint8_t)JOP_JMP_IF; e2[4].a = 4; e2[4].imm = 1; /* -> pc 6 -- a branch sits between call2 and the would-be consumer */
+  e2[5].op = (uint8_t)JOP_ADD_I32; e2[5].a = 5; e2[5].b = 1; e2[5].c = 3; /* would-be consumer -- must not be reached across the branch */
+  e2[6].op = (uint8_t)JOP_RET; e2[6].a = 5;
+
+  funcs[0].nregs = 2; funcs[0].cap_start = 0; funcs[0].reg_types = r0; funcs[0].ninsns = 2; funcs[0].insns = e0;
+  funcs[1].nregs = 2; funcs[1].cap_start = 0; funcs[1].reg_types = r1; funcs[1].ninsns = 3; funcs[1].insns = e1;
+  funcs[2].nregs = 6; funcs[2].cap_start = 0; funcs[2].reg_types = r2; funcs[2].ninsns = 7; funcs[2].insns = e2;
+
+  memset(m, 0, sizeof(*m));
+  m->ntypes = 2;
+  m->types = types;
+  m->nfuncs = 3;
+  m->funcs = funcs;
+  m->entry = 1;
+}
+
+static void test_call_survive_declines_across_branch(void) {
+  jello_type_entry types[2];
+  jello_type_id r0[2], r1[2], r2[6];
+  jello_insn e0[2], e1[3], e2[7];
+  jello_bc_function funcs[3];
+  jello_bc_module m;
+  build_call_direct_branch_decline_module(types, r0, r1, r2, e0, e1, e2, funcs, &m, 5);
+
+  jit_call_survive_armed_count = 0;
+  jit_call_survive_decline_count = 0;
+  jello_numeric_result out;
+  memset(&out, 0, sizeof(out));
+  assert(run_module_exec(&m, &out) == JELLO_EXEC_OK);
+  assert(out.kind == JELLO_NUM_I32);
+  assert(out.as.i32 == (5 + 100) + (4 + 100)); /* 209 -- correct regardless of survive */
+  assert(jit_call_survive_decline_count > 0);
+  printf("test_call_survive_declines_across_branch: PASS (result=%d, armed=%u, declined=%u)\n",
+      out.as.i32, jit_call_survive_armed_count, jit_call_survive_decline_count);
+}
+
 static void build_call_self_trap_module(jello_type_entry* types, jello_type_id* r0, jello_type_id* r1,
     jello_insn* e0, jello_insn* e1, jello_bc_function* funcs, jello_bc_module* m) {
   types[0].kind = JELLO_T_I32;
@@ -379,12 +439,14 @@ int main(void) {
   test_call_direct_executes();
   test_nested_jit_trap_propagates();
   test_wx_icache_prepare_exec_repeated();
+  test_call_survive_declines_across_branch();
   test_nested_ret_does_not_hit_boundary_epilogue();
 #else
   printf("test_call_self_recursive_sum: SKIPPED (host is not x86_64)\n");
   printf("test_call_direct_executes: SKIPPED (host is not x86_64)\n");
   printf("test_nested_jit_trap_propagates: SKIPPED (host is not x86_64)\n");
   printf("test_wx_icache_prepare_exec_repeated: SKIPPED (host is not x86_64)\n");
+  printf("test_call_survive_declines_across_branch: SKIPPED (host is not x86_64)\n");
   printf("test_nested_ret_does_not_hit_boundary_epilogue: SKIPPED (host is not x86_64)\n");
 #endif
   printf("jit_calls_tests: all tests passed\n");

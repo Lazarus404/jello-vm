@@ -9,6 +9,8 @@
 
 uint32_t jit_reg_reload_count;
 uint32_t jit_reg_discard_count;
+uint32_t jit_call_survive_armed_count;
+uint32_t jit_call_survive_decline_count;
 
 static const uint8_t jit_gpr_pool[] = {6, 7, 8, 9, 10, 11, 14};
 
