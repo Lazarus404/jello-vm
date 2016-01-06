@@ -3,6 +3,7 @@
 
 #include <jello/internal/jit_impl.h>
 #include <jello/internal/vm_internal.h>
+#include <assert.h>
 #include <string.h>
 
 /* -- The JIT frame is Chapter 3's frame, unmodified -- */
@@ -62,6 +63,11 @@ jello_bytes* jit_bytes_concat2(jello_vm* vm, jello_bytes* b, jello_bytes* c) {
   memcpy(dst->data, b->data, b->length);
   memcpy(dst->data + b->length, c->data, c->length);
   return dst;
+}
+
+void jit_debug_assert_rsp_aligned16(uint64_t rsp) {
+  (void)rsp;
+  assert((rsp & 0xFu) == 0 && "body_off's own 16-byte call alignment was broken by a survive-slot stack adjustment");
 }
 
 uint32_t jit_bits_read(const jello_bytes* b, uint32_t width, uint32_t bit_off) {

@@ -2,6 +2,7 @@
 // Copyright (c) Jahred Love. All rights reserved.
 
 #include <jello/internal/jit_impl.h>
+#include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -137,6 +138,8 @@ void jit_reg_state_init(jit_reg_state* st, uint32_t nregs, jit_reg_emit_ctx emit
   memset(st->xmm_pinned, 0, sizeof st->xmm_pinned);
   st->next_gpr_victim = 0;
   st->next_xmm_victim = 0;
+  st->survive_held = 0;
+  st->survive_vreg = 0;
 }
 
 void jit_reg_state_free(jit_reg_state* st) {
@@ -165,6 +168,26 @@ void jit_reg_state_discard_currents(jit_reg_state* st) {
   jit_reg_state_clobber_call(st);
 }
 
+void jit_reg_survive_hold(jit_reg_state* st, uint8_t vreg) {
+  assert(!st->survive_held && "jit_reg_survive_hold: already held (Sec 4.1: one slot at a time)");
+  emit_load_gpr64_from_slot(st->emit.buf, (unsigned)JIT_REG_SURVIVE, vreg);
+  st->survive_held = 1;
+  st->survive_vreg = vreg;
+}
+
+void jit_reg_survive_release(jit_reg_state* st) {
+  assert(st->survive_held && "jit_reg_survive_release: not held");
+  st->survive_held = 0;
+}
+
+int jit_reg_survive_is_held(const jit_reg_state* st) {
+  return st->survive_held;
+}
+
+uint8_t jit_reg_survive_held_vreg(const jit_reg_state* st) {
+  return st->survive_vreg;
+}
+
 void jit_reg_unbind_preg(jit_reg_state* st, int preg) {
   if(preg_is_xmm(preg)) {
     int xi = preg_xmm_index(preg);
@@ -185,6 +208,7 @@ void jit_reg_unbind_preg(jit_reg_state* st, int preg) {
 
 void jit_reg_unbind_vreg(jit_reg_state* st, uint8_t vreg) {
   if((uint32_t)vreg >= st->nregs) return;
+  if(st->survive_held && st->survive_vreg == vreg) return;
   int preg = (int)st->current[vreg];
   if(preg == JIT_PREG_NONE) return;
   jit_reg_unbind_preg(st, preg);

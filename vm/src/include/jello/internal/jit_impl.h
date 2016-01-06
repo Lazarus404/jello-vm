@@ -225,6 +225,8 @@ typedef struct jit_reg_state {
   unsigned next_gpr_victim;
   unsigned next_xmm_victim;
   jit_reg_emit_ctx emit;
+  int survive_held;
+  uint8_t survive_vreg;
 } jit_reg_state;
 
 extern uint32_t jit_reg_reload_count;
@@ -249,6 +251,10 @@ void jit_reg_store_home_gpr64(jit_reg_state* st, uint8_t vreg, int preg);
 void jit_reg_store_home_xmm32(jit_reg_state* st, uint8_t vreg, int preg);
 void jit_reg_store_home_xmm64(jit_reg_state* st, uint8_t vreg, int preg);
 void jit_reg_unpin_all(jit_reg_state* st);
+void jit_reg_survive_hold(jit_reg_state* st, uint8_t vreg);
+void jit_reg_survive_release(jit_reg_state* st);
+int jit_reg_survive_is_held(const jit_reg_state* st);
+uint8_t jit_reg_survive_held_vreg(const jit_reg_state* st);
 
 typedef struct jit_survive_plan {
   uint8_t* armed;      /* [ninsns] -- 1 iff this call index holds `candidate` across its own call */
@@ -261,6 +267,7 @@ typedef struct jit_survive_plan {
 int jit_survive_plan_build(const jello_jit_ir_function* ir, const jello_bc_module* m,
     const jello_bc_function* f, const uint8_t* is_target, jit_survive_plan* out_plan);
 void jit_survive_plan_free(jit_survive_plan* plan);
+void jit_debug_assert_rsp_aligned16(uint64_t rsp);
 void jit_trap_arithmetic(jello_vm* vm);
 void jit_trap_stack_overflow(jello_vm* vm);
 void jit_trap_null_deref(jello_vm* vm);

@@ -37,6 +37,42 @@ static void build_call_direct_module(jello_type_entry* types, jello_type_id* r0,
 }
 
 #if defined(__x86_64__)
+static void build_fib_survive_module(jello_type_entry* types, jello_type_id* r0, jello_type_id* r1,
+                                     jello_insn* e0, jello_insn* e1, jello_bc_function* funcs,
+                                     jello_bc_module* m, uint32_t n) {
+  types[0].kind = JELLO_T_I32;
+  types[1].kind = JELLO_T_BOOL;
+  memset(&types[0].as, 0, sizeof(types[0].as));
+  memset(&types[1].as, 0, sizeof(types[1].as));
+
+  r0[0] = 0; r0[1] = 0;
+  r1[0] = 0; r1[1] = 1; r1[2] = 0; r1[3] = 0; r1[4] = 0; r1[5] = 0; r1[6] = 0;
+
+  e0[0].op = (uint8_t)JOP_CONST_I32; e0[0].a = 0; e0[0].imm = n;
+  e0[1].op = (uint8_t)JOP_CALL; e0[1].a = 1; e0[1].b = 0; e0[1].c = 1; e0[1].imm = 1;
+  e0[2].op = (uint8_t)JOP_RET; e0[2].a = 1;
+
+  e1[0].op = (uint8_t)JOP_LT_I32_IMM; e1[0].a = 1; e1[0].b = 0; e1[0].imm = 2;
+  e1[1].op = (uint8_t)JOP_JMP_IF; e1[1].a = 1; e1[1].imm = 6; /* -> pc 8 (base case) */
+  e1[2].op = (uint8_t)JOP_SUB_I32_IMM; e1[2].a = 2; e1[2].b = 0; e1[2].imm = 1;
+  e1[3].op = (uint8_t)JOP_CALL; e1[3].a = 3; e1[3].b = 2; e1[3].c = 1; e1[3].imm = 1; /* r3 = fib(n-1) -- survive candidate */
+  e1[4].op = (uint8_t)JOP_SUB_I32_IMM; e1[4].a = 4; e1[4].b = 0; e1[4].imm = 2;
+  e1[5].op = (uint8_t)JOP_CALL; e1[5].a = 5; e1[5].b = 4; e1[5].c = 1; e1[5].imm = 1; /* r5 = fib(n-2) */
+  e1[6].op = (uint8_t)JOP_ADD_I32; e1[6].a = 6; e1[6].b = 3; e1[6].c = 5; /* consumer: r3 + r5 */
+  e1[7].op = (uint8_t)JOP_RET; e1[7].a = 6;
+  e1[8].op = (uint8_t)JOP_RET; e1[8].a = 0; /* base case: n < 2 */
+
+  funcs[0].nregs = 2; funcs[0].cap_start = 0; funcs[0].reg_types = r0; funcs[0].ninsns = 3; funcs[0].insns = e0;
+  funcs[1].nregs = 7; funcs[1].cap_start = 0; funcs[1].reg_types = r1; funcs[1].ninsns = 9; funcs[1].insns = e1;
+
+  memset(m, 0, sizeof(*m));
+  m->ntypes = 2;
+  m->types = types;
+  m->nfuncs = 2;
+  m->funcs = funcs;
+  m->entry = 0;
+}
+
 static void build_call_self_sum_module(jello_type_entry* types, jello_type_id* r0, jello_type_id* r1,
                                        jello_insn* e0, jello_insn* e1, jello_bc_function* funcs,
                                        jello_bc_module* m) {
@@ -273,6 +309,65 @@ static void test_call_direct_executes(void) {
 }
 
 
+static int32_t fib_ref(int32_t n) {
+  return (n < 2) ? n : fib_ref(n - 1) + fib_ref(n - 2);
+}
+
+static void build_call_direct_survive_module(jello_type_entry* types,
+    jello_type_id* r0, jello_type_id* r1, jello_type_id* r2,
+    jello_insn* e0, jello_insn* e1, jello_insn* e2,
+    jello_bc_function* funcs, jello_bc_module* m, uint32_t n) {
+  types[0].kind = JELLO_T_I32;
+  memset(&types[0].as, 0, sizeof(types[0].as));
+
+  r0[0] = 0; r0[1] = 0;
+  r1[0] = 0; r1[1] = 0;
+  r2[0] = 0; r2[1] = 0; r2[2] = 0; r2[3] = 0; r2[4] = 0;
+
+  e0[0].op = (uint8_t)JOP_MUL_I32_IMM; e0[0].a = 1; e0[0].b = 0; e0[0].imm = 2; /* leaf(x) = 2x */
+  e0[1].op = (uint8_t)JOP_RET; e0[1].a = 1;
+
+  e1[0].op = (uint8_t)JOP_CONST_I32; e1[0].a = 0; e1[0].imm = n;
+  e1[1].op = (uint8_t)JOP_CALL; e1[1].a = 1; e1[1].b = 0; e1[1].c = 1; e1[1].imm = 2; /* -> func[2] */
+  e1[2].op = (uint8_t)JOP_RET; e1[2].a = 1;
+
+  e2[0].op = (uint8_t)JOP_CALL; e2[0].a = 1; e2[0].b = 0; e2[0].c = 1; e2[0].imm = 0; /* r1 = leaf(n) -- candidate */
+  e2[1].op = (uint8_t)JOP_SUB_I32_IMM; e2[1].a = 2; e2[1].b = 0; e2[1].imm = 1; /* r2 = n-1 */
+  e2[2].op = (uint8_t)JOP_CALL; e2[2].a = 3; e2[2].b = 2; e2[2].c = 1; e2[2].imm = 0; /* r3 = leaf(n-1) */
+  e2[3].op = (uint8_t)JOP_ADD_I32; e2[3].a = 4; e2[3].b = 1; e2[3].c = 3; /* consumer: r1 + r3 */
+  e2[4].op = (uint8_t)JOP_RET; e2[4].a = 4;
+
+  funcs[0].nregs = 2; funcs[0].cap_start = 0; funcs[0].reg_types = r0; funcs[0].ninsns = 2; funcs[0].insns = e0;
+  funcs[1].nregs = 2; funcs[1].cap_start = 0; funcs[1].reg_types = r1; funcs[1].ninsns = 3; funcs[1].insns = e1;
+  funcs[2].nregs = 5; funcs[2].cap_start = 0; funcs[2].reg_types = r2; funcs[2].ninsns = 5; funcs[2].insns = e2;
+
+  memset(m, 0, sizeof(*m));
+  m->ntypes = 1;
+  m->types = types;
+  m->nfuncs = 3;
+  m->funcs = funcs;
+  m->entry = 1;
+}
+
+static void test_call_direct_survive_correct(void) {
+  jello_type_entry types[1];
+  jello_type_id r0[2], r1[2], r2[5];
+  jello_insn e0[2], e1[3], e2[5];
+  jello_bc_function funcs[3];
+  jello_bc_module m;
+  build_call_direct_survive_module(types, r0, r1, r2, e0, e1, e2, funcs, &m, 5);
+
+  jit_call_survive_armed_count = 0;
+  jello_numeric_result out;
+  memset(&out, 0, sizeof(out));
+  assert(run_module_exec(&m, &out) == JELLO_EXEC_OK);
+  assert(out.kind == JELLO_NUM_I32);
+  assert(out.as.i32 == 2 * 5 + 2 * 4); /* 18 */
+  assert(jit_call_survive_armed_count > 0);
+  printf("test_call_direct_survive_correct: PASS (result=%d, armed=%u)\n",
+      out.as.i32, jit_call_survive_armed_count);
+}
+
 static void build_call_direct_branch_decline_module(jello_type_entry* types,
     jello_type_id* r0, jello_type_id* r1, jello_type_id* r2,
     jello_insn* e0, jello_insn* e1, jello_insn* e2,
@@ -331,6 +426,25 @@ static void test_call_survive_declines_across_branch(void) {
   assert(jit_call_survive_decline_count > 0);
   printf("test_call_survive_declines_across_branch: PASS (result=%d, armed=%u, declined=%u)\n",
       out.as.i32, jit_call_survive_armed_count, jit_call_survive_decline_count);
+}
+
+static void test_call_self_survive_fib_correct(void) {
+  jello_type_entry types[2];
+  jello_type_id r0[2], r1[7];
+  jello_insn e0[3], e1[9];
+  jello_bc_function funcs[2];
+  jello_bc_module m;
+  build_fib_survive_module(types, r0, r1, e0, e1, funcs, &m, 15);
+
+  jit_call_survive_armed_count = 0;
+  jello_numeric_result out;
+  memset(&out, 0, sizeof(out));
+  assert(run_module_exec(&m, &out) == JELLO_EXEC_OK);
+  assert(out.kind == JELLO_NUM_I32);
+  assert(out.as.i32 == fib_ref(15));
+  assert(jit_call_survive_armed_count > 0);
+  printf("test_call_self_survive_fib_correct: PASS (fib(15)=%d, armed=%u)\n",
+      out.as.i32, jit_call_survive_armed_count);
 }
 
 static void build_call_self_trap_module(jello_type_entry* types, jello_type_id* r0, jello_type_id* r1,
@@ -439,6 +553,8 @@ int main(void) {
   test_call_direct_executes();
   test_nested_jit_trap_propagates();
   test_wx_icache_prepare_exec_repeated();
+  test_call_self_survive_fib_correct();
+  test_call_direct_survive_correct();
   test_call_survive_declines_across_branch();
   test_nested_ret_does_not_hit_boundary_epilogue();
 #else
@@ -446,6 +562,8 @@ int main(void) {
   printf("test_call_direct_executes: SKIPPED (host is not x86_64)\n");
   printf("test_nested_jit_trap_propagates: SKIPPED (host is not x86_64)\n");
   printf("test_wx_icache_prepare_exec_repeated: SKIPPED (host is not x86_64)\n");
+  printf("test_call_self_survive_fib_correct: SKIPPED (host is not x86_64)\n");
+  printf("test_call_direct_survive_correct: SKIPPED (host is not x86_64)\n");
   printf("test_call_survive_declines_across_branch: SKIPPED (host is not x86_64)\n");
   printf("test_nested_ret_does_not_hit_boundary_epilogue: SKIPPED (host is not x86_64)\n");
 #endif
