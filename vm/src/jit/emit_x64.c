@@ -1104,6 +1104,10 @@ static void emit_trap_tail_x64(emit_ctx* ctx) {
   emit_call_fn(buf, (void*)vm_pop_frame);
   emit_reload_jit_reg_base_x64(buf);
   emit_mov_eax_imm32(buf, (uint32_t)JELLO_EXEC_TRAP);
+  if(ctx->survive_any_armed) {
+    emit_mov_r64_from_mem_rsp(buf, (unsigned)JIT_REG_SURVIVE, 0);
+    emit_rsp_adjust_local(buf, 1, 16);
+  }
   emit_ret(buf);
 
   size_t boundary = buf->len;
