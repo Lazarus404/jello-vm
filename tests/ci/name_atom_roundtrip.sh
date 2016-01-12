@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+JLO_TOOL="${1:?usage: name_atom_roundtrip.sh <path-to-jlo_tool>}"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+TMP="$(mktemp -d)"
+trap 'rm -rf "${TMP}"' EXIT
+
+failures=0
+fail() {
+  echo "name_atom_roundtrip FAIL: $*" >&2
+  failures=$((failures + 1))
+}
+
+NAMED_SRC="${ROOT}/tests/bytecode/named_functions.jlo.txt"
+NAMED_BIN="${TMP}/named_functions.jlo"
+if ! "${JLO_TOOL}" asm "${NAMED_SRC}" -o "${NAMED_BIN}" 2>"${TMP}/named.asm.err"; then
+  fail "named_functions: asm failed -- $(cat "${TMP}/named.asm.err")"
+else
+  disasm="$("${JLO_TOOL}" disasm "${NAMED_BIN}")"
+  if ! grep -q "func\[0\] name=update " <<<"${disasm}"; then
+    fail "named_functions: func[0]'s own name did not round-trip -- got: ${disasm}"
+  elif ! grep -q "func\[1\] name=helper " <<<"${disasm}"; then
+    fail "named_functions: func[1]'s own name did not round-trip -- got: ${disasm}"
+  else
+    echo "name_atom_roundtrip: named_functions -- both names round-tripped"
+  fi
+  run_out="$("${JLO_TOOL}" run "${NAMED_BIN}")"
+  if [[ "${run_out}" != "RESULT kind=I32 value=42" ]]; then
+    fail "named_functions: expected [RESULT kind=I32 value=42] got [${run_out}]"
+  else
+    echo "name_atom_roundtrip: named_functions -- ${run_out}"
+  fi
+fi
+
+UNNAMED_SRC="${ROOT}/tests/bytecode/bench/fib.jlo.txt"
+UNNAMED_BIN="${TMP}/fib.jlo"
+if ! "${JLO_TOOL}" asm "${UNNAMED_SRC}" -o "${UNNAMED_BIN}" 2>"${TMP}/unnamed.asm.err"; then
+  fail "fib (unnamed): asm failed -- $(cat "${TMP}/unnamed.asm.err")"
+else
+  disasm="$("${JLO_TOOL}" disasm "${UNNAMED_BIN}")"
+  if grep -q "name=" <<<"${disasm}"; then
+    fail "fib (unnamed): expected no name= attribute anywhere -- got: ${disasm}"
+  else
+    echo "name_atom_roundtrip: fib (unnamed) -- no name= attribute, as expected"
+  fi
+fi
+
+if [[ ${failures} -gt 0 ]]; then
+  echo "chapter16_name_atom_roundtrip: ${failures} failure(s)" >&2
+  exit 1
+fi
+
+echo "chapter16_name_atom_roundtrip: passed"

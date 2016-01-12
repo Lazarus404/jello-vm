@@ -439,10 +439,18 @@ jello_bc_result jello_bc_read(const uint8_t* data, size_t size, jello_bc_module*
     if(!funcs) { jello_bc_free(m); *out = NULL; return err(JELLO_BC_OUT_OF_MEMORY, "oom funcs", r.off); }
     m->funcs = funcs;
     for(uint32_t i = 0; i < m->nfuncs; i++) {
-      uint32_t nregs = 0, cap_start = 0, ninsns = 0;
+      uint32_t name_atom = JELLO_BC_NO_NAME, nregs = 0, cap_start = 0, ninsns = 0;
+      if((rr = rd_u32(&r, &name_atom)).err) { jello_bc_free(m); *out = NULL; return rr; }
+      if(name_atom != JELLO_BC_NO_NAME && name_atom >= m->natoms) {
+        jello_bc_free(m); *out = NULL;
+        return err(JELLO_BC_BAD_FORMAT, "function name atom out of range", r.off - 4);
+      }
       if((rr = rd_u32(&r, &nregs)).err) { jello_bc_free(m); *out = NULL; return rr; }
       if(nregs > 256) { jello_bc_free(m); *out = NULL; return err(JELLO_BC_BAD_FORMAT, "nregs > 256", r.off - 4); }
       if((rr = rd_u32(&r, &cap_start)).err) { jello_bc_free(m); *out = NULL; return rr; }
+      uint32_t nargs = nregs;
+      if((rr = rd_u32(&r, &nargs)).err) { jello_bc_free(m); *out = NULL; return rr; }
+      if(nargs > nregs) { jello_bc_free(m); *out = NULL; return err(JELLO_BC_BAD_FORMAT, "nargs > nregs", r.off - 4); }
       if((rr = rd_u32(&r, &ninsns)).err) { jello_bc_free(m); *out = NULL; return rr; }
 
       jello_type_id* reg_types = NULL;
@@ -473,6 +481,8 @@ jello_bc_result jello_bc_read(const uint8_t* data, size_t size, jello_bc_module*
         }
       }
 
+      funcs[i].name_atom = name_atom;
+      funcs[i].nargs = nargs;
       funcs[i].nregs = nregs;
       funcs[i].cap_start = cap_start;
       funcs[i].reg_types = reg_types;

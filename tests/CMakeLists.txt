@@ -139,6 +139,12 @@ if(JELLO_ENABLE_JIT)
       COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/jit_numeric_conform_x64.sh"
       WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     set_tests_properties(chapter10_jit_conform_x64 PROPERTIES TIMEOUT 300)
+
+    if(TARGET jlo_tool)
+      add_test(NAME chapter16_name_atom_roundtrip
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/name_atom_roundtrip.sh" "$<TARGET_FILE:jlo_tool>"
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    endif()
   endif()
 
   add_test(NAME chapter11_jit_numeric

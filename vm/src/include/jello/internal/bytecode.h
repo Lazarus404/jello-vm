@@ -257,7 +257,11 @@ typedef struct jello_insn {
   uint32_t imm;
 } jello_insn;
 
+#define JELLO_BC_NO_NAME UINT32_MAX
+
 typedef struct jello_bc_function {
+  uint32_t name_atom;
+  uint32_t nargs;
   uint32_t nregs;
   uint32_t cap_start;
   const jello_type_id* reg_types;

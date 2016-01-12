@@ -112,8 +112,10 @@ typedef struct asm_import_sig {
 } asm_import_sig;
 
 typedef struct func_t {
+  uint32_t name_atom;
   uint32_t nregs;
   uint32_t cap_start;
+  uint32_t nargs;
   uint32_t* reg_type_idx;
   uint32_t ninsns;
   jello_insn* insns;
@@ -744,12 +746,23 @@ static int parse_insn(cursor* c, uint32_t expect_pc, jello_insn* out) {
 }
 
 static int parse_func(cursor* c, const asm_type_entry* types, uint32_t ntypes,
+                       char* const* atoms, uint32_t natoms,
                        uint32_t* out_index, func_t* out_fn) {
   if(!expect_ident(c, "func")) return 0;
   if(!expect_ch(c, '[')) return 0;
   uint32_t idx;
   if(!read_uint(c, &idx)) return 0;
   if(!expect_ch(c, ']')) return 0;
+  uint32_t name_atom = JELLO_BC_NO_NAME;
+  size_t name_save = c->pos;
+  if(match_ident(c, "name")) {
+    if(!expect_ch(c, '=')) return 0;
+    char name[64];
+    if(!read_ident(c, name, sizeof(name))) return 0;
+    if(!find_atom_index_by_name(c, atoms, natoms, name, &name_atom)) return 0;
+  } else {
+    c->pos = name_save;
+  }
   if(!expect_ident(c, "nregs")) return 0;
   if(!expect_ch(c, '=')) return 0;
   uint32_t nregs;
@@ -761,6 +774,16 @@ static int parse_func(cursor* c, const asm_type_entry* types, uint32_t ntypes,
   if(match_ident(c, "cap_start")) {
     if(!expect_ch(c, '=')) return 0;
     if(!read_uint(c, &cap_start)) return 0;
+  } else {
+    c->pos = save;
+  }
+
+  uint32_t nargs = nregs;
+  save = c->pos;
+  if(match_ident(c, "nargs")) {
+    if(!expect_ch(c, '=')) return 0;
+    if(!read_uint(c, &nargs)) return 0;
+    if(nargs > nregs) return perr(c, "nargs exceeds nregs");
   } else {
     c->pos = save;
   }
@@ -790,8 +813,10 @@ static int parse_func(cursor* c, const asm_type_entry* types, uint32_t ntypes,
     insns[ninsns++] = insn;
   }
 
+  out_fn->name_atom = name_atom;
   out_fn->nregs = nregs;
   out_fn->cap_start = cap_start;
+  out_fn->nargs = nargs;
   out_fn->reg_type_idx = reg_type_idx;
   out_fn->ninsns = ninsns;
   out_fn->insns = insns;
@@ -843,7 +868,9 @@ static int parse_module(cursor* c, module_t* out) {
     if(c->pos >= c->len) break;
     uint32_t idx;
     func_t fn;
-    if(!parse_func(c, out->types, out->ntypes, &idx, &fn)) { module_free(out); free(funcs); return 0; }
+    if(!parse_func(c, out->types, out->ntypes, out->atoms, out->natoms, &idx, &fn)) {
+      module_free(out); free(funcs); return 0;
+    }
     if(idx != nfuncs) {
       fprintf(stderr, "%s: func[%u] out of order; expected func[%u]\n", c->filename, idx, nfuncs);
       module_free(out); free(funcs); free(fn.reg_type_idx); free(fn.insns);
@@ -991,8 +1018,10 @@ static int write_module(const module_t* m, byte_buf* bb) {
 
   for(uint32_t f = 0; f < m->nfuncs; f++) {
     const func_t* fn = &m->funcs[f];
+    bb_u32(bb, fn->name_atom);
     bb_u32(bb, fn->nregs);
     bb_u32(bb, fn->cap_start);
+    bb_u32(bb, fn->nargs);
     bb_u32(bb, fn->ninsns);
     for(uint32_t r = 0; r < fn->nregs; r++) bb_u32(bb, fn->reg_type_idx[r]);
     for(uint32_t k = 0; k < fn->ninsns; k++) {
@@ -1073,8 +1102,11 @@ static void print_real_module(const jello_bc_module* m, FILE* out) {
 
   for(uint32_t f = 0; f < m->nfuncs; f++) {
     const jello_bc_function* fn = &m->funcs[f];
-    fprintf(out, "func[%u] nregs=%u", f, fn->nregs);
+    fprintf(out, "func[%u]", f);
+    if(fn->name_atom != JELLO_BC_NO_NAME) fprintf(out, " name=%s", m->atoms[fn->name_atom]);
+    fprintf(out, " nregs=%u", fn->nregs);
     if(fn->cap_start != fn->nregs) fprintf(out, " cap_start=%u", fn->cap_start);
+    if(fn->nargs != fn->nregs) fprintf(out, " nargs=%u", fn->nargs);
     fprintf(out, " reg_types=[");
     for(uint32_t r = 0; r < fn->nregs; r++) {
       if(r) fprintf(out, ", ");
