@@ -17,7 +17,10 @@ static size_t module_emit_cap(const jello_bc_module* m) {
   return cap;
 }
 
+uint32_t jello_jit_module_prepare_count;
+
 int jello_jit_module_prepare(const jello_bc_module* m, jello_jit_module* out) {
+  jello_jit_module_prepare_count++;
   memset(out, 0, sizeof(*out));
   if(!m || m->nfuncs == 0) return 0;
 
@@ -81,6 +84,22 @@ void jello_jit_module_free(jello_jit_module* jm) {
   jm->nfuncs = 0;
   jm->prepared = 0;
   jit_free_exec_buf(&jm->blob);
+}
+
+jello_jit_module* jello_jit_module_create(const jello_bc_module* m) {
+  jello_jit_module* jm = (jello_jit_module*)calloc(1, sizeof(jello_jit_module));
+  if(!jm) return NULL;
+  if(!jello_jit_module_prepare(m, jm)) {
+    free(jm);
+    return NULL;
+  }
+  return jm;
+}
+
+void jello_jit_module_destroy(jello_jit_module* jm) {
+  if(!jm) return;
+  jello_jit_module_free(jm);
+  free(jm);
 }
 
 uint32_t jit_try_enter_count;

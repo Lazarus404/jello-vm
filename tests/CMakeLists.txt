@@ -140,6 +140,21 @@ if(JELLO_ENABLE_JIT)
       WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     set_tests_properties(chapter10_jit_conform_x64 PROPERTIES TIMEOUT 300)
 
+    add_executable(jit_reload_tests csrc/jit_reload_tests.c)
+    target_link_libraries(jit_reload_tests PRIVATE jello_vm)
+    jello_enable_warnings(jit_reload_tests)
+    if(JELLO_WARNINGS_AS_ERRORS)
+      target_compile_options(jit_reload_tests PRIVATE -Werror)
+    endif()
+
+    add_test(NAME chapter16_jit_reload
+      COMMAND jit_reload_tests
+      WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+    add_test(NAME chapter16_jit_reload_x64
+      COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/jit_reload_x64.sh"
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
     if(TARGET jlo_tool)
       add_test(NAME chapter16_name_atom_roundtrip
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/name_atom_roundtrip.sh" "$<TARGET_FILE:jlo_tool>"

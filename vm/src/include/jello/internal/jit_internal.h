@@ -43,6 +43,8 @@ typedef jello_exec_status (*jello_jit_entry_fn)(jello_vm* vm, uint8_t* frame_bas
 int jello_jit_compile_function(const jello_bc_module* m, uint32_t fi, jello_jit_code* out_code);
 void jello_jit_code_free(jello_jit_code* code);
 
+extern uint32_t jello_jit_module_prepare_count;
+
 int jello_jit_module_prepare(const jello_bc_module* m, jello_jit_module* out);
 void jello_jit_module_free(jello_jit_module* jm);
 int jello_jit_try_enter(jello_vm* vm, jello_jit_module* jm, jello_numeric_result* out, jello_exec_status* out_st);

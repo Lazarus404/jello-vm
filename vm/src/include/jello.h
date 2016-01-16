@@ -191,6 +191,14 @@ typedef struct jello_numeric_result {
 
 jello_exec_status jello_vm_exec_numeric(jello_vm* vm, const jello_bc_module* m, jello_numeric_result* out);
 
+typedef struct jello_jit_module jello_jit_module;
+
+jello_jit_module* jello_jit_module_create(const jello_bc_module* m);
+void jello_jit_module_destroy(jello_jit_module* jm);
+
+jello_exec_status jello_vm_exec_numeric_with_jit(jello_vm* vm, jello_jit_module* jm,
+    const jello_bc_module* m, jello_numeric_result* out);
+
 /* -- GC -- */
 void jello_gc_init(jello_vm* vm);
 void jello_gc_shutdown(jello_vm* vm);

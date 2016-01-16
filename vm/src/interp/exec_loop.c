@@ -229,7 +229,8 @@ jello_exec_status vm_exec_loop(exec_ctx* ctx) {
   }
 }
 
-jello_exec_status jello_vm_exec_numeric(jello_vm* vm, const jello_bc_module* m, jello_numeric_result* out) {
+static jello_exec_status vm_exec_numeric_impl(jello_vm* vm, const jello_bc_module* m,
+    jello_numeric_result* out, jello_jit_module* persistent_jm) {
   atomic_store(&vm->in_exec, 1);
 
   vm_frame_reset(vm);
@@ -247,15 +248,21 @@ jello_exec_status jello_vm_exec_numeric(jello_vm* vm, const jello_bc_module* m, 
     const char* jit_off = getenv("JELLO_JIT_DISABLE");
     if(!(jit_off && jit_off[0] != '\0')) {
       vm_warm_jit_layouts(vm, m);
-      jello_jit_module jm;
-      memset(&jm, 0, sizeof(jm));
+      jello_jit_module local_jm;
+      int owns_jm = persistent_jm == NULL;
+      jello_jit_module* jm = persistent_jm;
+      if(owns_jm) {
+        memset(&local_jm, 0, sizeof(local_jm));
+        jm = &local_jm;
+        jello_jit_module_prepare(m, jm);
+      }
       jello_exec_status jit_st = JELLO_EXEC_OK;
-      if(jello_jit_module_prepare(m, &jm) && jello_jit_try_enter(vm, &jm, out, &jit_st)) {
-        jello_jit_module_free(&jm);
+      if(jello_jit_try_enter(vm, jm, out, &jit_st)) {
+        if(owns_jm) jello_jit_module_free(jm);
         atomic_store(&vm->in_exec, 0);
         return jit_st;
       }
-      jello_jit_module_free(&jm);
+      if(owns_jm) jello_jit_module_free(jm);
     }
   }
 #endif
@@ -267,6 +274,15 @@ jello_exec_status jello_vm_exec_numeric(jello_vm* vm, const jello_bc_module* m, 
   jello_exec_status st = vm_exec_loop(&ctx);
   atomic_store(&vm->in_exec, 0);
   return st;
+}
+
+jello_exec_status jello_vm_exec_numeric(jello_vm* vm, const jello_bc_module* m, jello_numeric_result* out) {
+  return vm_exec_numeric_impl(vm, m, out, NULL);
+}
+
+jello_exec_status jello_vm_exec_numeric_with_jit(jello_vm* vm, jello_jit_module* jm,
+    const jello_bc_module* m, jello_numeric_result* out) {
+  return vm_exec_numeric_impl(vm, m, out, jm);
 }
 
 jello_trap_code jello_vm_last_trap_code(const jello_vm* vm) {
