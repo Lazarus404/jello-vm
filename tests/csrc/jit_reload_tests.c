@@ -57,6 +57,115 @@ static void test_module_create_destroy_roundtrip(void) {
   printf("test_module_create_destroy_roundtrip: PASS\n");
 }
 
+static void build_one_func_module(jello_type_entry* types, jello_type_id* r,
+    jello_insn* insns, uint32_t ninsns, uint32_t nregs, uint32_t nargs,
+    jello_bc_function* f, jello_bc_module* m) {
+  types[0].kind = JELLO_T_I32;
+  memset(&types[0].as, 0, sizeof(types[0].as));
+  f->name_atom = JELLO_BC_NO_NAME;
+  f->nargs = nargs;
+  f->nregs = nregs;
+  f->cap_start = nregs;
+  f->reg_types = r;
+  f->ninsns = ninsns;
+  f->insns = insns;
+  memset(m, 0, sizeof(*m));
+  m->ntypes = 1; m->types = types; m->nfuncs = 1; m->funcs = f; m->entry = 0;
+}
+
+static void test_reload_analyze_unchanged(void) {
+  jello_type_entry types_a[1], types_b[1];
+  jello_type_id r_a[2] = {0, 0}, r_b[2] = {0, 0};
+  jello_insn insns_a[2], insns_b[2];
+  memset(insns_a, 0, sizeof(insns_a));
+  memset(insns_b, 0, sizeof(insns_b));
+  insns_a[0].op = insns_b[0].op = (uint8_t)JOP_ADD_I32_IMM;
+  insns_a[0].a = insns_b[0].a = 1; insns_a[0].b = insns_b[0].b = 0;
+  insns_a[0].imm = insns_b[0].imm = 5;
+  insns_a[1].op = insns_b[1].op = (uint8_t)JOP_RET;
+  insns_a[1].a = insns_b[1].a = 1;
+
+  jello_bc_function fa, fb;
+  jello_bc_module ma, mb;
+  build_one_func_module(types_a, r_a, insns_a, 2, 2, 1, &fa, &ma);
+  build_one_func_module(types_b, r_b, insns_b, 2, 2, 1, &fb, &mb);
+
+  assert(jello_reload_analyze_function(&ma, &fa, &mb, &fb) == JELLO_RELOAD_FN_UNCHANGED);
+  printf("test_reload_analyze_unchanged: PASS\n");
+}
+
+static void test_reload_analyze_changed(void) {
+  jello_type_entry types_a[1], types_b[1];
+  jello_type_id r_a[2] = {0, 0}, r_b[2] = {0, 0};
+  jello_insn insns_a[2], insns_b[2];
+  memset(insns_a, 0, sizeof(insns_a));
+  memset(insns_b, 0, sizeof(insns_b));
+  insns_a[0].op = insns_b[0].op = (uint8_t)JOP_ADD_I32_IMM;
+  insns_a[0].a = insns_b[0].a = 1; insns_a[0].b = insns_b[0].b = 0;
+  insns_a[0].imm = 5;
+  insns_b[0].imm = 6; /* the only difference -- same signature, different body */
+  insns_a[1].op = insns_b[1].op = (uint8_t)JOP_RET;
+  insns_a[1].a = insns_b[1].a = 1;
+
+  jello_bc_function fa, fb;
+  jello_bc_module ma, mb;
+  build_one_func_module(types_a, r_a, insns_a, 2, 2, 1, &fa, &ma);
+  build_one_func_module(types_b, r_b, insns_b, 2, 2, 1, &fb, &mb);
+
+  assert(jello_reload_analyze_function(&ma, &fa, &mb, &fb) == JELLO_RELOAD_FN_CHANGED);
+  printf("test_reload_analyze_changed: PASS\n");
+}
+
+static void test_reload_analyze_signature_conflict_arg_count(void) {
+  jello_type_entry types_a[1], types_b[1];
+  jello_type_id r_a[2] = {0, 0}, r_b[3] = {0, 0, 0};
+  jello_insn insns_a[2], insns_b[2];
+  memset(insns_a, 0, sizeof(insns_a));
+  memset(insns_b, 0, sizeof(insns_b));
+  insns_a[0].op = (uint8_t)JOP_ADD_I32_IMM; insns_a[0].a = 1; insns_a[0].b = 0; insns_a[0].imm = 5;
+  insns_a[1].op = (uint8_t)JOP_RET; insns_a[1].a = 1;
+  insns_b[0].op = (uint8_t)JOP_ADD_I32; insns_b[0].a = 2; insns_b[0].b = 0; insns_b[0].c = 1;
+  insns_b[1].op = (uint8_t)JOP_RET; insns_b[1].a = 2;
+
+  jello_bc_function fa, fb;
+  jello_bc_module ma, mb;
+  build_one_func_module(types_a, r_a, insns_a, 2, 2, 1, &fa, &ma);
+  build_one_func_module(types_b, r_b, insns_b, 2, 3, 2, &fb, &mb); /* nargs 1 -> 2 */
+
+  assert(jello_reload_analyze_function(&ma, &fa, &mb, &fb) == JELLO_RELOAD_FN_SIGNATURE_CONFLICT);
+  printf("test_reload_analyze_signature_conflict_arg_count: PASS\n");
+}
+
+static void test_reload_analyze_signature_conflict_ret_kind(void) {
+  jello_type_entry types_a[2], types_b[2];
+  jello_type_id r_a[1] = {0}, r_b[1] = {1};
+  jello_insn insns_a[1], insns_b[1];
+  memset(insns_a, 0, sizeof(insns_a));
+  memset(insns_b, 0, sizeof(insns_b));
+  insns_a[0].op = insns_b[0].op = (uint8_t)JOP_RET;
+  insns_a[0].a = insns_b[0].a = 0;
+
+  types_a[0].kind = JELLO_T_I32; memset(&types_a[0].as, 0, sizeof(types_a[0].as));
+  types_a[1].kind = JELLO_T_BOOL; memset(&types_a[1].as, 0, sizeof(types_a[1].as));
+  types_b[0].kind = JELLO_T_I32; memset(&types_b[0].as, 0, sizeof(types_b[0].as));
+  types_b[1].kind = JELLO_T_BOOL; memset(&types_b[1].as, 0, sizeof(types_b[1].as));
+
+  jello_bc_function fa, fb;
+  jello_bc_module ma, mb;
+  fa.name_atom = fb.name_atom = JELLO_BC_NO_NAME;
+  fa.nargs = fb.nargs = 0;
+  fa.nregs = fb.nregs = 1;
+  fa.cap_start = fb.cap_start = 1;
+  fa.reg_types = r_a; fb.reg_types = r_b; /* I32 vs BOOL return */
+  fa.ninsns = fb.ninsns = 1;
+  fa.insns = insns_a; fb.insns = insns_b;
+  memset(&ma, 0, sizeof(ma)); ma.ntypes = 2; ma.types = types_a; ma.nfuncs = 1; ma.funcs = &fa;
+  memset(&mb, 0, sizeof(mb)); mb.ntypes = 2; mb.types = types_b; mb.nfuncs = 1; mb.funcs = &fb;
+
+  assert(jello_reload_analyze_function(&ma, &fa, &mb, &fb) == JELLO_RELOAD_FN_SIGNATURE_CONFLICT);
+  printf("test_reload_analyze_signature_conflict_ret_kind: PASS\n");
+}
+
 static void test_module_create_rejects_empty_module(void) {
   jello_bc_module m;
   memset(&m, 0, sizeof(m));
@@ -212,6 +321,10 @@ static void test_wx_icache_repeated_create_destroy_then_persistent(void) {
 int main(void) {
   setvbuf(stdout, NULL, _IONBF, 0);
   setvbuf(stderr, NULL, _IONBF, 0);
+  test_reload_analyze_unchanged();
+  test_reload_analyze_changed();
+  test_reload_analyze_signature_conflict_arg_count();
+  test_reload_analyze_signature_conflict_ret_kind();
   test_module_create_destroy_roundtrip();
   test_module_create_rejects_empty_module();
 #if defined(__x86_64__)

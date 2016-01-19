@@ -56,5 +56,19 @@ int jello_jit_emit_function_into(const jello_bc_module* m, uint32_t fi, jit_exec
     int allow_calls);
 
 void jello_jit_patch_call_rel32(jit_exec_buf* buf, size_t at, int32_t rel);
+/* -- Function identity across a recompile -- */
+typedef enum jello_reload_fn_status {
+  JELLO_RELOAD_FN_UNCHANGED,          /* same signature, same body hash -- no-op */
+  JELLO_RELOAD_FN_CHANGED,            /* same signature, different body hash -- recompile + patch */
+  JELLO_RELOAD_FN_SIGNATURE_CONFLICT, /* return kind, arg count, or an arg kind differs -- refused */
+  JELLO_RELOAD_FN_NEW,                /* Sec 8's own concern: name has no match in the old module */
+  JELLO_RELOAD_FN_REMOVED,            /* Sec 8's own concern: old name has no match in the new module */
+} jello_reload_fn_status;
+
+jello_reload_fn_status jello_reload_analyze_function(const jello_bc_module* old_m, const jello_bc_function* old_f,
+    const jello_bc_module* new_m, const jello_bc_function* new_f);
+
+int jello_reload_struct_sig_changed(const jello_bc_module* old_m, const jello_bc_module* new_m, uint32_t struct_sig_id);
+int jello_reload_function_uses_struct_sig(const jello_bc_module* m, const jello_bc_function* f, uint32_t struct_sig_id);
 
 #endif /* JELLO_JIT_INTERNAL_H */

@@ -42,6 +42,7 @@ if(JELLO_ENABLE_JIT)
     src/jit/survive.c
     src/jit/emit_x64.c
     src/jit/module.c
+    src/jit/reload.c
   )
   target_compile_definitions(jello_vm PRIVATE JELLO_ENABLE_JIT)
 endif()
