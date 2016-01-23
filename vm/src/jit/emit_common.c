@@ -2,6 +2,7 @@
 // Copyright (c) Jahred Love. All rights reserved.
 
 #include <jello/internal/jit_impl.h>
+#include <assert.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -37,6 +38,7 @@ jit_exec_buf jit_alloc_exec_buf(size_t cap) {
   buf.cap = cap;
   buf.len = 0;
   buf.finalized = 0;
+  buf.patch_open = 0;
 
   void* mem = mmap(NULL, cap, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if(mem == MAP_FAILED) return buf;
@@ -63,6 +65,24 @@ void jit_free_exec_buf(jit_exec_buf* buf) {
   if(!buf->mem) return;
   munmap(buf->mem, buf->cap);
   buf->mem = NULL;
+}
+
+/* -- the second, narrow W^X window -- */
+int jit_exec_buf_begin_patch(jit_exec_buf* buf) {
+  if(!buf->mem || !buf->finalized) return 0;
+  assert(!buf->patch_open && "Chapter 11 Sec 4: jit_exec_buf_begin_patch called while a patch window was already open");
+  if(mprotect(buf->mem, buf->cap, PROT_READ | PROT_WRITE) != 0) return 0;
+  buf->patch_open = 1;
+  return 1;
+}
+
+int jit_exec_buf_end_patch(jit_exec_buf* buf) {
+  if(!buf->mem || !buf->finalized) return 0;
+  assert(buf->patch_open && "Chapter 11 Sec 4: jit_exec_buf_end_patch called with no matching begin_patch open");
+  if(mprotect(buf->mem, buf->cap, PROT_READ | PROT_EXEC) != 0) return 0;
+  jit_sync_icache(buf->mem, jit_icache_span(buf->len, buf->cap));
+  buf->patch_open = 0;
+  return 1;
 }
 
 void jit_trap_arithmetic(jello_vm* vm) {

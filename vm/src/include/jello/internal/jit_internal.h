@@ -36,6 +36,8 @@ typedef struct jello_jit_module {
   jello_jit_func_code* funcs;
   uint32_t nfuncs;
   int prepared;
+  jello_jit_call_patch* patches;
+  uint32_t npatch;
 } jello_jit_module;
 
 typedef jello_exec_status (*jello_jit_entry_fn)(jello_vm* vm, uint8_t* frame_base, jello_numeric_result* out);

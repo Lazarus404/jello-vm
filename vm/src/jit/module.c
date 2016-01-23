@@ -60,13 +60,14 @@ int jello_jit_module_prepare(const jello_bc_module* m, jello_jit_module* out) {
     jello_jit_patch_call_rel32(&out->blob, p->site_off, rel);
   }
 
-  free(patches);
-
   if(!jit_finalize_exec_buf(&out->blob)) {
     jello_jit_module_free(out);
+    free(patches);
     return 0;
   }
 
+  out->patches = patches;
+  out->npatch = npatch;
   out->prepared = 1;
   return 1;
 }
@@ -83,6 +84,9 @@ void jello_jit_module_free(jello_jit_module* jm) {
   jm->funcs = NULL;
   jm->nfuncs = 0;
   jm->prepared = 0;
+  free(jm->patches);
+  jm->patches = NULL;
+  jm->npatch = 0;
   jit_free_exec_buf(&jm->blob);
 }
 

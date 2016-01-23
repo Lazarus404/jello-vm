@@ -3,6 +3,7 @@
 
 #include <jello/internal/jit_internal.h>
 #include <jello.h>
+#include <assert.h>
 #include <limits.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -500,6 +501,8 @@ static size_t emit_call_rel32(jit_exec_buf* buf, int32_t rel) {
 }
 
 static void patch_call_rel32(jit_exec_buf* buf, size_t at, int32_t rel) {
+  assert((!buf->finalized || buf->patch_open) &&
+    "Patched a finalized jit_exec_buf outside an open jit_exec_buf_begin_patch/end_patch window");
   memcpy(buf->mem + at + 1, &rel, 4);
 }
 
@@ -3073,6 +3076,7 @@ int jello_jit_compile_function(const jello_bc_module* m, uint32_t fi, jello_jit_
   out_code->buf.cap = 0;
   out_code->buf.len = 0;
   out_code->buf.finalized = 0;
+  out_code->buf.patch_open = 0;
   out_code->entry_off = 0;
   out_code->body_off = 0;
   out_code->loop_anchor_pcs = NULL;

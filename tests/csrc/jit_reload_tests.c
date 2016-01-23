@@ -177,6 +177,76 @@ static void test_module_create_rejects_empty_module(void) {
 
 #if defined(__x86_64__)
 
+static void build_three_leaf_module(jello_type_entry* types, jello_type_id* r0,
+    jello_type_id* r1, jello_type_id* r2, jello_insn* e0, jello_insn* e1, jello_insn* e2,
+    jello_bc_function* funcs, jello_bc_module* m) {
+  types[0].kind = JELLO_T_I32;
+  memset(&types[0].as, 0, sizeof(types[0].as));
+  r0[0] = 0; r1[0] = 0; r2[0] = 0;
+
+  e0[0].op = (uint8_t)JOP_CALL; e0[0].a = 0; e0[0].b = 0; e0[0].c = 0; e0[0].imm = 1; /* -> func[1] */
+  e0[1].op = (uint8_t)JOP_RET; e0[1].a = 0;
+  e1[0].op = (uint8_t)JOP_CONST_I32; e1[0].a = 0; e1[0].imm = 100;
+  e1[1].op = (uint8_t)JOP_RET; e1[1].a = 0;
+  e2[0].op = (uint8_t)JOP_CONST_I32; e2[0].a = 0; e2[0].imm = 200;
+  e2[1].op = (uint8_t)JOP_RET; e2[1].a = 0;
+
+  funcs[0].name_atom = funcs[1].name_atom = funcs[2].name_atom = JELLO_BC_NO_NAME;
+  funcs[0].nargs = 0; funcs[0].nregs = 1; funcs[0].cap_start = 1; funcs[0].reg_types = r0; funcs[0].ninsns = 2; funcs[0].insns = e0;
+  funcs[1].nargs = 0; funcs[1].nregs = 1; funcs[1].cap_start = 1; funcs[1].reg_types = r1; funcs[1].ninsns = 2; funcs[1].insns = e1;
+  funcs[2].nargs = 0; funcs[2].nregs = 1; funcs[2].cap_start = 1; funcs[2].reg_types = r2; funcs[2].ninsns = 2; funcs[2].insns = e2;
+
+  memset(m, 0, sizeof(*m));
+  m->ntypes = 1; m->types = types; m->nfuncs = 3; m->funcs = funcs; m->entry = 0;
+}
+
+static void test_begin_end_patch_redirects_live_call(void) {
+  jello_type_entry types[1];
+  jello_type_id r0[1], r1[1], r2[1];
+  jello_insn e0[2], e1[2], e2[2];
+  jello_bc_function funcs[3];
+  jello_bc_module m;
+  build_three_leaf_module(types, r0, r1, r2, e0, e1, e2, funcs, &m);
+
+  jello_jit_module* jm = jello_jit_module_create(&m);
+  assert(jm != NULL);
+
+  jello_vm* vm = jello_vm_create();
+  jello_numeric_result out;
+  memset(&out, 0, sizeof(out));
+  jello_exec_status st = jello_vm_exec_numeric_with_jit(vm, jm, &m, &out);
+  assert(st == JELLO_EXEC_OK && out.kind == JELLO_NUM_I32 && out.as.i32 == 100);
+
+  size_t f0_start = jm->funcs[0].blob_off;
+  size_t f0_end = f0_start + jm->funcs[0].size;
+  size_t f1_entry = jm->funcs[1].blob_off + jm->funcs[1].body_off;
+  size_t f2_entry = jm->funcs[2].blob_off + jm->funcs[2].body_off;
+  size_t call_site = (size_t)-1;
+  for(size_t i = f0_start; i + 5 <= f0_end; i++) {
+    if(jm->blob.mem[i] != 0xE8) continue;
+    int32_t rel;
+    memcpy(&rel, jm->blob.mem + i + 1, 4);
+    size_t target = (size_t)((int64_t)(i + 5) + (int64_t)rel);
+    if(target == f1_entry) { call_site = i; break; }
+  }
+  assert(call_site != (size_t)-1);
+
+  assert(jm->blob.finalized == 1);
+  assert(jit_exec_buf_begin_patch(&jm->blob) == 1);
+  int32_t new_rel = (int32_t)(f2_entry - (call_site + 5));
+  jello_jit_patch_call_rel32(&jm->blob, call_site, new_rel);
+  assert(jit_exec_buf_end_patch(&jm->blob) == 1);
+  assert(jm->blob.finalized == 1); /* untouched by either call, per Sec 4's own contract */
+
+  memset(&out, 0, sizeof(out));
+  st = jello_vm_exec_numeric_with_jit(vm, jm, &m, &out);
+  assert(st == JELLO_EXEC_OK && out.kind == JELLO_NUM_I32 && out.as.i32 == 200);
+
+  jello_jit_module_destroy(jm);
+  jello_vm_destroy(vm);
+  printf("test_begin_end_patch_redirects_live_call: PASS\n");
+}
+
 static int32_t fib_ref(int32_t n) {
   return (n < 2) ? n : fib_ref(n - 1) + fib_ref(n - 2);
 }
@@ -331,10 +401,12 @@ int main(void) {
   test_persistent_handle_no_per_call_recompile();
   test_persistent_handle_matches_fresh_path();
   test_persistent_handle_null_falls_back_correctly();
+  test_begin_end_patch_redirects_live_call();
 #else
   printf("test_persistent_handle_no_per_call_recompile: SKIPPED (host is not x86_64)\n");
   printf("test_persistent_handle_matches_fresh_path: SKIPPED (host is not x86_64)\n");
   printf("test_persistent_handle_null_falls_back_correctly: SKIPPED (host is not x86_64)\n");
+  printf("test_begin_end_patch_redirects_live_call: SKIPPED (host is not x86_64)\n");
 #endif
 #if defined(__x86_64__)
   test_wx_icache_repeated_create_destroy_then_persistent();
