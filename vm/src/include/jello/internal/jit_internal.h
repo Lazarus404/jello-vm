@@ -72,5 +72,7 @@ jello_reload_fn_status jello_reload_analyze_function(const jello_bc_module* old_
 
 int jello_reload_struct_sig_changed(const jello_bc_module* old_m, const jello_bc_module* new_m, uint32_t struct_sig_id);
 int jello_reload_function_uses_struct_sig(const jello_bc_module* m, const jello_bc_function* f, uint32_t struct_sig_id);
+int jello_jit_reload_pause_all(jello_vm* vm);
+void jello_jit_reload_resume_all(jello_vm* vm);
 
 #endif /* JELLO_JIT_INTERNAL_H */

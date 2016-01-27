@@ -231,6 +231,8 @@ jello_exec_status vm_exec_loop(exec_ctx* ctx) {
 
 static jello_exec_status vm_exec_numeric_impl(jello_vm* vm, const jello_bc_module* m,
     jello_numeric_result* out, jello_jit_module* persistent_jm) {
+  vm_safepoint_check(vm);
+
   atomic_store(&vm->in_exec, 1);
 
   vm_frame_reset(vm);

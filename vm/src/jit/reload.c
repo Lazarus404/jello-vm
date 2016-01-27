@@ -119,3 +119,19 @@ int jello_reload_function_uses_struct_sig(const jello_bc_module* m, const jello_
   }
   return 0;
 }
+
+int jello_jit_reload_pause_all(jello_vm* vm) {
+  if(!vm_heap_stop_the_world(vm)) return 0; /* another stop-the-world was already in flight; nothing is paused now */
+  jello_heap* heap = vm->heap;
+  for(uint32_t i = 0; i < heap->threads_len; i++) {
+    if(atomic_load(&heap->threads[i]->in_exec) != 0) {
+      vm_heap_resume_the_world(vm);
+      return 0;
+    }
+  }
+  return 1;
+}
+
+void jello_jit_reload_resume_all(jello_vm* vm) {
+  vm_heap_resume_the_world(vm);
+}

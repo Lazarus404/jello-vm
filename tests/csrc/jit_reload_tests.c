@@ -388,6 +388,124 @@ static void test_wx_icache_repeated_create_destroy_then_persistent(void) {
 
 #endif
 
+static void test_pause_resume_all_idle_succeeds(void) {
+  jello_vm* vm = jello_vm_create();
+  assert(vm != NULL);
+  assert(jello_jit_reload_pause_all(vm) == 1);
+  jello_jit_reload_resume_all(vm);
+
+  jello_type_entry types[1];
+  jello_type_id r[1] = {0};
+  jello_insn insns[2];
+  memset(insns, 0, sizeof(insns));
+  insns[0].op = (uint8_t)JOP_CONST_I32; insns[0].a = 0; insns[0].imm = 7;
+  insns[1].op = (uint8_t)JOP_RET; insns[1].a = 0;
+  jello_bc_function f;
+  f.name_atom = JELLO_BC_NO_NAME; f.nargs = 0; f.nregs = 1; f.cap_start = 1;
+  f.reg_types = r; f.ninsns = 2; f.insns = insns;
+  types[0].kind = JELLO_T_I32; memset(&types[0].as, 0, sizeof(types[0].as));
+  jello_bc_module m;
+  memset(&m, 0, sizeof(m));
+  m.ntypes = 1; m.types = types; m.nfuncs = 1; m.funcs = &f; m.entry = 0;
+
+  jello_numeric_result out;
+  memset(&out, 0, sizeof(out));
+  assert(jello_vm_exec_numeric(vm, &m, &out) == JELLO_EXEC_OK);
+  assert(out.kind == JELLO_NUM_I32 && out.as.i32 == 7);
+
+  jello_vm_destroy(vm);
+  printf("test_pause_resume_all_idle_succeeds: PASS\n");
+}
+
+enum { PAUSE_HOLD_MS = 150 };
+
+typedef struct pause_thread_arg {
+  jello_vm* vm;
+  atomic_int* paused_flag;
+  int ok;
+} pause_thread_arg;
+
+typedef struct waiter_thread_arg {
+  jello_vm* vm;
+  jello_bc_module* m;
+  atomic_int* paused_flag;
+  double elapsed_ms;
+  int ok;
+} waiter_thread_arg;
+
+static double now_ms(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
+}
+
+static void* pause_thread_main(void* arg_) {
+  pause_thread_arg* arg = (pause_thread_arg*)arg_;
+  arg->ok = jello_jit_reload_pause_all(arg->vm);
+  atomic_store(arg->paused_flag, 1);
+  struct timespec req;
+  req.tv_sec = 0;
+  req.tv_nsec = PAUSE_HOLD_MS * 1000000L;
+  nanosleep(&req, NULL);
+  jello_jit_reload_resume_all(arg->vm);
+  return NULL;
+}
+
+static void* waiter_thread_main(void* arg_) {
+  waiter_thread_arg* arg = (waiter_thread_arg*)arg_;
+  while(!atomic_load(arg->paused_flag)) { /* spin until thread A has actually paused the world */ }
+
+  jello_numeric_result out;
+  memset(&out, 0, sizeof(out));
+  double t0 = now_ms();
+  jello_exec_status st = jello_vm_exec_numeric(arg->vm, arg->m, &out);
+  arg->elapsed_ms = now_ms() - t0;
+  arg->ok = (st == JELLO_EXEC_OK && out.kind == JELLO_NUM_I32 && out.as.i32 == 7);
+  return NULL;
+}
+
+static void test_reload_pause_blocks_fresh_call_on_other_thread(void) {
+  jello_vm* vm_a = jello_vm_create();
+  assert(vm_a != NULL);
+  jello_vm* vm_b = jello_vm_create_joined(vm_a);
+  assert(vm_b != NULL);
+
+  jello_type_entry types[1];
+  jello_type_id r[1] = {0};
+  jello_insn insns[2];
+  memset(insns, 0, sizeof(insns));
+  insns[0].op = (uint8_t)JOP_CONST_I32; insns[0].a = 0; insns[0].imm = 7;
+  insns[1].op = (uint8_t)JOP_RET; insns[1].a = 0;
+  jello_bc_function f;
+  f.name_atom = JELLO_BC_NO_NAME; f.nargs = 0; f.nregs = 1; f.cap_start = 1;
+  f.reg_types = r; f.ninsns = 2; f.insns = insns;
+  types[0].kind = JELLO_T_I32; memset(&types[0].as, 0, sizeof(types[0].as));
+  jello_bc_module m;
+  memset(&m, 0, sizeof(m));
+  m.ntypes = 1; m.types = types; m.nfuncs = 1; m.funcs = &f; m.entry = 0;
+
+  atomic_int paused_flag;
+  atomic_init(&paused_flag, 0);
+  pause_thread_arg a_arg = {vm_a, &paused_flag, 0};
+  waiter_thread_arg b_arg = {vm_b, &m, &paused_flag, 0.0, 0};
+
+  pthread_t ta, tb;
+  assert(pthread_create(&ta, NULL, pause_thread_main, &a_arg) == 0);
+  assert(pthread_create(&tb, NULL, waiter_thread_main, &b_arg) == 0);
+  assert(pthread_join(ta, NULL) == 0);
+  assert(pthread_join(tb, NULL) == 0);
+
+  printf("test_reload_pause_blocks_fresh_call_on_other_thread: PASS (paused=%d, waiter_ok=%d, waiter_elapsed_ms=%.1f)\n",
+      a_arg.ok, b_arg.ok, b_arg.elapsed_ms);
+  assert(a_arg.ok && "thread A's own pause_all must have succeeded (heap was idle)");
+  assert(b_arg.ok && "thread B's own call must still produce the correct result once resumed");
+  assert(b_arg.elapsed_ms >= (double)PAUSE_HOLD_MS * 0.5 &&
+      "thread B's own call returned too quickly -- it did not actually block on thread A's pause");
+
+  jello_vm_destroy(vm_b);
+  jello_vm_destroy(vm_a);
+}
+
 int main(void) {
   setvbuf(stdout, NULL, _IONBF, 0);
   setvbuf(stderr, NULL, _IONBF, 0);
@@ -397,6 +515,8 @@ int main(void) {
   test_reload_analyze_signature_conflict_ret_kind();
   test_module_create_destroy_roundtrip();
   test_module_create_rejects_empty_module();
+  test_pause_resume_all_idle_succeeds();
+  test_reload_pause_blocks_fresh_call_on_other_thread();
 #if defined(__x86_64__)
   test_persistent_handle_no_per_call_recompile();
   test_persistent_handle_matches_fresh_path();
