@@ -175,6 +175,320 @@ static void test_module_create_rejects_empty_module(void) {
   printf("test_module_create_rejects_empty_module: PASS\n");
 }
 
+static void build_named_two_func_module(jello_type_entry* types, jello_type_id* r0,
+    jello_type_id* r1, jello_insn* e0, jello_insn* e1, jello_bc_function* funcs,
+    jello_bc_module* m, uint32_t main_name_atom, uint32_t helper_name_atom, int32_t helper_const) {
+  types[0].kind = JELLO_T_I32;
+  memset(&types[0].as, 0, sizeof(types[0].as));
+  r0[0] = 0; r1[0] = 0;
+  memset(e0, 0, 2 * sizeof(jello_insn));
+  memset(e1, 0, 2 * sizeof(jello_insn));
+
+  e0[0].op = (uint8_t)JOP_CALL; e0[0].a = 0; e0[0].b = 0; e0[0].c = 0; e0[0].imm = 1;
+  e0[1].op = (uint8_t)JOP_RET; e0[1].a = 0;
+  e1[0].op = (uint8_t)JOP_CONST_I32; e1[0].a = 0; e1[0].imm = (uint32_t)helper_const;
+  e1[1].op = (uint8_t)JOP_RET; e1[1].a = 0;
+
+  funcs[0].name_atom = main_name_atom;
+  funcs[0].nargs = 0; funcs[0].nregs = 1; funcs[0].cap_start = 1; funcs[0].reg_types = r0; funcs[0].ninsns = 2; funcs[0].insns = e0;
+  funcs[1].name_atom = helper_name_atom;
+  funcs[1].nargs = 0; funcs[1].nregs = 1; funcs[1].cap_start = 1; funcs[1].reg_types = r1; funcs[1].ninsns = 2; funcs[1].insns = e1;
+
+  memset(m, 0, sizeof(*m));
+  m->ntypes = 1; m->types = types; m->nfuncs = 2; m->funcs = funcs; m->entry = 0;
+}
+
+static const char* g_two_func_atoms[2] = {"main", "helper"};
+
+static void test_reload_unchanged_is_successful_noop(void) {
+  jello_type_entry types_a[1], types_b[1];
+  jello_type_id r0_a[1], r1_a[1], r0_b[1], r1_b[1];
+  jello_insn e0_a[2], e1_a[2], e0_b[2], e1_b[2];
+  jello_bc_function funcs_a[2], funcs_b[2];
+  jello_bc_module old_m, new_m;
+  build_named_two_func_module(types_a, r0_a, r1_a, e0_a, e1_a, funcs_a, &old_m, 0, 1, 100);
+  old_m.atoms = g_two_func_atoms; old_m.natoms = 2; /* build_* memsets m -- set atoms after */
+  build_named_two_func_module(types_b, r0_b, r1_b, e0_b, e1_b, funcs_b, &new_m, 0, 1, 100);
+  new_m.atoms = g_two_func_atoms; new_m.natoms = 2;
+
+  jello_jit_module* jm = jello_jit_module_create(&old_m);
+  assert(jm != NULL);
+  jello_vm* vm = jello_vm_create();
+
+  jello_jit_reload_report report;
+  int rc = jello_jit_module_reload(vm, jm, &old_m, &new_m, 0, &report);
+  assert(rc == 1);
+  assert(report.n_unchanged == 2);
+  assert(report.n_changed == 0);
+  assert(report.n_new == 0);
+  assert(report.n_removed == 0);
+  assert(report.n_signature_conflicts == 0);
+  assert(report.n_type_conflicts == 0);
+
+  jello_jit_reload_report_free(&report);
+  jello_jit_module_destroy(jm);
+  jello_vm_destroy(vm);
+  printf("test_reload_unchanged_is_successful_noop: PASS\n");
+}
+
+static void build_struct_using_module(jello_type_entry* types, jello_struct_sig* sig,
+    uint32_t* field_type, uint32_t* field_offset, uint32_t nfields, jello_type_id* r,
+    jello_insn* insns, jello_bc_function* f, jello_bc_module* m, uint32_t name_atom) {
+  types[0].kind = JELLO_T_I32;
+  memset(&types[0].as, 0, sizeof(types[0].as));
+  types[1].kind = JELLO_T_STRUCT;
+  types[1].as.strct.struct_sig_id = 0;
+
+  for(uint32_t i = 0; i < nfields; i++) { field_type[i] = 0; field_offset[i] = i * 4; }
+  sig->nfields = (uint16_t)nfields;
+  sig->named = 0;
+  sig->is_mutable = 0;
+  sig->field_type = field_type;
+  sig->field_name_atom = NULL;
+  sig->field_offset = field_offset;
+
+  r[0] = 1; /* STRUCT-typed register, never assigned -- static analysis only, never executed */
+  r[1] = 0; /* I32 -- the one actually returned */
+  memset(insns, 0, 1 * sizeof(jello_insn));
+  insns[0].op = (uint8_t)JOP_RET; insns[0].a = 1;
+
+  f->name_atom = name_atom;
+  f->nargs = 0; f->nregs = 2; f->cap_start = 2; f->reg_types = r; f->ninsns = 1; f->insns = insns;
+
+  memset(m, 0, sizeof(*m));
+  m->ntypes = 2; m->types = types; m->nstruct_sigs = 1; m->struct_sigs = sig;
+  m->nfuncs = 1; m->funcs = f; m->entry = 0;
+}
+
+static const char* g_one_func_atom[1] = {"main"};
+
+static void test_reload_refuses_struct_type_conflict_by_default(void) {
+  jello_type_entry types_a[2], types_b[2];
+  jello_struct_sig sig_a, sig_b;
+  uint32_t field_type_a[1], field_offset_a[1];
+  uint32_t field_type_b[2], field_offset_b[2];
+  jello_type_id r_a[2], r_b[2];
+  jello_insn insns_a[1], insns_b[1];
+  jello_bc_function f_a, f_b;
+  jello_bc_module old_m, new_m;
+
+  build_struct_using_module(types_a, &sig_a, field_type_a, field_offset_a, 1, r_a, insns_a, &f_a, &old_m, 0);
+  old_m.atoms = g_one_func_atom; old_m.natoms = 1;
+  build_struct_using_module(types_b, &sig_b, field_type_b, field_offset_b, 2, r_b, insns_b, &f_b, &new_m, 0);
+  new_m.atoms = g_one_func_atom; new_m.natoms = 1;
+
+  assert(jello_reload_struct_sig_changed(&old_m, &new_m, 0) == 1);
+  assert(jello_reload_function_uses_struct_sig(&old_m, &f_a, 0) == 1);
+  assert(jello_reload_analyze_function(&old_m, &f_a, &new_m, &f_b) == JELLO_RELOAD_FN_CHANGED);
+
+  jello_jit_module* jm = jello_jit_module_create(&old_m);
+  assert(jm != NULL);
+  jello_vm* vm = jello_vm_create();
+
+  jello_jit_reload_report report;
+  int rc = jello_jit_module_reload(vm, jm, &old_m, &new_m, /* allow_conflicts */ 0, &report);
+  assert(rc == 0); /* refused -- the struct shape changed under a live function */
+  assert(report.n_type_conflicts == 1);
+  assert(report.n_signature_conflicts == 0);
+  assert(report.fn_status[0] == JELLO_RELOAD_FN_SIGNATURE_CONFLICT);
+  jello_jit_reload_report_free(&report);
+
+  jello_jit_module_destroy(jm);
+  jello_vm_destroy(vm);
+  printf("test_reload_refuses_struct_type_conflict_by_default: PASS\n");
+}
+
+static void build_one_named_func_module(jello_type_entry* types, jello_type_id* r,
+    jello_insn* insns, jello_bc_function* f, jello_bc_module* m, uint32_t nargs, uint32_t name_atom) {
+  types[0].kind = JELLO_T_I32;
+  memset(&types[0].as, 0, sizeof(types[0].as));
+  r[0] = 0;
+  memset(insns, 0, 1 * sizeof(jello_insn));
+  insns[0].op = (uint8_t)JOP_RET; insns[0].a = 0;
+
+  f->name_atom = name_atom;
+  f->nargs = nargs; f->nregs = 1; f->cap_start = 1; f->reg_types = r; f->ninsns = 1; f->insns = insns;
+
+  memset(m, 0, sizeof(*m));
+  m->ntypes = 1; m->types = types; m->nfuncs = 1; m->funcs = f; m->entry = 0;
+}
+
+static void test_reload_allow_conflicts_recompiles_even_if_body_unchanged(void) {
+  jello_type_entry types_a[1], types_b[1];
+  jello_type_id r_a[1], r_b[1];
+  jello_insn insns_a[1], insns_b[1];
+  jello_bc_function f_a, f_b;
+  jello_bc_module old_m, new_m;
+  build_one_named_func_module(types_a, r_a, insns_a, &f_a, &old_m, 0, 0); /* nargs 0 */
+  old_m.atoms = g_one_func_atom; old_m.natoms = 1;
+  build_one_named_func_module(types_b, r_b, insns_b, &f_b, &new_m, 1, 0); /* nargs 1 -- only difference */
+  new_m.atoms = g_one_func_atom; new_m.natoms = 1;
+
+  assert(jello_reload_analyze_function(&old_m, &f_a, &new_m, &f_b) == JELLO_RELOAD_FN_SIGNATURE_CONFLICT);
+
+  jello_jit_module* jm = jello_jit_module_create(&old_m);
+  assert(jm != NULL);
+  jello_vm* vm = jello_vm_create();
+
+  jello_jit_module_prepare_count = 0;
+  jello_jit_reload_report report;
+  int rc = jello_jit_module_reload(vm, jm, &old_m, &new_m, /* allow_conflicts */ 1, &report);
+  assert(rc == 1);
+  assert(report.n_changed == 0);
+  assert(report.n_signature_conflicts == 1);
+  assert(jello_jit_module_prepare_count == 1);
+  jello_jit_reload_report_free(&report);
+
+  jello_jit_module_destroy(jm);
+  jello_vm_destroy(vm);
+  printf("test_reload_allow_conflicts_recompiles_even_if_body_unchanged: PASS\n");
+}
+
+static void test_reload_new_function_recompiles_even_if_nothing_changed(void) {
+  jello_type_entry types_a[1], types_b[1];
+  jello_type_id r_a[1];
+  jello_insn insns_a[1];
+  jello_bc_function f_a;
+  jello_bc_module old_m;
+  build_one_named_func_module(types_a, r_a, insns_a, &f_a, &old_m, 0, 0);
+  old_m.atoms = g_one_func_atom; old_m.natoms = 1;
+
+  jello_type_id r0_b[1], r1_b[1];
+  jello_insn e0_b[1], e1_b[1];
+  jello_bc_function funcs_b[2];
+  jello_bc_module new_m;
+  types_b[0].kind = JELLO_T_I32;
+  memset(&types_b[0].as, 0, sizeof(types_b[0].as));
+  r0_b[0] = 0; r1_b[0] = 0;
+  memset(e0_b, 0, sizeof(e0_b)); e0_b[0].op = (uint8_t)JOP_RET; e0_b[0].a = 0; /* byte-identical to f_a */
+  memset(e1_b, 0, sizeof(e1_b)); e1_b[0].op = (uint8_t)JOP_RET; e1_b[0].a = 0;
+  funcs_b[0].name_atom = 0; funcs_b[0].nargs = 0; funcs_b[0].nregs = 1; funcs_b[0].cap_start = 1;
+  funcs_b[0].reg_types = r0_b; funcs_b[0].ninsns = 1; funcs_b[0].insns = e0_b;
+  funcs_b[1].name_atom = JELLO_BC_NO_NAME; funcs_b[1].nargs = 0; funcs_b[1].nregs = 1; funcs_b[1].cap_start = 1;
+  funcs_b[1].reg_types = r1_b; funcs_b[1].ninsns = 1; funcs_b[1].insns = e1_b;
+  memset(&new_m, 0, sizeof(new_m));
+  new_m.ntypes = 1; new_m.types = types_b; new_m.nfuncs = 2; new_m.funcs = funcs_b; new_m.entry = 0;
+  new_m.atoms = g_one_func_atom; new_m.natoms = 1;
+
+  jello_jit_module* jm = jello_jit_module_create(&old_m);
+  assert(jm != NULL);
+  assert(jm->nfuncs == 1);
+  jello_vm* vm = jello_vm_create();
+
+  jello_jit_module_prepare_count = 0;
+  jello_jit_reload_report report;
+  int rc = jello_jit_module_reload(vm, jm, &old_m, &new_m, 0, &report);
+  assert(rc == 1);
+  assert(report.n_unchanged == 1);
+  assert(report.n_new == 1);
+  assert(report.n_changed == 0);
+  assert(report.n_signature_conflicts == 0);
+  assert(report.n_type_conflicts == 0);
+  assert(jello_jit_module_prepare_count == 1);
+  assert(jm->nfuncs == 2);
+  jello_jit_reload_report_free(&report);
+
+  jello_jit_module_destroy(jm);
+  jello_vm_destroy(vm);
+  printf("test_reload_new_function_recompiles_even_if_nothing_changed: PASS\n");
+}
+
+#if defined(__x86_64__)
+
+static void build_two_func_module_arity_variant(jello_type_entry* types, jello_type_id* r0,
+    jello_type_id* r1, jello_insn* e0, jello_insn* e1, jello_bc_function* funcs,
+    jello_bc_module* m, uint32_t main_name_atom, uint32_t helper_name_atom, int32_t arg_const) {
+  types[0].kind = JELLO_T_I32;
+  memset(&types[0].as, 0, sizeof(types[0].as));
+  r0[0] = 0; r0[1] = 0;
+  r1[0] = 0;
+  memset(e0, 0, 3 * sizeof(jello_insn));
+  memset(e1, 0, 1 * sizeof(jello_insn));
+
+  e0[0].op = (uint8_t)JOP_CONST_I32; e0[0].a = 0; e0[0].imm = (uint32_t)arg_const;
+  e0[1].op = (uint8_t)JOP_CALL; e0[1].a = 1; e0[1].b = 0; e0[1].c = 1; e0[1].imm = 1; /* helper(arg) */
+  e0[2].op = (uint8_t)JOP_RET; e0[2].a = 1;
+  e1[0].op = (uint8_t)JOP_RET; e1[0].a = 0; /* helper(x) = x */
+
+  funcs[0].name_atom = main_name_atom;
+  funcs[0].nargs = 0; funcs[0].nregs = 2; funcs[0].cap_start = 2; funcs[0].reg_types = r0; funcs[0].ninsns = 3; funcs[0].insns = e0;
+  funcs[1].name_atom = helper_name_atom;
+  funcs[1].nargs = 1; funcs[1].nregs = 1; funcs[1].cap_start = 1; funcs[1].reg_types = r1; funcs[1].ninsns = 1; funcs[1].insns = e1;
+
+  memset(m, 0, sizeof(*m));
+  m->ntypes = 1; m->types = types; m->nfuncs = 2; m->funcs = funcs; m->entry = 0;
+}
+
+static void test_reload_refuses_signature_conflict_by_default(void) {
+  jello_type_entry types_a[1], types_b[1];
+  jello_type_id r0_a[1], r1_a[1], r0_b[2], r1_b[1];
+  jello_insn e0_a[2], e1_a[2], e0_b[3], e1_b[1];
+  jello_bc_function funcs_a[2], funcs_b[2];
+  jello_bc_module old_m, new_m;
+  build_named_two_func_module(types_a, r0_a, r1_a, e0_a, e1_a, funcs_a, &old_m, 0, 1, 100);
+  old_m.atoms = g_two_func_atoms; old_m.natoms = 2;
+  build_two_func_module_arity_variant(types_b, r0_b, r1_b, e0_b, e1_b, funcs_b, &new_m, 0, 1, 777);
+  new_m.atoms = g_two_func_atoms; new_m.natoms = 2;
+
+  jello_jit_module* jm = jello_jit_module_create(&old_m);
+  assert(jm != NULL);
+  jello_vm* vm = jello_vm_create();
+
+  jello_numeric_result out;
+  memset(&out, 0, sizeof(out));
+  assert(jello_vm_exec_numeric_with_jit(vm, jm, &old_m, &out) == JELLO_EXEC_OK);
+  assert(out.kind == JELLO_NUM_I32 && out.as.i32 == 100);
+
+  jello_jit_reload_report report;
+  int rc = jello_jit_module_reload(vm, jm, &old_m, &new_m, /* allow_conflicts */ 0, &report);
+  assert(rc == 0); /* refused -- must not silently apply a conflicting reload */
+  assert(report.n_signature_conflicts == 1);
+  assert(report.n_type_conflicts == 0);
+  assert(report.fn_status[1] == JELLO_RELOAD_FN_SIGNATURE_CONFLICT);
+  jello_jit_reload_report_free(&report);
+
+  memset(&out, 0, sizeof(out));
+  assert(jello_vm_exec_numeric_with_jit(vm, jm, &old_m, &out) == JELLO_EXEC_OK);
+  assert(out.kind == JELLO_NUM_I32 && out.as.i32 == 100);
+
+  jello_jit_module_destroy(jm);
+  jello_vm_destroy(vm);
+  printf("test_reload_refuses_signature_conflict_by_default: PASS\n");
+}
+
+static void test_reload_allow_conflicts_overrides_refusal(void) {
+  jello_type_entry types_a[1], types_b[1];
+  jello_type_id r0_a[1], r1_a[1], r0_b[2], r1_b[1];
+  jello_insn e0_a[2], e1_a[2], e0_b[3], e1_b[1];
+  jello_bc_function funcs_a[2], funcs_b[2];
+  jello_bc_module old_m, new_m;
+  build_named_two_func_module(types_a, r0_a, r1_a, e0_a, e1_a, funcs_a, &old_m, 0, 1, 100);
+  old_m.atoms = g_two_func_atoms; old_m.natoms = 2;
+  build_two_func_module_arity_variant(types_b, r0_b, r1_b, e0_b, e1_b, funcs_b, &new_m, 0, 1, 777);
+  new_m.atoms = g_two_func_atoms; new_m.natoms = 2;
+
+  jello_jit_module* jm = jello_jit_module_create(&old_m);
+  assert(jm != NULL);
+  jello_vm* vm = jello_vm_create();
+
+  jello_jit_reload_report report;
+  int rc = jello_jit_module_reload(vm, jm, &old_m, &new_m, /* allow_conflicts */ 1, &report);
+  assert(rc == 1); /* explicit override proceeds despite the conflict */
+  assert(report.n_signature_conflicts == 1);
+  jello_jit_reload_report_free(&report);
+
+  jello_numeric_result out;
+  memset(&out, 0, sizeof(out));
+  assert(jello_vm_exec_numeric_with_jit(vm, jm, &new_m, &out) == JELLO_EXEC_OK);
+  assert(out.kind == JELLO_NUM_I32 && out.as.i32 == 777);
+
+  jello_jit_module_destroy(jm);
+  jello_vm_destroy(vm);
+  printf("test_reload_allow_conflicts_overrides_refusal: PASS\n");
+}
+
+#endif
+
 #if defined(__x86_64__)
 
 static void build_three_leaf_module(jello_type_entry* types, jello_type_id* r0,
@@ -246,6 +560,149 @@ static void test_begin_end_patch_redirects_live_call(void) {
   jello_vm_destroy(vm);
   printf("test_begin_end_patch_redirects_live_call: PASS\n");
 }
+
+#if defined(__x86_64__)
+
+static void test_reload_changed_function_end_to_end(void) {
+  jello_type_entry types_a[1], types_b[1];
+  jello_type_id r0_a[1], r1_a[1], r0_b[1], r1_b[1];
+  jello_insn e0_a[2], e1_a[2], e0_b[2], e1_b[2];
+  jello_bc_function funcs_a[2], funcs_b[2];
+  jello_bc_module old_m, new_m;
+  build_named_two_func_module(types_a, r0_a, r1_a, e0_a, e1_a, funcs_a, &old_m, 0, 1, 100);
+  old_m.atoms = g_two_func_atoms; old_m.natoms = 2;
+  build_named_two_func_module(types_b, r0_b, r1_b, e0_b, e1_b, funcs_b, &new_m, 0, 1, 200);
+  new_m.atoms = g_two_func_atoms; new_m.natoms = 2;
+
+  jello_jit_module* jm = jello_jit_module_create(&old_m);
+  assert(jm != NULL);
+  jello_vm* vm = jello_vm_create();
+
+  jello_numeric_result out;
+  memset(&out, 0, sizeof(out));
+  assert(jello_vm_exec_numeric_with_jit(vm, jm, &old_m, &out) == JELLO_EXEC_OK);
+  assert(out.kind == JELLO_NUM_I32 && out.as.i32 == 100);
+
+  jello_jit_reload_report report;
+  int rc = jello_jit_module_reload(vm, jm, &old_m, &new_m, 0, &report);
+  assert(rc == 1);
+  assert(report.n_unchanged == 1); /* "main" itself did not change */
+  assert(report.n_changed == 1);   /* "helper" did */
+  assert(report.n_new == 0);
+  assert(report.n_removed == 0);
+  assert(report.n_signature_conflicts == 0);
+  assert(report.n_type_conflicts == 0);
+  assert(report.fn_status[1] == JELLO_RELOAD_FN_CHANGED);
+  jello_jit_reload_report_free(&report);
+
+  memset(&out, 0, sizeof(out));
+  assert(jello_vm_exec_numeric_with_jit(vm, jm, &new_m, &out) == JELLO_EXEC_OK);
+  assert(out.kind == JELLO_NUM_I32 && out.as.i32 == 200);
+
+  jello_jit_module_destroy(jm);
+  jello_vm_destroy(vm);
+  printf("test_reload_changed_function_end_to_end: PASS\n");
+}
+
+static int32_t fib_ref_reload(int32_t n) {
+  return (n < 2) ? n : fib_ref_reload(n - 1) + fib_ref_reload(n - 2);
+}
+
+static void build_fib_survive_reload_module(jello_type_entry* types, jello_type_id* r0,
+    jello_type_id* r1, jello_type_id* r2, jello_insn* e0, jello_insn* e1, jello_insn* e2,
+    jello_bc_function* funcs, jello_bc_module* m, int32_t unrelated_const) {
+  types[0].kind = JELLO_T_I32;
+  types[1].kind = JELLO_T_BOOL;
+  memset(&types[0].as, 0, sizeof(types[0].as));
+  memset(&types[1].as, 0, sizeof(types[1].as));
+
+  r0[0] = 0; r0[1] = 0;
+  r1[0] = 0; r1[1] = 1; r1[2] = 0; r1[3] = 0; r1[4] = 0; r1[5] = 0; r1[6] = 0;
+  r2[0] = 0;
+
+  memset(e0, 0, 3 * sizeof(jello_insn));
+  memset(e1, 0, 9 * sizeof(jello_insn));
+  memset(e2, 0, 2 * sizeof(jello_insn));
+
+  e0[0].op = (uint8_t)JOP_CONST_I32; e0[0].a = 0; e0[0].imm = 15;
+  e0[1].op = (uint8_t)JOP_CALL; e0[1].a = 1; e0[1].b = 0; e0[1].c = 1; e0[1].imm = 1; /* -> fib */
+  e0[2].op = (uint8_t)JOP_RET; e0[2].a = 1;
+
+  e1[0].op = (uint8_t)JOP_LT_I32_IMM; e1[0].a = 1; e1[0].b = 0; e1[0].imm = 2;
+  e1[1].op = (uint8_t)JOP_JMP_IF; e1[1].a = 1; e1[1].imm = 6;
+  e1[2].op = (uint8_t)JOP_SUB_I32_IMM; e1[2].a = 2; e1[2].b = 0; e1[2].imm = 1;
+  e1[3].op = (uint8_t)JOP_CALL; e1[3].a = 3; e1[3].b = 2; e1[3].c = 1; e1[3].imm = 1; /* survive candidate */
+  e1[4].op = (uint8_t)JOP_SUB_I32_IMM; e1[4].a = 4; e1[4].b = 0; e1[4].imm = 2;
+  e1[5].op = (uint8_t)JOP_CALL; e1[5].a = 5; e1[5].b = 4; e1[5].c = 1; e1[5].imm = 1;
+  e1[6].op = (uint8_t)JOP_ADD_I32; e1[6].a = 6; e1[6].b = 3; e1[6].c = 5; /* consumer */
+  e1[7].op = (uint8_t)JOP_RET; e1[7].a = 6;
+  e1[8].op = (uint8_t)JOP_RET; e1[8].a = 0;
+
+  /* The one function this fixture actually varies between old_m/new_m. */
+  e2[0].op = (uint8_t)JOP_CONST_I32; e2[0].a = 0; e2[0].imm = (uint32_t)unrelated_const;
+  e2[1].op = (uint8_t)JOP_RET; e2[1].a = 0;
+
+  funcs[0].name_atom = 0; /* "main" */
+  funcs[0].nargs = 0; funcs[0].nregs = 2; funcs[0].cap_start = 0; funcs[0].reg_types = r0; funcs[0].ninsns = 3; funcs[0].insns = e0;
+  funcs[1].name_atom = 1; /* "fib" */
+  funcs[1].nargs = 0; funcs[1].nregs = 7; funcs[1].cap_start = 0; funcs[1].reg_types = r1; funcs[1].ninsns = 9; funcs[1].insns = e1;
+  funcs[2].name_atom = 2; /* "unrelated" */
+  funcs[2].nargs = 0; funcs[2].nregs = 1; funcs[2].cap_start = 1; funcs[2].reg_types = r2; funcs[2].ninsns = 2; funcs[2].insns = e2;
+
+  memset(m, 0, sizeof(*m));
+  m->ntypes = 2; m->types = types; m->nfuncs = 3; m->funcs = funcs; m->entry = 0;
+}
+
+static const char* g_fib_survive_reload_atoms[3] = {"main", "fib", "unrelated"};
+
+static void test_reload_chapter10_survive_interaction(void) {
+  jello_type_entry types_a[2], types_b[2];
+  jello_type_id r0_a[2], r1_a[7], r2_a[1], r0_b[2], r1_b[7], r2_b[1];
+  jello_insn e0_a[3], e1_a[9], e2_a[2], e0_b[3], e1_b[9], e2_b[2];
+  jello_bc_function funcs_a[3], funcs_b[3];
+  jello_bc_module old_m, new_m;
+  build_fib_survive_reload_module(types_a, r0_a, r1_a, r2_a, e0_a, e1_a, e2_a, funcs_a, &old_m, 111);
+  old_m.atoms = g_fib_survive_reload_atoms; old_m.natoms = 3;
+  build_fib_survive_reload_module(types_b, r0_b, r1_b, r2_b, e0_b, e1_b, e2_b, funcs_b, &new_m, 222);
+  new_m.atoms = g_fib_survive_reload_atoms; new_m.natoms = 3;
+
+  jit_call_survive_armed_count = 0;
+  jello_jit_module* jm = jello_jit_module_create(&old_m);
+  assert(jm != NULL);
+  assert(jit_call_survive_armed_count > 0);
+  jello_vm* vm = jello_vm_create();
+
+  jello_numeric_result out;
+  memset(&out, 0, sizeof(out));
+  assert(jello_vm_exec_numeric_with_jit(vm, jm, &old_m, &out) == JELLO_EXEC_OK);
+  assert(out.kind == JELLO_NUM_I32 && out.as.i32 == fib_ref_reload(15));
+
+  jello_jit_reload_report report;
+  jit_call_survive_armed_count = 0;
+  int rc = jello_jit_module_reload(vm, jm, &old_m, &new_m, 0, &report);
+  assert(rc == 1);
+  assert(report.n_unchanged == 2); /* "main" and "fib" -- byte-identical */
+  assert(report.n_changed == 1);   /* "unrelated" */
+  assert(report.n_new == 0);
+  assert(report.n_removed == 0);
+  assert(report.n_signature_conflicts == 0);
+  assert(report.n_type_conflicts == 0);
+  assert(report.fn_status[1] == JELLO_RELOAD_FN_UNCHANGED); /* fib itself */
+  jello_jit_reload_report_free(&report);
+  assert(jit_call_survive_armed_count > 0);
+  uint32_t armed_after_reload = jit_call_survive_armed_count;
+
+  memset(&out, 0, sizeof(out));
+  assert(jello_vm_exec_numeric_with_jit(vm, jm, &new_m, &out) == JELLO_EXEC_OK);
+  assert(out.kind == JELLO_NUM_I32 && out.as.i32 == fib_ref_reload(15));
+
+  jello_jit_module_destroy(jm);
+  jello_vm_destroy(vm);
+  printf("test_reload_chapter10_survive_interaction: PASS (fib(15)=%d, armed_after_reload=%u)\n",
+      out.as.i32, armed_after_reload);
+}
+
+#endif
 
 static int32_t fib_ref(int32_t n) {
   return (n < 2) ? n : fib_ref(n - 1) + fib_ref(n - 2);
@@ -517,16 +974,28 @@ int main(void) {
   test_module_create_rejects_empty_module();
   test_pause_resume_all_idle_succeeds();
   test_reload_pause_blocks_fresh_call_on_other_thread();
+  test_reload_unchanged_is_successful_noop();
+  test_reload_refuses_struct_type_conflict_by_default();
+  test_reload_allow_conflicts_recompiles_even_if_body_unchanged();
+  test_reload_new_function_recompiles_even_if_nothing_changed();
 #if defined(__x86_64__)
   test_persistent_handle_no_per_call_recompile();
   test_persistent_handle_matches_fresh_path();
   test_persistent_handle_null_falls_back_correctly();
+  test_reload_refuses_signature_conflict_by_default();
+  test_reload_allow_conflicts_overrides_refusal();
   test_begin_end_patch_redirects_live_call();
+  test_reload_changed_function_end_to_end();
+  test_reload_chapter10_survive_interaction();
 #else
   printf("test_persistent_handle_no_per_call_recompile: SKIPPED (host is not x86_64)\n");
   printf("test_persistent_handle_matches_fresh_path: SKIPPED (host is not x86_64)\n");
   printf("test_persistent_handle_null_falls_back_correctly: SKIPPED (host is not x86_64)\n");
+  printf("test_reload_refuses_signature_conflict_by_default: SKIPPED (host is not x86_64)\n");
+  printf("test_reload_allow_conflicts_overrides_refusal: SKIPPED (host is not x86_64)\n");
   printf("test_begin_end_patch_redirects_live_call: SKIPPED (host is not x86_64)\n");
+  printf("test_reload_changed_function_end_to_end: SKIPPED (host is not x86_64)\n");
+  printf("test_reload_chapter10_survive_interaction: SKIPPED (host is not x86_64)\n");
 #endif
 #if defined(__x86_64__)
   test_wx_icache_repeated_create_destroy_then_persistent();

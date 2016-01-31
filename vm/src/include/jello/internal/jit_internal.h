@@ -75,4 +75,13 @@ int jello_reload_function_uses_struct_sig(const jello_bc_module* m, const jello_
 int jello_jit_reload_pause_all(jello_vm* vm);
 void jello_jit_reload_resume_all(jello_vm* vm);
 
+typedef struct jello_jit_reload_report {
+  uint32_t n_unchanged, n_changed, n_new, n_removed, n_signature_conflicts, n_type_conflicts;
+  jello_reload_fn_status* fn_status; /* [new_m->nfuncs], owned by this report */
+} jello_jit_reload_report;
+
+int jello_jit_module_reload(jello_vm* vm, jello_jit_module* jm, const jello_bc_module* old_m,
+    const jello_bc_module* new_m, int allow_conflicts, jello_jit_reload_report* out_report);
+void jello_jit_reload_report_free(jello_jit_reload_report* report);
+
 #endif /* JELLO_JIT_INTERNAL_H */

@@ -120,6 +120,129 @@ int jello_reload_function_uses_struct_sig(const jello_bc_module* m, const jello_
   return 0;
 }
 
+/* -- End-to-end reload -- */
+
+int jello_jit_module_reload(jello_vm* vm, jello_jit_module* jm, const jello_bc_module* old_m,
+    const jello_bc_module* new_m, int allow_conflicts, jello_jit_reload_report* out_report) {
+  if(!out_report) return 0;
+  memset(out_report, 0, sizeof(*out_report));
+  if(!vm || !jm || !jm->prepared || !old_m || !new_m || new_m->nfuncs == 0) return 0;
+
+  out_report->fn_status = (jello_reload_fn_status*)calloc(new_m->nfuncs, sizeof(jello_reload_fn_status));
+  if(!out_report->fn_status) return 0;
+
+  uint32_t min_sigs = old_m->nstruct_sigs < new_m->nstruct_sigs ? old_m->nstruct_sigs : new_m->nstruct_sigs;
+  uint8_t* struct_conflict = min_sigs ? (uint8_t*)calloc(min_sigs, 1) : NULL;
+  if(min_sigs && !struct_conflict) {
+    free(out_report->fn_status);
+    out_report->fn_status = NULL;
+    return 0;
+  }
+  for(uint32_t i = 0; i < min_sigs; i++) {
+    if(jello_reload_struct_sig_changed(old_m, new_m, i)) struct_conflict[i] = 1;
+  }
+
+  uint8_t* old_matched = old_m->nfuncs ? (uint8_t*)calloc(old_m->nfuncs, 1) : NULL;
+  if(old_m->nfuncs && !old_matched) {
+    free(struct_conflict);
+    free(out_report->fn_status);
+    out_report->fn_status = NULL;
+    return 0;
+  }
+
+  for(uint32_t nfi = 0; nfi < new_m->nfuncs; nfi++) {
+    const jello_bc_function* new_f = &new_m->funcs[nfi];
+    jello_reload_fn_status status = JELLO_RELOAD_FN_NEW;
+    uint32_t old_fi = 0;
+    int found = 0;
+
+    if(new_f->name_atom != JELLO_BC_NO_NAME && new_f->name_atom < new_m->natoms) {
+      const char* new_name = new_m->atoms[new_f->name_atom];
+      for(uint32_t ofi = 0; ofi < old_m->nfuncs; ofi++) {
+        const jello_bc_function* old_f = &old_m->funcs[ofi];
+        if(old_f->name_atom == JELLO_BC_NO_NAME || old_f->name_atom >= old_m->natoms) continue;
+        if(strcmp(old_m->atoms[old_f->name_atom], new_name) == 0) {
+          old_fi = ofi;
+          found = 1;
+          old_matched[ofi] = 1;
+          break;
+        }
+      }
+    }
+
+    int is_type_conflict = 0;
+    if(found) {
+      const jello_bc_function* old_f = &old_m->funcs[old_fi];
+      status = jello_reload_analyze_function(old_m, old_f, new_m, new_f);
+      for(uint32_t sid = 0; sid < min_sigs; sid++) {
+        if(!struct_conflict[sid]) continue;
+        if(jello_reload_function_uses_struct_sig(old_m, old_f, sid) ||
+            jello_reload_function_uses_struct_sig(new_m, new_f, sid)) {
+          status = JELLO_RELOAD_FN_SIGNATURE_CONFLICT;
+          is_type_conflict = 1;
+        }
+      }
+    }
+
+    out_report->fn_status[nfi] = status;
+    switch(status) {
+      case JELLO_RELOAD_FN_UNCHANGED: out_report->n_unchanged++; break;
+      case JELLO_RELOAD_FN_CHANGED: out_report->n_changed++; break;
+      case JELLO_RELOAD_FN_NEW: out_report->n_new++; break;
+      case JELLO_RELOAD_FN_SIGNATURE_CONFLICT:
+        if(is_type_conflict) out_report->n_type_conflicts++;
+        else out_report->n_signature_conflicts++;
+        break;
+      default: break;
+    }
+  }
+
+  for(uint32_t ofi = 0; ofi < old_m->nfuncs; ofi++) {
+    if(!old_matched[ofi]) out_report->n_removed++;
+  }
+  free(old_matched);
+  free(struct_conflict);
+
+  if((out_report->n_signature_conflicts > 0 || out_report->n_type_conflicts > 0) && !allow_conflicts) {
+    return 0;
+  }
+
+  if(out_report->n_changed == 0 && out_report->n_new == 0 &&
+      out_report->n_signature_conflicts == 0 && out_report->n_type_conflicts == 0) {
+    return 1;
+  }
+
+  jello_jit_module new_jm;
+  memset(&new_jm, 0, sizeof(new_jm));
+  if(!jello_jit_module_prepare(new_m, &new_jm)) return 0;
+
+  {
+    int paused = 0;
+    for(int tries = 0; tries < 64; tries++) {
+      if(jello_jit_reload_pause_all(vm)) { paused = 1; break; }
+      sched_yield();
+    }
+    if(!paused) {
+      jello_jit_module_free(&new_jm);
+      return 0;
+    }
+  }
+
+  jello_jit_module old_jm = *jm;
+  *jm = new_jm;
+
+  jello_jit_reload_resume_all(vm);
+
+  jello_jit_module_free(&old_jm);
+  return 1;
+}
+
+void jello_jit_reload_report_free(jello_jit_reload_report* report) {
+  if(!report) return;
+  free(report->fn_status);
+  report->fn_status = NULL;
+}
+
 int jello_jit_reload_pause_all(jello_vm* vm) {
   if(!vm_heap_stop_the_world(vm)) return 0; /* another stop-the-world was already in flight; nothing is paused now */
   jello_heap* heap = vm->heap;
