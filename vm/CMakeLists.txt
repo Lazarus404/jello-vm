@@ -41,6 +41,7 @@ if(JELLO_ENABLE_JIT)
     src/jit/regalloc.c
     src/jit/survive.c
     src/jit/emit_x64.c
+    src/jit/regalloc_x64.c
     src/jit/module.c
     src/jit/reload.c
   )

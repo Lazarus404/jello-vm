@@ -238,6 +238,19 @@ extern uint32_t jit_reg_discard_count;
 extern uint32_t jit_call_survive_armed_count;
 extern uint32_t jit_call_survive_decline_count;
 
+/* -- The regalloc seam -- */
+extern const uint8_t jit_gpr_pool[];
+extern const uint32_t jit_gpr_pool_len;
+extern const uint32_t jit_xmm_pool_len;
+
+void jit_spill_load_gpr64(jit_exec_buf* buf, unsigned dst_gpr, uint8_t vreg);
+void jit_spill_store_gpr32(jit_exec_buf* buf, uint8_t vreg, unsigned src_gpr);
+void jit_spill_store_gpr64(jit_exec_buf* buf, uint8_t vreg, unsigned src_gpr);
+void jit_spill_load_xmm32(jit_exec_buf* buf, unsigned dst_xmm, uint8_t vreg);
+void jit_spill_load_xmm64(jit_exec_buf* buf, unsigned dst_xmm, uint8_t vreg);
+void jit_spill_store_xmm32(jit_exec_buf* buf, uint8_t vreg, unsigned src_xmm);
+void jit_spill_store_xmm64(jit_exec_buf* buf, uint8_t vreg, unsigned src_xmm);
+
 void jit_reg_state_init(jit_reg_state* st, uint32_t nregs, jit_reg_emit_ctx emit);
 void jit_reg_state_free(jit_reg_state* st);
 void jit_reg_state_clobber_call(jit_reg_state* st);
