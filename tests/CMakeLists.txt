@@ -160,6 +160,17 @@ if(JELLO_ENABLE_JIT)
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/name_atom_roundtrip.sh" "$<TARGET_FILE:jlo_tool>"
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     endif()
+  
+    add_executable(chapter13_jit_arm64_tests csrc/chapter13_jit_arm64_tests.c)
+    target_link_libraries(chapter13_jit_arm64_tests PRIVATE jello_vm)
+    jello_enable_warnings(chapter13_jit_arm64_tests)
+    if(JELLO_WARNINGS_AS_ERRORS)
+      target_compile_options(chapter13_jit_arm64_tests PRIVATE -Werror)
+    endif()
+
+    add_test(NAME chapter13_jit_arm64
+      COMMAND chapter13_jit_arm64_tests
+      WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
   endif()
 
   add_test(NAME chapter11_jit_numeric

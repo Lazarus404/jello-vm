@@ -39,7 +39,7 @@ static void init_i32_reg_types(jello_type_id* reg_types, uint32_t nregs) {
   for(uint32_t i = 0; i < nregs; i++) reg_types[i] = 0;
 }
 
-#if defined(__x86_64__)
+#if defined(__x86_64__) || defined(__aarch64__)
 static jello_exec_status run_jit_entry(const jello_bc_module* m,
                                        jello_numeric_result* out) {
   jello_jit_code code;
@@ -65,7 +65,11 @@ static jello_exec_status run_jit_entry(const jello_bc_module* m,
 #endif
 
 static void test_add_i32(void) {
-#if defined(__x86_64__)
+#if defined(__aarch64__)
+  printf("test_add_i32: SKIPPED (aarch64 backend has no integer ops yet)\n");
+  return;
+#endif
+#if defined(__x86_64__) || defined(__aarch64__)
   jello_type_entry types[1];
   jello_type_id reg_types[3];
   jello_insn insns[4];
@@ -87,12 +91,16 @@ static void test_add_i32(void) {
   assert(out.as.i32 == 8);
   printf("test_add_i32: PASS\n");
 #else
-  printf("test_add_i32: SKIPPED (host is not x86_64)\n");
+  printf("test_add_i32: SKIPPED (host is not x86_64 or aarch64)\n");
 #endif
 }
 
 static void test_div_i32_by_zero_trap(void) {
-#if defined(__x86_64__)
+#if defined(__aarch64__)
+  printf("test_div_i32_by_zero_trap: SKIPPED (aarch64 backend has no integer ops yet)\n");
+  return;
+#endif
+#if defined(__x86_64__) || defined(__aarch64__)
   jello_type_entry types[1];
   jello_type_id reg_types[3];
   jello_insn insns[4];
@@ -111,12 +119,16 @@ static void test_div_i32_by_zero_trap(void) {
   assert(st == JELLO_EXEC_TRAP);
   printf("test_div_i32_by_zero_trap: PASS\n");
 #else
-  printf("test_div_i32_by_zero_trap: SKIPPED (host is not x86_64)\n");
+  printf("test_div_i32_by_zero_trap: SKIPPED (host is not x86_64 or aarch64)\n");
 #endif
 }
 
 static void test_div_i32_min_neg1_trap(void) {
-#if defined(__x86_64__)
+#if defined(__aarch64__)
+  printf("test_div_i32_min_neg1_trap: SKIPPED (aarch64 backend has no integer ops yet)\n");
+  return;
+#endif
+#if defined(__x86_64__) || defined(__aarch64__)
   jello_type_entry types[1];
   jello_type_id reg_types[3];
   jello_insn insns[4];
@@ -135,11 +147,15 @@ static void test_div_i32_min_neg1_trap(void) {
   assert(st == JELLO_EXEC_TRAP);
   printf("test_div_i32_min_neg1_trap: PASS\n");
 #else
-  printf("test_div_i32_min_neg1_trap: SKIPPED (host is not x86_64)\n");
+  printf("test_div_i32_min_neg1_trap: SKIPPED (host is not x86_64 or aarch64)\n");
 #endif
 }
 
 static void test_accept_jmp_function(void) {
+#if defined(__aarch64__)
+  printf("test_accept_jmp_function: SKIPPED (aarch64 backend has no branches yet)\n");
+  return;
+#endif
   jello_type_entry types[1];
   jello_type_id reg_types[1];
   jello_insn insns[2];
@@ -179,6 +195,10 @@ static void test_reject_call_function(void) {
 }
 
 static void test_reload_count_const_add_add(void) {
+#if defined(__aarch64__)
+  printf("test_reload_count_const_add_add: SKIPPED (aarch64 backend has no integer ops yet)\n");
+  return;
+#endif
   jello_type_entry types[1];
   jello_type_id reg_types[1];
   jello_insn insns[4];

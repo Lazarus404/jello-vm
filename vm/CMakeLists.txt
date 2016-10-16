@@ -40,11 +40,28 @@ if(JELLO_ENABLE_JIT)
     src/jit/frame.c
     src/jit/regalloc.c
     src/jit/survive.c
-    src/jit/emit_x64.c
-    src/jit/regalloc_x64.c
     src/jit/module.c
     src/jit/reload.c
   )
+  set(JELLO_JIT_TARGET_ARCH "")
+  if(APPLE AND CMAKE_OSX_ARCHITECTURES)
+    set(JELLO_JIT_TARGET_ARCH "${CMAKE_OSX_ARCHITECTURES}")
+  endif()
+  if(NOT JELLO_JIT_TARGET_ARCH AND CMAKE_C_COMPILER_TARGET MATCHES "x86_64")
+    set(JELLO_JIT_TARGET_ARCH "x86_64")
+  elseif(NOT JELLO_JIT_TARGET_ARCH AND CMAKE_C_COMPILER_TARGET MATCHES "aarch64|arm64")
+    set(JELLO_JIT_TARGET_ARCH "aarch64")
+  endif()
+  if(NOT JELLO_JIT_TARGET_ARCH)
+    set(JELLO_JIT_TARGET_ARCH "${CMAKE_SYSTEM_PROCESSOR}")
+  endif()
+  if(JELLO_JIT_TARGET_ARCH MATCHES "^(x86_64|AMD64)$")
+    target_sources(jello_vm PRIVATE src/jit/emit_x64.c src/jit/regalloc_x64.c)
+  elseif(JELLO_JIT_TARGET_ARCH MATCHES "^(aarch64|arm64|ARM64)$")
+    target_sources(jello_vm PRIVATE src/jit/emit_arm64.c src/jit/regalloc_arm64.c)
+  else()
+    message(FATAL_ERROR "JELLO_ENABLE_JIT: unsupported CMAKE target arch '${JELLO_JIT_TARGET_ARCH}'")
+  endif()
   target_compile_definitions(jello_vm PRIVATE JELLO_ENABLE_JIT)
 endif()
 target_include_directories(jello_vm PUBLIC src/include)

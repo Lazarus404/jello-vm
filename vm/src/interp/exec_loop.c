@@ -245,7 +245,7 @@ static jello_exec_status vm_exec_numeric_impl(jello_vm* vm, const jello_bc_modul
     return JELLO_EXEC_TRAP;
   }
 
-#if defined(JELLO_ENABLE_JIT) && defined(__x86_64__)
+#if defined(JELLO_ENABLE_JIT) && (defined(__x86_64__) || defined(__aarch64__))
   {
     const char* jit_off = getenv("JELLO_JIT_DISABLE");
     if(!(jit_off && jit_off[0] != '\0')) {

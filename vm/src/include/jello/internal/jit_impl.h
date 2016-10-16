@@ -186,12 +186,21 @@ int jello_jit_ir_verify(const jello_jit_ir_function* f, const jello_bc_function*
 
 void jello_jit_ir_free(jello_jit_ir_function* f);
 /* -- the private JIT-to-JIT calling convention -- */
+#if defined(__aarch64__)
+typedef enum jit_arm64_reg {
+  JIT_REG_OUT = 19,     /* x19 */
+  JIT_REG_VM = 20,      /* x20 */
+  JIT_REG_BASE = 21,    /* x21 */
+  JIT_REG_SURVIVE = 28, /* x28 -- Chapter 10/12 */
+} jit_arm64_reg;
+#else
 typedef enum jit_x64_reg {
   JIT_REG_OUT = 3,
   JIT_REG_VM = 12,   /* R12 */
   JIT_REG_BASE = 13, /* R13 */
   JIT_REG_SURVIVE = 15, /* R15 */
 } jit_x64_reg;
+#endif
 
 /* -- the minimal W^X proof mechanism -- */
 typedef struct jit_exec_buf {
@@ -222,7 +231,7 @@ typedef struct jit_reg_state {
   uint32_t nregs;
   int8_t* current;
   int8_t gpr_vreg[11];
-  int8_t xmm_vreg[6];
+  int8_t xmm_vreg[8];
   uint8_t gpr_pinned[11];
   uint8_t xmm_pinned[8];
   unsigned next_gpr_victim;
