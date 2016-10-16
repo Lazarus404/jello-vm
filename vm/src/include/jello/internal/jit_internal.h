@@ -58,6 +58,8 @@ int jello_jit_emit_function_into(const jello_bc_module* m, uint32_t fi, jit_exec
     int allow_calls);
 
 void jello_jit_patch_call_rel32(jit_exec_buf* buf, size_t at, int32_t rel);
+void jello_jit_patch_call(jit_exec_buf* buf, size_t site_off, size_t callee_off);
+
 /* -- Function identity across a recompile -- */
 typedef enum jello_reload_fn_status {
   JELLO_RELOAD_FN_UNCHANGED,          /* same signature, same body hash -- no-op */

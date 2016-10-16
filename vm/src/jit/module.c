@@ -56,8 +56,7 @@ int jello_jit_module_prepare(const jello_bc_module* m, jello_jit_module* out) {
       return 0;
     }
     size_t callee = out->funcs[p->callee_fi].blob_off + out->funcs[p->callee_fi].body_off;
-    int32_t rel = (int32_t)(callee - (p->site_off + 5));
-    jello_jit_patch_call_rel32(&out->blob, p->site_off, rel);
+    jello_jit_patch_call(&out->blob, p->site_off, callee);
   }
 
   if(!jit_finalize_exec_buf(&out->blob)) {

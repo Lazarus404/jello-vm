@@ -3119,6 +3119,10 @@ void jello_jit_patch_call_rel32(jit_exec_buf* buf, size_t at, int32_t rel) {
   patch_call_rel32(buf, at, rel);
 }
 
+void jello_jit_patch_call(jit_exec_buf* buf, size_t site_off, size_t callee_off) {
+  patch_call_rel32(buf, site_off, (int32_t)(callee_off - (site_off + 5)));
+}
+
 void jello_jit_code_free(jello_jit_code* code) {
   free(code->loop_anchor_pcs);
   free(code->loop_anchor_offs);
