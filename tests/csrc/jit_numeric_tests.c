@@ -65,10 +65,6 @@ static jello_exec_status run_jit_entry(const jello_bc_module* m,
 #endif
 
 static void test_add_i32(void) {
-#if defined(__aarch64__)
-  printf("test_add_i32: SKIPPED (aarch64 backend has no integer ops yet)\n");
-  return;
-#endif
 #if defined(__x86_64__) || defined(__aarch64__)
   jello_type_entry types[1];
   jello_type_id reg_types[3];
@@ -96,10 +92,6 @@ static void test_add_i32(void) {
 }
 
 static void test_div_i32_by_zero_trap(void) {
-#if defined(__aarch64__)
-  printf("test_div_i32_by_zero_trap: SKIPPED (aarch64 backend has no integer ops yet)\n");
-  return;
-#endif
 #if defined(__x86_64__) || defined(__aarch64__)
   jello_type_entry types[1];
   jello_type_id reg_types[3];
@@ -124,10 +116,6 @@ static void test_div_i32_by_zero_trap(void) {
 }
 
 static void test_div_i32_min_neg1_trap(void) {
-#if defined(__aarch64__)
-  printf("test_div_i32_min_neg1_trap: SKIPPED (aarch64 backend has no integer ops yet)\n");
-  return;
-#endif
 #if defined(__x86_64__) || defined(__aarch64__)
   jello_type_entry types[1];
   jello_type_id reg_types[3];
@@ -195,10 +183,6 @@ static void test_reject_call_function(void) {
 }
 
 static void test_reload_count_const_add_add(void) {
-#if defined(__aarch64__)
-  printf("test_reload_count_const_add_add: SKIPPED (aarch64 backend has no integer ops yet)\n");
-  return;
-#endif
   jello_type_entry types[1];
   jello_type_id reg_types[1];
   jello_insn insns[4];

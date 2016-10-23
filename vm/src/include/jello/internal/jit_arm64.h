@@ -22,8 +22,24 @@ static inline uint32_t a64_movk_x(uint8_t rd, uint16_t imm, uint8_t shift) {
   return 0xF2800000u | (((uint32_t)(shift / 16u) & 3u) << 21) | ((uint32_t)imm << 5) | (uint32_t)rd;
 }
 
+static inline uint32_t a64_add_w_rr(uint8_t rd, uint8_t rn, uint8_t rm) {
+  return 0x0B000000u | ((uint32_t)rm << 16) | ((uint32_t)rn << 5) | (uint32_t)rd;
+}
+
 static inline uint32_t a64_sub_w_rr(uint8_t rd, uint8_t rn, uint8_t rm) {
   return 0x4B000000u | ((uint32_t)rm << 16) | ((uint32_t)rn << 5) | (uint32_t)rd;
+}
+
+static inline uint32_t a64_add_w_imm(uint8_t rd, uint8_t rn, uint32_t imm12) {
+  return 0x11000000u | ((imm12 & 0xFFFu) << 10) | ((uint32_t)rn << 5) | (uint32_t)rd;
+}
+
+static inline uint32_t a64_sub_w_imm(uint8_t rd, uint8_t rn, uint32_t imm12) {
+  return 0x51000000u | ((imm12 & 0xFFFu) << 10) | ((uint32_t)rn << 5) | (uint32_t)rd;
+}
+
+static inline uint32_t a64_subs_w_rr(uint8_t rd, uint8_t rn, uint8_t rm) {
+  return 0x6B000000u | ((uint32_t)rm << 16) | ((uint32_t)rn << 5) | (uint32_t)rd;
 }
 
 static inline uint32_t a64_add_x_rr(uint8_t rd, uint8_t rn, uint8_t rm) {
@@ -34,8 +50,30 @@ static inline uint32_t a64_add_x_imm(uint8_t rd, uint8_t rn, uint32_t imm12) {
   return 0x91000000u | ((imm12 & 0xFFFu) << 10) | ((uint32_t)rn << 5) | (uint32_t)rd;
 }
 
+static inline uint32_t a64_cset_w(uint8_t rd, uint8_t cond) {
+  uint8_t inv = (uint8_t)(cond ^ 1u);
+  return 0x1A800000u | (1u << 10) | ((uint32_t)31u << 16) | ((uint32_t)inv << 12) | ((uint32_t)31u << 5) |
+         (uint32_t)rd;
+}
+
 static inline uint32_t a64_mul_w(uint8_t rd, uint8_t rn, uint8_t rm) {
   return 0x1B007C00u | ((uint32_t)rm << 16) | ((uint32_t)rn << 5) | (uint32_t)rd;
+}
+
+static inline uint32_t a64_sdiv_w(uint8_t rd, uint8_t rn, uint8_t rm) {
+  return 0x1AC00C00u | ((uint32_t)rm << 16) | ((uint32_t)rn << 5) | (uint32_t)rd;
+}
+
+static inline uint32_t a64_msub_w(uint8_t rd, uint8_t rn, uint8_t rm, uint8_t ra) {
+  return 0x1B008000u | ((uint32_t)rm << 16) | ((uint32_t)ra << 10) | ((uint32_t)rn << 5) | (uint32_t)rd;
+}
+
+static inline uint32_t a64_lslv_w(uint8_t rd, uint8_t rn, uint8_t rm) {
+  return 0x1AC02000u | ((uint32_t)rm << 16) | ((uint32_t)rn << 5) | (uint32_t)rd;
+}
+
+static inline uint32_t a64_neg_w(uint8_t rd, uint8_t rm) {
+  return 0x4B0003E0u | ((uint32_t)rm << 16) | (uint32_t)rd;
 }
 
 static inline uint32_t a64_ldr_w_uimm(uint8_t rt, uint8_t rn, uint32_t byte_off) {
@@ -62,8 +100,44 @@ static inline uint32_t a64_sub_x_imm(uint8_t rd, uint8_t rn, uint32_t imm12) {
   return 0xD1000000u | ((imm12 & 0xFFFu) << 10) | ((uint32_t)rn << 5) | (uint32_t)rd;
 }
 
+static inline uint32_t a64_cmn_x_imm(uint8_t rn, uint32_t imm12) {
+  return 0xB1000000u | ((imm12 & 0xFFFu) << 10) | ((uint32_t)rn << 5) | 0x1Fu;
+}
+
+static inline uint32_t a64_and_w_imm31(uint8_t rd, uint8_t rn) {
+  return 0x12001000u | ((uint32_t)rn << 5) | (uint32_t)rd;
+}
+
+static inline uint32_t a64_and_x_imm63(uint8_t rd, uint8_t rn) {
+  return 0x92401400u | ((uint32_t)rn << 5) | (uint32_t)rd;
+}
+
+static inline uint32_t a64_sub_x_rr(uint8_t rd, uint8_t rn, uint8_t rm) {
+  return 0xCB000000u | ((uint32_t)rm << 16) | ((uint32_t)rn << 5) | (uint32_t)rd;
+}
+
+static inline uint32_t a64_subs_x_rr(uint8_t rd, uint8_t rn, uint8_t rm) {
+  return 0xEB000000u | ((uint32_t)rm << 16) | ((uint32_t)rn << 5) | (uint32_t)rd;
+}
+
 static inline uint32_t a64_mul_x(uint8_t rd, uint8_t rn, uint8_t rm) {
   return 0x9B007C00u | ((uint32_t)rm << 16) | ((uint32_t)rn << 5) | (uint32_t)rd;
+}
+
+static inline uint32_t a64_sdiv_x(uint8_t rd, uint8_t rn, uint8_t rm) {
+  return 0x9AC00C00u | ((uint32_t)rm << 16) | ((uint32_t)rn << 5) | (uint32_t)rd;
+}
+
+static inline uint32_t a64_msub_x(uint8_t rd, uint8_t rn, uint8_t rm, uint8_t ra) {
+  return 0x9B008000u | ((uint32_t)rm << 16) | ((uint32_t)ra << 10) | ((uint32_t)rn << 5) | (uint32_t)rd;
+}
+
+static inline uint32_t a64_lslv_x(uint8_t rd, uint8_t rn, uint8_t rm) {
+  return 0x9AC02000u | ((uint32_t)rm << 16) | ((uint32_t)rn << 5) | (uint32_t)rd;
+}
+
+static inline uint32_t a64_neg_x(uint8_t rd, uint8_t rm) {
+  return 0xCB0003E0u | ((uint32_t)rm << 16) | (uint32_t)rd;
 }
 
 static inline uint32_t a64_ldr_d_uimm(uint8_t dt, uint8_t rn, uint32_t byte_off) {
@@ -74,6 +148,24 @@ static inline uint32_t a64_ldr_d_uimm(uint8_t dt, uint8_t rn, uint32_t byte_off)
 static inline uint32_t a64_str_d_uimm(uint8_t dt, uint8_t rn, uint32_t byte_off) {
   uint32_t imm12 = byte_off / 8u;
   return 0xFD000000u | (imm12 << 10) | ((uint32_t)rn << 5) | (uint32_t)dt;
+}
+
+static inline uint32_t a64_asrv_w(uint8_t rd, uint8_t rn, uint8_t rm) {
+  return 0x1AC02800u | ((uint32_t)rm << 16) | ((uint32_t)rn << 5) | (uint32_t)rd;
+}
+
+static inline uint32_t a64_asrv_x(uint8_t rd, uint8_t rn, uint8_t rm) {
+  return 0x9AC02800u | ((uint32_t)rm << 16) | ((uint32_t)rn << 5) | (uint32_t)rd;
+}
+
+static inline uint32_t a64_b_lo(int32_t off_insns) {
+  uint32_t imm19 = ((uint32_t)off_insns & 0x7FFFFu) << 5;
+  return 0x54000000u | imm19 | 0x3u;
+}
+
+static inline uint32_t a64_b_ls(int32_t off_insns) {
+  uint32_t imm19 = ((uint32_t)off_insns & 0x7FFFFu) << 5;
+  return 0x54000000u | imm19 | 0x9u;
 }
 
 static inline uint32_t a64_ldr_s_uimm(uint8_t st, uint8_t rn, uint32_t byte_off) {
@@ -103,6 +195,34 @@ static inline uint32_t a64_blr_x(uint8_t xn) {
   return 0xD63F0000u | ((uint32_t)xn << 5);
 }
 
+static inline uint32_t a64_cmp_w_imm(uint8_t rn, uint16_t imm) {
+  return 0x71000000u | ((uint32_t)imm << 10) | ((uint32_t)rn << 5) | 0x1Fu;
+}
+
+static inline uint32_t a64_and_w_rr(uint8_t rd, uint8_t rn, uint8_t rm) {
+  return 0x0A000000u | ((uint32_t)rm << 16) | ((uint32_t)rn << 5) | (uint32_t)rd;
+}
+
+static inline uint32_t a64_and_x_rr(uint8_t rd, uint8_t rn, uint8_t rm) {
+  return 0x8A000000u | ((uint32_t)rm << 16) | ((uint32_t)rn << 5) | (uint32_t)rd;
+}
+
+static inline uint32_t a64_ands_w_rr(uint8_t rd, uint8_t rn, uint8_t rm) {
+  return 0x6A000000u | ((uint32_t)rm << 16) | ((uint32_t)rn << 5) | (uint32_t)rd;
+}
+
+static inline uint32_t a64_ands_x_rr(uint8_t rd, uint8_t rn, uint8_t rm) {
+  return 0xEA000000u | ((uint32_t)rm << 16) | ((uint32_t)rn << 5) | (uint32_t)rd;
+}
+
+static inline uint32_t a64_orr_w_rr(uint8_t rd, uint8_t rn, uint8_t rm) {
+  return 0x2A000000u | ((uint32_t)rm << 16) | ((uint32_t)rn << 5) | (uint32_t)rd;
+}
+
+static inline uint32_t a64_orr_x_rr(uint8_t rd, uint8_t rn, uint8_t rm) {
+  return 0xAA000000u | ((uint32_t)rm << 16) | ((uint32_t)rn << 5) | (uint32_t)rd;
+}
+
 static inline uint32_t a64_uxtw_x_w(uint8_t xd, uint8_t ws) {
   return 0xD3407C00u | ((uint32_t)ws << 5) | (uint32_t)xd;
 }
@@ -117,6 +237,39 @@ static inline uint32_t a64_mov_x_rr(uint8_t rd, uint8_t rm) {
 
 static inline uint32_t a64_ldrb_w_uimm(uint8_t rt, uint8_t rn, uint32_t byte_off) {
   return 0x39400000u | ((byte_off & 0xFFFu) << 10) | ((uint32_t)rn << 5) | (uint32_t)rt;
+}
+
+static inline uint32_t a64_eor_w_rr(uint8_t rd, uint8_t rn, uint8_t rm) {
+  return 0x4A000000u | ((uint32_t)rm << 16) | ((uint32_t)rn << 5) | (uint32_t)rd;
+}
+
+static inline uint32_t a64_eor_x_rr(uint8_t rd, uint8_t rn, uint8_t rm) {
+  return 0xCA000000u | ((uint32_t)rm << 16) | ((uint32_t)rn << 5) | (uint32_t)rd;
+}
+
+static inline uint32_t a64_b_eq(int32_t off_insns) {
+  uint32_t imm19 = ((uint32_t)off_insns & 0x7FFFFu) << 5;
+  return 0x54000000u | imm19 | 0x0u;
+}
+
+static inline uint32_t a64_b_ne(int32_t off_insns) {
+  uint32_t imm19 = ((uint32_t)off_insns & 0x7FFFFu) << 5;
+  return 0x54000000u | imm19 | 0x1u;
+}
+
+static inline uint32_t a64_b_hs(int32_t off_insns) {
+  uint32_t imm19 = ((uint32_t)off_insns & 0x7FFFFu) << 5;
+  return 0x54000000u | imm19 | 0x2u;
+}
+
+static inline uint32_t a64_b_hi(int32_t off_insns) {
+  uint32_t imm19 = ((uint32_t)off_insns & 0x7FFFFu) << 5;
+  return 0x54000000u | imm19 | 0x8u;
+}
+
+static inline uint32_t a64_b_lt(int32_t off_insns) {
+  uint32_t imm19 = ((uint32_t)off_insns & 0x7FFFFu) << 5;
+  return 0x54000000u | imm19 | 0xBu;
 }
 
 static inline uint32_t a64_ret(void) {
