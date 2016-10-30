@@ -150,6 +150,34 @@ static inline uint32_t a64_str_d_uimm(uint8_t dt, uint8_t rn, uint32_t byte_off)
   return 0xFD000000u | (imm12 << 10) | ((uint32_t)rn << 5) | (uint32_t)dt;
 }
 
+static inline uint32_t a64_fadd_d(uint8_t dd, uint8_t dn, uint8_t dm) {
+  return 0x1E602800u | ((uint32_t)dm << 16) | ((uint32_t)dn << 5) | (uint32_t)dd;
+}
+
+static inline uint32_t a64_fsub_d(uint8_t dd, uint8_t dn, uint8_t dm) {
+  return 0x1E603800u | ((uint32_t)dm << 16) | ((uint32_t)dn << 5) | (uint32_t)dd;
+}
+
+static inline uint32_t a64_fmul_d(uint8_t dd, uint8_t dn, uint8_t dm) {
+  return 0x1E600800u | ((uint32_t)dm << 16) | ((uint32_t)dn << 5) | (uint32_t)dd;
+}
+
+static inline uint32_t a64_fdiv_d(uint8_t dd, uint8_t dn, uint8_t dm) {
+  return 0x1E601800u | ((uint32_t)dm << 16) | ((uint32_t)dn << 5) | (uint32_t)dd;
+}
+
+static inline uint32_t a64_fmov_d(uint8_t dd, uint8_t dn) {
+  return 0x1E604000u | ((uint32_t)dn << 5) | (uint32_t)dd;
+}
+
+static inline uint32_t a64_sxtw_x_w(uint8_t xd, uint8_t ws) {
+  return 0x93407C00u | ((uint32_t)ws << 5) | (uint32_t)xd;
+}
+
+static inline uint32_t a64_sxth_w(uint8_t wd, uint8_t wn) {
+  return 0x13003C00u | ((uint32_t)wn << 5) | (uint32_t)wd;
+}
+
 static inline uint32_t a64_asrv_w(uint8_t rd, uint8_t rn, uint8_t rm) {
   return 0x1AC02800u | ((uint32_t)rm << 16) | ((uint32_t)rn << 5) | (uint32_t)rd;
 }
@@ -168,6 +196,10 @@ static inline uint32_t a64_b_ls(int32_t off_insns) {
   return 0x54000000u | imm19 | 0x9u;
 }
 
+static inline uint32_t a64_fcmp_d(uint8_t dn, uint8_t dm) {
+  return 0x1E602000u | ((uint32_t)dm << 16) | ((uint32_t)dn << 5);
+}
+
 static inline uint32_t a64_ldr_s_uimm(uint8_t st, uint8_t rn, uint32_t byte_off) {
   uint32_t imm12 = byte_off / 4u;
   return 0xBD400000u | (imm12 << 10) | ((uint32_t)rn << 5) | (uint32_t)st;
@@ -176,6 +208,70 @@ static inline uint32_t a64_ldr_s_uimm(uint8_t st, uint8_t rn, uint32_t byte_off)
 static inline uint32_t a64_str_s_uimm(uint8_t st, uint8_t rn, uint32_t byte_off) {
   uint32_t imm12 = byte_off / 4u;
   return 0xBD000000u | (imm12 << 10) | ((uint32_t)rn << 5) | (uint32_t)st;
+}
+
+static inline uint32_t a64_fadd_s(uint8_t sd, uint8_t sn, uint8_t sm) {
+  return 0x1E202800u | ((uint32_t)sm << 16) | ((uint32_t)sn << 5) | (uint32_t)sd;
+}
+
+static inline uint32_t a64_fsub_s(uint8_t sd, uint8_t sn, uint8_t sm) {
+  return 0x1E203800u | ((uint32_t)sm << 16) | ((uint32_t)sn << 5) | (uint32_t)sd;
+}
+
+static inline uint32_t a64_fmul_s(uint8_t sd, uint8_t sn, uint8_t sm) {
+  return 0x1E200800u | ((uint32_t)sm << 16) | ((uint32_t)sn << 5) | (uint32_t)sd;
+}
+
+static inline uint32_t a64_fdiv_s(uint8_t sd, uint8_t sn, uint8_t sm) {
+  return 0x1E201800u | ((uint32_t)sm << 16) | ((uint32_t)sn << 5) | (uint32_t)sd;
+}
+
+static inline uint32_t a64_fcmp_s(uint8_t sn, uint8_t sm) {
+  return 0x1E202000u | ((uint32_t)sm << 16) | ((uint32_t)sn << 5);
+}
+
+static inline uint32_t a64_fmov_s(uint8_t sd, uint8_t sn) {
+  return 0x1E204000u | ((uint32_t)sn << 5) | (uint32_t)sd;
+}
+
+static inline uint32_t a64_scvtf_s_w(uint8_t sd, uint8_t wn) {
+  return 0x1E220000u | ((uint32_t)wn << 5) | (uint32_t)sd;
+}
+
+static inline uint32_t a64_scvtf_d_w(uint8_t dd, uint8_t wn) {
+  return 0x1E620000u | ((uint32_t)wn << 5) | (uint32_t)dd;
+}
+
+static inline uint32_t a64_scvtf_s_x(uint8_t sd, uint8_t xn) {
+  return 0x9E220000u | ((uint32_t)xn << 5) | (uint32_t)sd;
+}
+
+static inline uint32_t a64_scvtf_d_x(uint8_t dd, uint8_t xn) {
+  return 0x9E620000u | ((uint32_t)xn << 5) | (uint32_t)dd;
+}
+
+static inline uint32_t a64_fcvtzs_w_s(uint8_t wd, uint8_t sn) {
+  return 0x1E380000u | ((uint32_t)sn << 5) | (uint32_t)wd;
+}
+
+static inline uint32_t a64_fcvtzs_w_d(uint8_t wd, uint8_t dn) {
+  return 0x1E780000u | ((uint32_t)dn << 5) | (uint32_t)wd;
+}
+
+static inline uint32_t a64_fcvtzs_x_s(uint8_t xd, uint8_t sn) {
+  return 0x9E380000u | ((uint32_t)sn << 5) | (uint32_t)xd;
+}
+
+static inline uint32_t a64_fcvtzs_x_d(uint8_t xd, uint8_t dn) {
+  return 0x9E780000u | ((uint32_t)dn << 5) | (uint32_t)xd;
+}
+
+static inline uint32_t a64_fcvt_d_s(uint8_t dd, uint8_t sn) {
+  return 0x1E22C000u | ((uint32_t)sn << 5) | (uint32_t)dd;
+}
+
+static inline uint32_t a64_fcvt_s_d(uint8_t sd, uint8_t dn) {
+  return 0x1E624000u | ((uint32_t)dn << 5) | (uint32_t)sd;
 }
 
 static inline uint32_t a64_cbz_w(uint8_t rt, int32_t off_insns) {
