@@ -279,6 +279,11 @@ static inline uint32_t a64_cbz_w(uint8_t rt, int32_t off_insns) {
   return 0x34000000u | imm19 | (uint32_t)rt;
 }
 
+static inline uint32_t a64_cbnz_w(uint8_t rt, int32_t off_insns) {
+  uint32_t imm19 = ((uint32_t)off_insns & 0x7FFFFu) << 5;
+  return 0x35000000u | imm19 | (uint32_t)rt;
+}
+
 static inline uint32_t a64_b(int32_t off_insns) {
   return 0x14000000u | ((uint32_t)off_insns & 0x03FFFFFFu);
 }

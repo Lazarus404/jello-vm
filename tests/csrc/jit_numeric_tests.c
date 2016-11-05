@@ -140,10 +140,6 @@ static void test_div_i32_min_neg1_trap(void) {
 }
 
 static void test_accept_jmp_function(void) {
-#if defined(__aarch64__)
-  printf("test_accept_jmp_function: SKIPPED (aarch64 backend has no branches yet)\n");
-  return;
-#endif
   jello_type_entry types[1];
   jello_type_id reg_types[1];
   jello_insn insns[2];

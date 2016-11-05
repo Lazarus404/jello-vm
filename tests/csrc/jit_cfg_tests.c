@@ -120,10 +120,6 @@ static void test_prologue_unchanged(void) {
 }
 
 static void test_jmp_forward_patches(void) {
-#if defined(__aarch64__)
-  printf("test_jmp_forward_patches: SKIPPED (aarch64 backend has no branches yet)\n");
-  return;
-#endif
   jello_type_entry types[1];
   jello_type_id reg_types[2];
   jello_insn insns[5];
@@ -154,10 +150,6 @@ static void test_jmp_forward_patches(void) {
 }
 
 static void test_hot_loop_anchors_and_discard(void) {
-#if defined(__aarch64__)
-  printf("test_hot_loop_anchors_and_discard: SKIPPED (aarch64 backend has no branches yet)\n");
-  return;
-#endif
   jello_type_entry types[2];
   jello_type_id reg_types[3];
   jello_insn insns[7];
@@ -260,10 +252,6 @@ static jello_exec_status run_jit_entry(const jello_bc_module* m,
 }
 
 static void test_hot_loop_execute(void) {
-#if defined(__aarch64__)
-  printf("test_hot_loop_execute: SKIPPED (aarch64 backend has no branches yet)\n");
-  return;
-#endif
   jello_type_entry types[2];
   jello_type_id reg_types[3];
   jello_insn insns[7];
@@ -309,10 +297,6 @@ static void test_hot_loop_execute(void) {
 }
 
 static void test_jmp_if_taken_execute(void) {
-#if defined(__aarch64__)
-  printf("test_jmp_if_taken_execute: SKIPPED (aarch64 backend has no branches yet)\n");
-  return;
-#endif
   jello_type_entry types[2];
   jello_type_id reg_types[3];
   jello_insn insns[6];

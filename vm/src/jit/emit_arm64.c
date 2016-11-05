@@ -104,11 +104,25 @@ static size_t emit_cbz_w_placeholder(jit_exec_buf* buf, unsigned reg) {
   return at;
 }
 
+static size_t emit_cbnz_w_placeholder(jit_exec_buf* buf, unsigned reg) {
+  size_t at = buf->len;
+  emit_u32(buf, a64_cbnz_w((uint8_t)reg, 0));
+  return at;
+}
+
 static void patch_cbz_w(jit_exec_buf* buf, size_t at, size_t target) {
   int32_t off = off_insns_at(at, target);
   uint32_t old = *(uint32_t*)(buf->mem + at);
   uint32_t rt = old & 0x1Fu;
   uint32_t word = 0x34000000u | (((uint32_t)off & 0x7FFFFu) << 5) | rt;
+  memcpy(buf->mem + at, &word, 4);
+}
+
+static void patch_cbnz_w(jit_exec_buf* buf, size_t at, size_t target) {
+  int32_t off = off_insns_at(at, target);
+  uint32_t old = *(uint32_t*)(buf->mem + at);
+  uint32_t rt = old & 0x1Fu;
+  uint32_t word = 0x35000000u | (((uint32_t)off & 0x7FFFFu) << 5) | rt;
   memcpy(buf->mem + at, &word, 4);
 }
 
@@ -492,6 +506,15 @@ static void patch_trap_jumps(emit_ctx* ctx, const size_t* trap_off_by_kind) {
   }
 }
 
+static int push_branch(emit_ctx* ctx, size_t at, uint32_t bc_tgt, uint8_t is_jcc) {
+  if(ctx->branch_count >= ctx->branch_cap) return 0;
+  ctx->branches[ctx->branch_count].at = at;
+  ctx->branches[ctx->branch_count].bc_tgt = bc_tgt;
+  ctx->branches[ctx->branch_count].is_jcc = is_jcc;
+  ctx->branch_count++;
+  return 1;
+}
+
 static int push_ret_jump(emit_ctx* ctx, size_t at) {
   if(ctx->ret_jump_count >= ctx->ret_jump_cap) return 0;
   ctx->ret_jumps[ctx->ret_jump_count++] = at;
@@ -534,6 +557,7 @@ static int jir_op_allowed(jello_jit_ir_op op, int allow_calls) {
   (void)allow_calls;
   switch(op) {
     case JIR_NOP: case JIR_RET: case JIR_MOV:
+    case JIR_JMP: case JIR_JMP_IF: case JIR_SAFEPOINT:
     case JIR_CONST_I8_IMM: case JIR_CONST_I32: case JIR_CONST_I64:
     case JIR_CONST_F16: case JIR_CONST_F32: case JIR_CONST_F64: case JIR_CONST_BOOL:
     case JIR_BIN_I32: case JIR_BIN_I64: case JIR_BIN_F16: case JIR_BIN_F32: case JIR_BIN_F64:
@@ -1358,6 +1382,27 @@ int jello_jit_emit_function_into(const jello_bc_module* m, uint32_t fi, jit_exec
       emit_ret_insn(&ctx, ins->a);
       goto insn_done;
     }
+    if(op == JIR_JMP) {
+      uint32_t tgt = 0;
+      if(!resolve_target_bc(bc, (int32_t)ins->imm, f->ninsns, &tgt)) { ok = 0; break; }
+      size_t at = emit_b_placeholder(buf);
+      if(!push_branch(&ctx, at, tgt, 0)) ok = 0;
+      goto insn_done;
+    }
+    if(op == JIR_JMP_IF) {
+      uint32_t tgt = 0;
+      if(!resolve_target_bc(bc, (int32_t)ins->imm, f->ninsns, &tgt)) { ok = 0; break; }
+      int cond = jit_reg_get_gpr(&ra, ins->a, 1);
+      size_t at = emit_cbnz_w_placeholder(buf, (unsigned)cond);
+      if(!push_branch(&ctx, at, tgt, 2)) ok = 0;
+      goto insn_done;
+    }
+    if(op == JIR_SAFEPOINT) {
+      emit_mov_x_rr(buf, A64_X0, (unsigned)JIT_REG_VM);
+      emit_call_fn(buf, (void*)vm_safepoint_check);
+      jit_reg_state_clobber_call(&ra);
+      goto insn_done;
+    }
     ok = emit_insn(&ctx, ins);
   insn_done:
     if(splan.is_consumer[i] && jit_reg_survive_is_held(&ra)) jit_reg_survive_release(&ra);
@@ -1383,6 +1428,18 @@ int jello_jit_emit_function_into(const jello_bc_module* m, uint32_t fi, jit_exec
     for(size_t i = 0; i < ctx.ret_jump_count; i++) {
       size_t at = ctx.ret_jumps[i];
       patch_b(buf, at, epilogue_ok_off );
+    }
+    for(size_t i = 0; i < ctx.branch_count; i++) {
+      size_t at = ctx.branches[i].at;
+      uint32_t tgt = ctx.branches[i].bc_tgt;
+      if(tgt >= f->ninsns || native_off[tgt] == (size_t)-1) { ok = 0; break; }
+      size_t tgt_off = native_off[tgt];
+      if(ctx.branches[i].is_jcc == 2)
+        patch_cbnz_w(buf, at, tgt_off);
+      else if(ctx.branches[i].is_jcc)
+        patch_b_cond(buf, at, tgt_off);
+      else
+        patch_b(buf, at, tgt_off);
     }
   }
 

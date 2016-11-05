@@ -67,14 +67,39 @@ static void test_golden_12b_add_i32(void) {
   printf("test_golden_13b_add_i32: PASS\n");
 }
 
+static void test_golden_12c_back_edge_branch(void) {
+  jello_type_entry types[1];
+  jello_type_id reg_types[1];
+  jello_insn insns[2];
+  jello_bc_function func;
+  reg_types[0] = 0;
+  insns[0].op = (uint8_t)JOP_JMP; insns[0].imm = 0;
+  insns[1].op = (uint8_t)JOP_RET; insns[1].a = 0;
+  jello_bc_module m = make_i32_module(types, reg_types, insns, &func, 1, 2);
+
+  jello_jit_code code;
+  memset(&code, 0, sizeof(code));
+  assert(jello_jit_compile_function(&m, 0, &code) == 1);
+  const uint8_t* ep = code.buf.mem + code.body_off;
+  size_t ep_len = code.buf.len - code.body_off;
+  assert(insn_word_present(ep, ep_len, 0xFC000000u, 0x14000000u) ||
+         insn_word_present(ep, ep_len, 0xFF000000u, 0x54000000u));
+  jello_jit_code_free(&code);
+  printf("test_golden_13c_back_edge_branch: PASS\n");
+}
+
 #else
 static void test_golden_12b_add_i32(void) {
   printf("test_golden_13b_add_i32: SKIPPED (host is not aarch64)\n");
+}
+static void test_golden_12c_back_edge_branch(void) {
+  printf("test_golden_13c_back_edge_branch: SKIPPED (host is not aarch64)\n");
 }
 #endif
 
 int main(void) {
   test_golden_12b_add_i32();
+  test_golden_12c_back_edge_branch();
   printf("chapter13_jit_golden_tests: all tests passed\n");
   return 0;
 }
