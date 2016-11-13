@@ -144,10 +144,6 @@ static void build_call_self_sum_module(jello_type_entry* types, jello_type_id* r
 #endif
 
 static void test_module_prepare_produces_one_blob(void) {
-#if defined(__aarch64__)
-  printf("test_module_prepare_produces_one_blob: SKIPPED (aarch64 backend has no calls yet)\n");
-  return;
-#endif
   jello_type_entry types[1];
   jello_type_id r0[2], r1[2];
   jello_insn e0[3], e1[2];
@@ -172,10 +168,6 @@ static void test_module_prepare_produces_one_blob(void) {
 }
 
 static void test_call_rel32_patch_golden(void) {
-#if defined(__aarch64__)
-  printf("test_call_rel32_patch_golden: SKIPPED (aarch64 backend has no calls yet)\n");
-  return;
-#endif
   jello_type_entry types[1];
   jello_type_id r0[2], r1[2];
   jello_insn e0[3], e1[2];
@@ -248,10 +240,6 @@ static void test_module_prepare_rejects_call_native(void) {
 }
 
 static void test_module_prepare_accepts_pointer_callee(void) {
-#if defined(__aarch64__)
-  printf("test_module_prepare_accepts_pointer_callee: SKIPPED (aarch64 backend has no calls yet)\n");
-  return;
-#endif
   jello_type_entry types[2];
   types[0].kind = JELLO_T_I32;
   types[1].kind = JELLO_T_BYTES;
@@ -301,10 +289,6 @@ static jello_exec_status run_module_exec(const jello_bc_module* m, jello_numeric
 }
 
 static void test_call_self_recursive_sum(void) {
-#if defined(__aarch64__)
-  printf("test_call_self_recursive_sum: SKIPPED (aarch64 backend has no calls yet)\n");
-  return;
-#endif
   jello_type_entry types[2];
   jello_type_id r0[2], r1[5];
   jello_insn e0[3], e1[8];
@@ -389,10 +373,6 @@ static void build_call_direct_survive_module(jello_type_entry* types,
 }
 
 static void test_call_direct_survive_correct(void) {
-#if defined(__aarch64__)
-  printf("test_call_direct_survive_correct: SKIPPED (aarch64 backend has no calls yet)\n");
-  return;
-#endif
   jello_type_entry types[1];
   jello_type_id r0[2], r1[2], r2[5];
   jello_insn e0[2], e1[3], e2[5];
@@ -452,10 +432,6 @@ static void build_call_direct_branch_decline_module(jello_type_entry* types,
 }
 
 static void test_call_survive_declines_across_branch(void) {
-#if defined(__aarch64__)
-  printf("test_call_survive_declines_across_branch: SKIPPED (aarch64 backend has no calls yet)\n");
-  return;
-#endif
   jello_type_entry types[2];
   jello_type_id r0[2], r1[2], r2[6];
   jello_insn e0[2], e1[3], e2[7];
@@ -476,10 +452,6 @@ static void test_call_survive_declines_across_branch(void) {
 }
 
 static void test_call_self_survive_fib_correct(void) {
-#if defined(__aarch64__)
-  printf("test_call_self_survive_fib_correct: SKIPPED (aarch64 backend has no calls yet)\n");
-  return;
-#endif
   jello_type_entry types[2];
   jello_type_id r0[2], r1[7];
   jello_insn e0[3], e1[9];
@@ -540,10 +512,6 @@ static void build_fib_survive_nested_trap_module(jello_type_entry* types, jello_
 }
 
 static void test_nested_survive_trap_propagates(void) {
-#if defined(__aarch64__)
-  printf("test_nested_survive_trap_propagates: SKIPPED (aarch64 backend has no calls yet)\n");
-  return;
-#endif
   jello_type_entry types[2];
   jello_type_id r0[2], r1[7];
   jello_insn e0[3], e1[15];
@@ -620,10 +588,6 @@ static void test_nested_jit_trap_propagates(void) {
 }
 
 static void test_wx_icache_prepare_exec_repeated(void) {
-#if defined(__aarch64__)
-  printf("test_wx_icache_prepare_exec_repeated: SKIPPED (aarch64 backend has no calls yet)\n");
-  return;
-#endif
   jello_type_entry types[1];
   jello_type_id r0[2], r1[2];
   jello_insn e0[3], e1[2];

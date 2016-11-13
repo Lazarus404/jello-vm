@@ -43,10 +43,6 @@ static void build_fib_module(jello_type_entry* types, jello_type_id* r0, jello_t
 }
 
 static void test_module_create_destroy_roundtrip(void) {
-#if defined(__aarch64__)
-  printf("test_module_create_destroy_roundtrip: SKIPPED (aarch64 backend has no calls yet)\n");
-  return;
-#endif
   jello_type_entry types[2];
   jello_type_id r0[2], r1[7];
   jello_insn e0[3], e1[9];
@@ -205,10 +201,6 @@ static void build_named_two_func_module(jello_type_entry* types, jello_type_id* 
 static const char* g_two_func_atoms[2] = {"main", "helper"};
 
 static void test_reload_unchanged_is_successful_noop(void) {
-#if defined(__aarch64__)
-  printf("test_reload_unchanged_is_successful_noop: SKIPPED (aarch64 backend has no calls yet)\n");
-  return;
-#endif
   jello_type_entry types_a[1], types_b[1];
   jello_type_id r0_a[1], r1_a[1], r0_b[1], r1_b[1];
   jello_insn e0_a[2], e1_a[2], e0_b[2], e1_b[2];
@@ -428,10 +420,6 @@ static void build_two_func_module_arity_variant(jello_type_entry* types, jello_t
 }
 
 static void test_reload_refuses_signature_conflict_by_default(void) {
-#if defined(__aarch64__)
-  printf("test_reload_refuses_signature_conflict_by_default: SKIPPED (aarch64 backend has no calls yet)\n");
-  return;
-#endif
   jello_type_entry types_a[1], types_b[1];
   jello_type_id r0_a[1], r1_a[1], r0_b[2], r1_b[1];
   jello_insn e0_a[2], e1_a[2], e0_b[3], e1_b[1];
@@ -469,10 +457,6 @@ static void test_reload_refuses_signature_conflict_by_default(void) {
 }
 
 static void test_reload_allow_conflicts_overrides_refusal(void) {
-#if defined(__aarch64__)
-  printf("test_reload_allow_conflicts_overrides_refusal: SKIPPED (aarch64 backend has no calls yet)\n");
-  return;
-#endif
   jello_type_entry types_a[1], types_b[1];
   jello_type_id r0_a[1], r1_a[1], r0_b[2], r1_b[1];
   jello_insn e0_a[2], e1_a[2], e0_b[3], e1_b[1];
@@ -722,10 +706,6 @@ static int32_t fib_ref(int32_t n) {
 }
 
 static void test_persistent_handle_no_per_call_recompile(void) {
-#if defined(__aarch64__)
-  printf("test_persistent_handle_no_per_call_recompile: SKIPPED (aarch64 backend has no calls yet)\n");
-  return;
-#endif
   jello_type_entry types[2];
   jello_type_id r0[2], r1[7];
   jello_insn e0[3], e1[9];
@@ -814,10 +794,6 @@ static void test_persistent_handle_null_falls_back_correctly(void) {
 
 #if defined(__x86_64__) || defined(__aarch64__)
 static void test_wx_icache_repeated_create_destroy_then_persistent(void) {
-#if defined(__aarch64__)
-  printf("test_wx_icache_repeated_create_destroy_then_persistent: SKIPPED (aarch64 backend has no calls yet)\n");
-  return;
-#endif
   jello_vm* vm = jello_vm_create();
   assert(vm != NULL);
   for(int iter = 0; iter < 50; iter++) {
