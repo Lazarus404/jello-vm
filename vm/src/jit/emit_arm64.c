@@ -368,6 +368,10 @@ static void emit_mul_w_imm32(jit_exec_buf* buf, unsigned dst, uint32_t imm) {
   emit_u32(buf, a64_mul_w((uint8_t)dst, (uint8_t)dst, A64_TMP0));
 }
 
+static void emit_lsl_x_imm3(jit_exec_buf* buf, unsigned dst, unsigned src) {
+  emit_u32(buf, a64_lsl_x_imm((uint8_t)dst, (uint8_t)src, 3));
+}
+
 static void emit_lslv_w(jit_exec_buf* buf, unsigned dst) {
   emit_u32(buf, a64_lslv_w((uint8_t)dst, (uint8_t)dst, A64_TMP0));
 }
@@ -388,8 +392,29 @@ static void emit_ldrb_w_disp(jit_exec_buf* buf, unsigned dst, unsigned base, uin
   emit_u32(buf, a64_ldrb_w_uimm((uint8_t)dst, (uint8_t)base, disp));
 }
 
+static void emit_ldrh_w_disp(jit_exec_buf* buf, unsigned dst, unsigned base, uint32_t disp) {
+  emit_u32(buf, a64_ldrh_w_uimm((uint8_t)dst, (uint8_t)base, disp));
+}
+
 static void emit_strb_w_disp(jit_exec_buf* buf, unsigned src, unsigned base, uint32_t disp) {
   emit_u32(buf, a64_strb_w_uimm((uint8_t)src, (uint8_t)base, disp));
+}
+
+static void emit_strh_w_disp(jit_exec_buf* buf, unsigned src, unsigned base, uint32_t disp) {
+  emit_u32(buf, a64_strh_w_uimm((uint8_t)src, (uint8_t)base, disp));
+}
+
+static void emit_rev_w(jit_exec_buf* buf, unsigned reg) {
+  emit_u32(buf, a64_rev_w((uint8_t)reg, (uint8_t)reg));
+}
+
+static void emit_rev_x(jit_exec_buf* buf, unsigned reg) {
+  emit_u32(buf, a64_rev_x((uint8_t)reg, (uint8_t)reg));
+}
+
+static void emit_rev16_w(jit_exec_buf* buf, unsigned reg, uint8_t imm8) {
+  (void)imm8;
+  emit_u32(buf, a64_rev16_w((uint8_t)reg, (uint8_t)reg));
 }
 
 static void emit_fmov_s(jit_exec_buf* buf, unsigned dst, unsigned src) {
@@ -467,6 +492,22 @@ static void emit_fcvt_d_s(jit_exec_buf* buf, unsigned dst, unsigned src) {
 
 static void emit_fcvt_s_d(jit_exec_buf* buf, unsigned dst, unsigned src) {
   emit_u32(buf, a64_fcvt_s_d(pool_dreg_i(dst), pool_dreg_i(src)));
+}
+
+static void emit_fmov_s_w(jit_exec_buf* buf, unsigned xmm, unsigned gpr) {
+  emit_u32(buf, a64_fmov_s_x(pool_dreg_i(xmm), (uint8_t)gpr));
+}
+
+static void emit_fmov_w_s(jit_exec_buf* buf, unsigned gpr, unsigned xmm) {
+  emit_u32(buf, a64_fmov_x_s((uint8_t)gpr, pool_dreg_i(xmm)));
+}
+
+static void emit_fmov_d_x(jit_exec_buf* buf, unsigned xmm, unsigned gpr) {
+  emit_u32(buf, a64_fmov_d_x(pool_dreg_i(xmm), (uint8_t)gpr));
+}
+
+static void emit_fmov_x_d(jit_exec_buf* buf, unsigned gpr, unsigned xmm) {
+  emit_u32(buf, a64_fmov_x_d((uint8_t)gpr, pool_dreg_i(xmm)));
 }
 
 static void emit_str_x_sp(jit_exec_buf* buf, unsigned src, uint8_t disp) {
@@ -641,7 +682,8 @@ static int jir_op_allowed(jello_jit_ir_op op, int allow_calls) {
     case JIR_CMP_I32: case JIR_CMP_I64: case JIR_CMP_F32: case JIR_CMP_F64:
     case JIR_EQ_I32_IMM: case JIR_LT_I32_IMM: case JIR_CONV:
     case JIR_BYTES_NEW: case JIR_BYTES_LEN: case JIR_BYTES_GET_U8: case JIR_BYTES_SET_U8:
-    case JIR_BYTES_EQ: case JIR_BYTES_CONCAT2: case JIR_BYTES_BITOP:
+    case JIR_BYTES_EQ: case JIR_BYTES_CONCAT2: case JIR_BYTES_BITOP: case JIR_BYTES_READ:
+    case JIR_BYTES_WRITE: case JIR_BYTES_BLIT: case JIR_BITS_WRITE: case JIR_BITS_READ:
       return 1;
     case JIR_CALL_SELF:
     case JIR_CALL_DIRECT:
@@ -1394,6 +1436,163 @@ static void emit_bytes_bitop(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
   jit_reg_store_home_gpr64(ctx->ra, ins->a, dst);
 }
 
+static void bytes_rw_info(jello_jir_bytes_rw rw, uint32_t* width, int* be, int* is_float) {
+  switch(rw) {
+    case JIR_BRW_U16_LE: *width = 2; *be = 0; *is_float = 0; return;
+    case JIR_BRW_U16_BE: *width = 2; *be = 1; *is_float = 0; return;
+    case JIR_BRW_U32_LE: *width = 4; *be = 0; *is_float = 0; return;
+    case JIR_BRW_U32_BE: *width = 4; *be = 1; *is_float = 0; return;
+    case JIR_BRW_I32_LE: *width = 4; *be = 0; *is_float = 0; return;
+    case JIR_BRW_I32_BE: *width = 4; *be = 1; *is_float = 0; return;
+    case JIR_BRW_F32_LE: *width = 4; *be = 0; *is_float = 1; return;
+    case JIR_BRW_F32_BE: *width = 4; *be = 1; *is_float = 1; return;
+    case JIR_BRW_I64_LE: *width = 8; *be = 0; *is_float = 0; return;
+    case JIR_BRW_I64_BE: *width = 8; *be = 1; *is_float = 0; return;
+    case JIR_BRW_F64_LE: *width = 8; *be = 0; *is_float = 1; return;
+    case JIR_BRW_F64_BE: *width = 8; *be = 1; *is_float = 1; return;
+  }
+  *width = 4; *be = 0; *is_float = 0;
+}
+
+static void emit_bytes_bounds_check(emit_ctx* ctx, int bytes_gpr, int off_gpr, uint32_t width) {
+  jit_exec_buf* buf = ctx->buf;
+  emit_ldr_w_disp(buf, A64_TMP0, (unsigned)bytes_gpr, (uint32_t)offsetof(jello_bytes, length));
+  emit_mov_w_rr(buf, A64_TMP1, (unsigned)off_gpr);
+  emit_alu_x_imm32(buf, 0x00, A64_TMP1, width);
+  emit_cmp_x_rr(buf, A64_TMP1, A64_TMP0);
+  emit_jcc_trap(ctx, 0x87, JIT_TRAP_BOUNDS); /* JA: off + width > length */
+}
+
+static void emit_bytes_read(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
+  jit_exec_buf* buf = ctx->buf;
+  uint32_t width; int be, is_float;
+  bytes_rw_info((jello_jir_bytes_rw)ins->imm, &width, &be, &is_float);
+  int bp = jit_reg_get_gpr(ctx->ra, ins->b, 1);
+  emit_bytes_null_check(ctx, (unsigned)bp);
+  int off = jit_reg_get_gpr(ctx->ra, ins->c, 1);
+  emit_bytes_bounds_check(ctx, bp, off, width);
+
+  emit_mov_x_rr(buf, A64_TMP0, (unsigned)bp);
+  emit_mov_w_rr(buf, A64_TMP1, (unsigned)off);
+  emit_add_x_rr(buf, A64_TMP0, A64_TMP1);
+  emit_alu_x_imm32(buf, 0x00, A64_TMP0, (uint32_t)offsetof(jello_bytes, data));
+
+  if(!is_float) {
+    int dst = jit_reg_alloc_gpr(ctx->ra, ins->a, 0);
+    if(width == 2) emit_ldrh_w_disp(buf, (unsigned)dst, A64_TMP0, 0);
+    else if(width == 4) emit_ldr_w_disp(buf, (unsigned)dst, A64_TMP0, 0);
+    else emit_ldr_x_disp(buf, (unsigned)dst, A64_TMP0, 0);
+    if(be) {
+      if(width == 8) emit_rev_x(buf, (unsigned)dst);
+      else if(width == 4) emit_rev_w(buf, (unsigned)dst);
+      else emit_rev16_w(buf, (unsigned)dst, 8);
+    }
+    if(width == 8) jit_reg_store_home_gpr64(ctx->ra, ins->a, dst);
+    else jit_reg_store_home_gpr32(ctx->ra, ins->a, dst);
+  } else {
+    if(width == 4) emit_ldr_w_disp(buf, A64_TMP1, A64_TMP0, 0);
+    else emit_ldr_x_disp(buf, A64_TMP1, A64_TMP0, 0);
+    if(be) { if(width == 8) emit_rev_x(buf, A64_TMP1); else emit_rev_w(buf, A64_TMP1); }
+    int dst = jit_reg_alloc_xmm(ctx->ra, ins->a, 0, width == 8);
+    if(width == 4) {
+      emit_fmov_s_w(buf, (unsigned)(dst - (int)JIT_PREG_XMM0), A64_TMP1);
+      jit_reg_store_home_xmm32(ctx->ra, ins->a, dst);
+    } else {
+      emit_fmov_d_x(buf, (unsigned)(dst - (int)JIT_PREG_XMM0), A64_TMP1);
+      jit_reg_store_home_xmm64(ctx->ra, ins->a, dst);
+    }
+  }
+}
+
+static void emit_bytes_write(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
+  jit_exec_buf* buf = ctx->buf;
+  uint32_t width; int be, is_float;
+  bytes_rw_info((jello_jir_bytes_rw)ins->imm, &width, &be, &is_float);
+  int bp = jit_reg_get_gpr(ctx->ra, ins->b, 1);
+  emit_bytes_null_check(ctx, (unsigned)bp);
+  int off = jit_reg_get_gpr(ctx->ra, ins->c, 1);
+  emit_bytes_bounds_check(ctx, bp, off, width);
+
+  if(!is_float) {
+    int val = jit_reg_get_gpr(ctx->ra, ins->a, 1);
+    emit_mov_x_rr(buf, A64_TMP2, (unsigned)val);
+  } else {
+    int val = jit_reg_get_xmm(ctx->ra, ins->a, 1, width == 8);
+    if(width == 4) emit_fmov_w_s(buf, A64_TMP2, (unsigned)(val - (int)JIT_PREG_XMM0));
+    else emit_fmov_x_d(buf, A64_TMP2, (unsigned)(val - (int)JIT_PREG_XMM0));
+  }
+  if(be) {
+    if(width == 8) emit_rev_x(buf, A64_TMP2);
+    else if(width == 4) emit_rev_w(buf, A64_TMP2);
+    else emit_rev16_w(buf, A64_TMP2, 8);
+  }
+
+  emit_mov_x_rr(buf, A64_TMP0, (unsigned)bp);
+  emit_mov_w_rr(buf, A64_TMP1, (unsigned)off);
+  emit_add_x_rr(buf, A64_TMP0, A64_TMP1);
+  emit_alu_x_imm32(buf, 0x00, A64_TMP0, (uint32_t)offsetof(jello_bytes, data));
+
+  if(width == 2) emit_strh_w_disp(buf, A64_TMP2, A64_TMP0, 0);
+  else if(width == 4) emit_str_w_disp(buf, A64_TMP2, A64_TMP0, 0);
+  else emit_str_x_disp(buf, A64_TMP2, A64_TMP0, 0);
+}
+
+static void emit_bytes_blit(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
+  jit_exec_buf* buf = ctx->buf;
+  int dst_bp = jit_reg_get_gpr(ctx->ra, ins->a, 1);
+  emit_bytes_null_check(ctx, (unsigned)dst_bp);
+  int src_bp = jit_reg_get_gpr(ctx->ra, ins->b, 1);
+  emit_bytes_null_check(ctx, (unsigned)src_bp);
+  int off = jit_reg_get_gpr(ctx->ra, ins->c, 1);
+
+  emit_ldr_w_disp(buf, A64_TMP0, (unsigned)src_bp, (uint32_t)offsetof(jello_bytes, length));
+  emit_mov_w_rr(buf, A64_TMP1, (unsigned)off);
+  emit_add_x_rr(buf, A64_TMP1, A64_TMP0);
+  emit_ldr_w_disp(buf, A64_TMP2, (unsigned)dst_bp, (uint32_t)offsetof(jello_bytes, length));
+  emit_cmp_x_rr(buf, A64_TMP1, A64_TMP2);
+  emit_jcc_trap(ctx, 0x87, JIT_TRAP_BOUNDS); /* JA: off + src->length > dst->length */
+
+  emit_mov_x_rr(buf, A64_TMP0, (unsigned)dst_bp);
+  emit_mov_w_rr(buf, A64_TMP1, (unsigned)off);
+  emit_add_x_rr(buf, A64_TMP0, A64_TMP1);
+  emit_alu_x_imm32(buf, 0x00, A64_TMP0, (uint32_t)offsetof(jello_bytes, data));
+  emit_mov_x_rr(buf, A64_TMP1, (unsigned)src_bp);
+  emit_alu_x_imm32(buf, 0x00, A64_TMP1, (uint32_t)offsetof(jello_bytes, data));
+  emit_ldr_w_disp(buf, A64_TMP2, (unsigned)src_bp, (uint32_t)offsetof(jello_bytes, length));
+
+  jit_reg_state_discard_currents(ctx->ra);
+  emit_mov_x_rr(buf, A64_X0, A64_TMP0);
+  emit_mov_x_rr(buf, A64_X1, A64_TMP1);
+  emit_mov_x_rr(buf, A64_X2, A64_TMP2);
+  emit_call_fn(buf, (void*)memmove);
+}
+
+static void emit_bits_write(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
+  jit_exec_buf* buf = ctx->buf;
+  uint32_t width = ins->c;
+  uint32_t bit_off = ins->imm;
+  uint64_t end_bit = (uint64_t)bit_off + (uint64_t)width;
+
+  int bp = jit_reg_get_gpr(ctx->ra, ins->a, 1);
+  emit_bytes_null_check(ctx, (unsigned)bp);
+  int val = jit_reg_get_gpr(ctx->ra, ins->b, 1);
+
+  emit_mov_x_rr(buf, A64_TMP0, (unsigned)bp);
+  emit_ldr_w_disp(buf, A64_TMP1, A64_TMP0, (uint32_t)offsetof(jello_bytes, length));
+  emit_lsl_x_imm3(buf, A64_TMP1, A64_TMP1);
+  emit_mov_x_imm64_reg(buf, A64_IP1, end_bit);
+  emit_cmp_x_rr(buf, A64_IP1, A64_TMP1);
+  emit_jcc_trap(ctx, 0x87, JIT_TRAP_BOUNDS); /* JA: end_bit > length*8 */
+
+  emit_mov_w_rr(buf, A64_TMP2, (unsigned)val);
+  jit_reg_state_discard_currents(ctx->ra);
+  emit_mov_x_rr(buf, A64_X0, A64_TMP0);
+  emit_mov_w_imm32(buf, A64_X1, width);
+  emit_mov_w_imm32(buf, A64_X2, bit_off);
+  emit_mov_w_rr(buf, A64_X3, A64_TMP2);
+  emit_call_fn(buf, (void*)jit_bits_write);
+}
+
 static void emit_bytes_new(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
   jit_exec_buf* buf = ctx->buf;
   int len = jit_reg_get_gpr(ctx->ra, ins->b, 1);
@@ -1427,6 +1626,32 @@ static void emit_bytes_concat2(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
   int dst = jit_reg_alloc_gpr(ctx->ra, ins->a, 0);
   emit_mov_x_rr(buf, (unsigned)dst, A64_X0);
   jit_reg_store_home_gpr64(ctx->ra, ins->a, dst);
+}
+
+static void emit_bits_read(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
+  jit_exec_buf* buf = ctx->buf;
+  uint32_t width = ins->c;
+  uint32_t bit_off = ins->imm;
+  uint64_t end_bit = (uint64_t)bit_off + (uint64_t)width;
+
+  int bp = jit_reg_get_gpr(ctx->ra, ins->b, 1);
+  emit_bytes_null_check(ctx, (unsigned)bp);
+
+  emit_mov_x_rr(buf, A64_TMP0, (unsigned)bp);
+  emit_ldr_w_disp(buf, A64_TMP1, A64_TMP0, (uint32_t)offsetof(jello_bytes, length));
+  emit_lsl_x_imm3(buf, A64_TMP1, A64_TMP1);
+  emit_mov_x_imm64_reg(buf, A64_IP1, end_bit);
+  emit_cmp_x_rr(buf, A64_IP1, A64_TMP1);
+  emit_jcc_trap(ctx, 0x87, JIT_TRAP_BOUNDS);
+
+  jit_reg_state_discard_currents(ctx->ra);
+  emit_mov_x_rr(buf, A64_X0, A64_TMP0);
+  emit_mov_w_imm32(buf, A64_X1, width);
+  emit_mov_w_imm32(buf, A64_X2, bit_off);
+  emit_call_fn(buf, (void*)jit_bits_read);
+  int dst = jit_reg_alloc_gpr(ctx->ra, ins->a, 0);
+  emit_mov_w_rr(buf, (unsigned)dst, A64_X0);
+  jit_reg_store_home_gpr32(ctx->ra, ins->a, dst);
 }
 
 
@@ -1705,6 +1930,21 @@ static int emit_insn(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
       break;
     case JIR_BYTES_BITOP:
       emit_bytes_bitop(ctx, ins);
+      break;
+    case JIR_BYTES_READ:
+      emit_bytes_read(ctx, ins);
+      break;
+    case JIR_BYTES_WRITE:
+      emit_bytes_write(ctx, ins);
+      break;
+    case JIR_BYTES_BLIT:
+      emit_bytes_blit(ctx, ins);
+      break;
+    case JIR_BITS_WRITE:
+      emit_bits_write(ctx, ins);
+      break;
+    case JIR_BITS_READ:
+      emit_bits_read(ctx, ins);
       break;
     case JIR_RET:
       break;
