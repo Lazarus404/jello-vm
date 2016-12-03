@@ -523,6 +523,46 @@ static void emit_sp_adjust(jit_exec_buf* buf, int is_add, uint8_t imm8) {
   else emit_u32(buf, a64_sub_x_imm(A64_SP, A64_SP, imm8));
 }
 
+static void emit_ldr_s_disp(jit_exec_buf* buf, unsigned xmm, unsigned base, uint32_t disp) {
+  if(disp <= 16380u && (disp & 3u) == 0)
+    emit_u32(buf, a64_ldr_s_uimm(pool_dreg_i(xmm), (uint8_t)base, disp));
+  else {
+    emit_mov_w_imm32(buf, A64_IP0, disp);
+    emit_u32(buf, a64_add_x_rr(A64_IP0, (uint8_t)base, A64_IP0));
+    emit_u32(buf, a64_ldr_s_uimm(pool_dreg_i(xmm), A64_IP0, 0));
+  }
+}
+
+static void emit_str_s_disp(jit_exec_buf* buf, unsigned xmm, unsigned base, uint32_t disp) {
+  if(disp <= 16380u && (disp & 3u) == 0)
+    emit_u32(buf, a64_str_s_uimm(pool_dreg_i(xmm), (uint8_t)base, disp));
+  else {
+    emit_mov_w_imm32(buf, A64_IP0, disp);
+    emit_u32(buf, a64_add_x_rr(A64_IP0, (uint8_t)base, A64_IP0));
+    emit_u32(buf, a64_str_s_uimm(pool_dreg_i(xmm), A64_IP0, 0));
+  }
+}
+
+static void emit_ldr_d_disp(jit_exec_buf* buf, unsigned xmm, unsigned base, uint32_t disp) {
+  if(disp <= 32760u && (disp & 7u) == 0)
+    emit_u32(buf, a64_ldr_d_uimm(pool_dreg_i(xmm), (uint8_t)base, disp));
+  else {
+    emit_mov_w_imm32(buf, A64_IP0, disp);
+    emit_u32(buf, a64_add_x_rr(A64_IP0, (uint8_t)base, A64_IP0));
+    emit_u32(buf, a64_ldr_d_uimm(pool_dreg_i(xmm), A64_IP0, 0));
+  }
+}
+
+static void emit_str_d_disp(jit_exec_buf* buf, unsigned xmm, unsigned base, uint32_t disp) {
+  if(disp <= 32760u && (disp & 7u) == 0)
+    emit_u32(buf, a64_str_d_uimm(pool_dreg_i(xmm), (uint8_t)base, disp));
+  else {
+    emit_mov_w_imm32(buf, A64_IP0, disp);
+    emit_u32(buf, a64_add_x_rr(A64_IP0, (uint8_t)base, A64_IP0));
+    emit_u32(buf, a64_str_d_uimm(pool_dreg_i(xmm), A64_IP0, 0));
+  }
+}
+
 static void emit_load_u32_slot_to_w1(jit_exec_buf* buf, uint8_t vreg) {
   uint32_t off = (uint32_t)vreg * REG_SLOT_BYTES;
   emit_u32(buf, a64_ldr_w_uimm(A64_X1, (uint8_t)JIT_REG_BASE, off));
@@ -684,6 +724,7 @@ static int jir_op_allowed(jello_jit_ir_op op, int allow_calls) {
     case JIR_BYTES_NEW: case JIR_BYTES_LEN: case JIR_BYTES_GET_U8: case JIR_BYTES_SET_U8:
     case JIR_BYTES_EQ: case JIR_BYTES_CONCAT2: case JIR_BYTES_BITOP: case JIR_BYTES_READ:
     case JIR_BYTES_WRITE: case JIR_BYTES_BLIT: case JIR_BITS_WRITE: case JIR_BITS_READ:
+    case JIR_STRUCT_NEW: case JIR_STRUCT_GET: case JIR_STRUCT_SET:
       return 1;
     case JIR_CALL_SELF:
     case JIR_CALL_DIRECT:
@@ -1654,6 +1695,85 @@ static void emit_bits_read(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
   jit_reg_store_home_gpr32(ctx->ra, ins->a, dst);
 }
 
+/* -- Struct ops -- */
+static int is_xmm_field_kind(jello_type_kind k) {
+  return k == JELLO_T_F32 || k == JELLO_T_F64;
+}
+
+static void emit_struct_new(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
+  jit_exec_buf* buf = ctx->buf;
+  jello_type_id tid = ctx->f->reg_types[ins->a];
+  uint32_t struct_sig_id = ctx->m->types[tid].as.strct.struct_sig_id;
+
+  jit_reg_state_discard_currents(ctx->ra);
+  emit_mov_x_rr(buf, A64_X0, (unsigned)JIT_REG_VM);
+  emit_mov_x_imm64_reg(buf, A64_X1, (uint64_t)(uintptr_t)ctx->m);
+  emit_mov_w_imm32(buf, A64_X2, struct_sig_id);
+  emit_call_fn(buf, (void*)jello_struct_new);
+  int dst = jit_reg_alloc_gpr(ctx->ra, ins->a, 0);
+  emit_mov_x_rr(buf, (unsigned)dst, A64_X0);
+  jit_reg_store_home_gpr64(ctx->ra, ins->a, dst);
+}
+
+static void emit_struct_get(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
+  jit_exec_buf* buf = ctx->buf;
+  jello_type_id struct_tid = ctx->f->reg_types[ins->b];
+  uint32_t sig_id = ctx->m->types[struct_tid].as.strct.struct_sig_id;
+  const jello_struct_sig* sig = &ctx->m->struct_sigs[sig_id];
+  uint32_t field_off = sig->field_offset[ins->imm];
+  jello_type_kind fk = ctx->m->types[sig->field_type[ins->imm]].kind;
+  uint32_t width = (uint32_t)jello_slot_size(fk);
+  uint32_t data_off = (uint32_t)offsetof(jello_struct, fields) + field_off;
+
+  int sp = jit_reg_get_gpr(ctx->ra, ins->b, 1);
+  emit_tst_x_rr(buf, (unsigned)sp, (unsigned)sp);
+  emit_jcc_trap(ctx, 0x84, JIT_TRAP_NULL);
+
+  if(is_xmm_field_kind(fk)) {
+    int dst = jit_reg_alloc_xmm(ctx->ra, ins->a, 0, width == 8);
+    if(width == 8) {
+      emit_ldr_d_disp(buf, (unsigned)(dst - (int)JIT_PREG_XMM0), (unsigned)sp, data_off);
+      jit_reg_store_home_xmm64(ctx->ra, ins->a, dst);
+    } else {
+      emit_ldr_s_disp(buf, (unsigned)(dst - (int)JIT_PREG_XMM0), (unsigned)sp, data_off);
+      jit_reg_store_home_xmm32(ctx->ra, ins->a, dst);
+    }
+  } else {
+    int dst = jit_reg_alloc_gpr(ctx->ra, ins->a, 0);
+    if(width == 8) {
+      emit_ldr_x_disp(buf, (unsigned)dst, (unsigned)sp, data_off);
+      jit_reg_store_home_gpr64(ctx->ra, ins->a, dst);
+    } else {
+      emit_ldr_w_disp(buf, (unsigned)dst, (unsigned)sp, data_off);
+      jit_reg_store_home_gpr32(ctx->ra, ins->a, dst);
+    }
+  }
+}
+
+static void emit_struct_set(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
+  jit_exec_buf* buf = ctx->buf;
+  jello_type_id struct_tid = ctx->f->reg_types[ins->b];
+  uint32_t sig_id = ctx->m->types[struct_tid].as.strct.struct_sig_id;
+  const jello_struct_sig* sig = &ctx->m->struct_sigs[sig_id];
+  uint32_t field_off = sig->field_offset[ins->imm];
+  jello_type_kind fk = ctx->m->types[sig->field_type[ins->imm]].kind;
+  uint32_t width = (uint32_t)jello_slot_size(fk);
+  uint32_t data_off = (uint32_t)offsetof(jello_struct, fields) + field_off;
+
+  int sp = jit_reg_get_gpr(ctx->ra, ins->b, 1);
+  emit_tst_x_rr(buf, (unsigned)sp, (unsigned)sp);
+  emit_jcc_trap(ctx, 0x84, JIT_TRAP_NULL);
+
+  if(is_xmm_field_kind(fk)) {
+    int val = jit_reg_get_xmm(ctx->ra, ins->a, 1, width == 8);
+    if(width == 8) emit_str_d_disp(buf, (unsigned)(val - (int)JIT_PREG_XMM0), (unsigned)sp, data_off);
+    else emit_str_s_disp(buf, (unsigned)(val - (int)JIT_PREG_XMM0), (unsigned)sp, data_off);
+  } else {
+    int val = jit_reg_get_gpr(ctx->ra, ins->a, 1);
+    if(width == 8) emit_str_x_disp(buf, (unsigned)val, (unsigned)sp, data_off);
+    else emit_str_w_disp(buf, (unsigned)val, (unsigned)sp, data_off);
+  }
+}
 
 
 /* -- Object ops -- */
@@ -1945,6 +2065,15 @@ static int emit_insn(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
       break;
     case JIR_BITS_READ:
       emit_bits_read(ctx, ins);
+      break;
+    case JIR_STRUCT_NEW:
+      emit_struct_new(ctx, ins);
+      break;
+    case JIR_STRUCT_GET:
+      emit_struct_get(ctx, ins);
+      break;
+    case JIR_STRUCT_SET:
+      emit_struct_set(ctx, ins);
       break;
     case JIR_RET:
       break;
