@@ -12,6 +12,15 @@
 #if defined(__aarch64__)
 enum { k_jit_body_off = 28 };
 
+static int bytes_contain(const uint8_t* hay, size_t hay_len,
+                         const uint8_t* needle, size_t needle_len) {
+  if(needle_len > hay_len) return 0;
+  for(size_t i = 0; i + needle_len <= hay_len; i++) {
+    if(memcmp(hay + i, needle, needle_len) == 0) return 1;
+  }
+  return 0;
+}
+
 static int insn_word_present(const uint8_t* ep, size_t ep_len, uint32_t mask, uint32_t value) {
   for(size_t i = 0; i + 4 <= ep_len; i++) {
     uint32_t w = 0;
@@ -131,6 +140,48 @@ static void test_golden_12d_bl_call_patch(void) {
   printf("test_golden_13d_bl_call_patch: PASS\n");
 }
 
+static void test_golden_12e_to_dyn_physeq(void) {
+  jello_type_entry types[4];
+  types[0].kind = JELLO_T_I32;
+  types[1].kind = JELLO_T_BYTES;
+  types[2].kind = JELLO_T_DYNAMIC;
+  types[3].kind = JELLO_T_BOOL;
+  for(int i = 0; i < 4; i++) memset(&types[i].as, 0, sizeof(types[i].as));
+
+  jello_type_id reg_types[5] = {0, 1, 2, 1, 3};
+  jello_insn insns[5];
+  insns[0].op = (uint8_t)JOP_CONST_I32; insns[0].a = 0; insns[0].imm = 8;
+  insns[1].op = (uint8_t)JOP_BYTES_NEW; insns[1].a = 1; insns[1].b = 0;
+  insns[2].op = (uint8_t)JOP_TO_DYN; insns[2].a = 2; insns[2].b = 1;
+  insns[3].op = (uint8_t)JOP_PHYSEQ; insns[3].a = 4; insns[3].b = 1; insns[3].c = 2;
+  insns[4].op = (uint8_t)JOP_RET; insns[4].a = 4;
+
+  jello_bc_function func;
+  func.nregs = 5;
+  func.cap_start = 0;
+  func.reg_types = reg_types;
+  func.ninsns = 5;
+  func.insns = insns;
+
+  jello_bc_module m;
+  memset(&m, 0, sizeof(m));
+  m.ntypes = 4;
+  m.types = types;
+  m.nfuncs = 1;
+  m.funcs = &func;
+  m.entry = 0;
+
+  jello_jit_code code;
+  memset(&code, 0, sizeof(code));
+  assert(jello_jit_compile_function(&m, 0, &code) == 1);
+  const uint8_t* ep = code.buf.mem + code.body_off;
+  size_t ep_len = code.buf.len - code.body_off;
+  static const uint8_t mov_vm_x0[] = {0xE0, 0x03, 0x14, 0xAA};
+  assert(bytes_contain(ep, ep_len, mov_vm_x0, sizeof(mov_vm_x0)));
+  assert(insn_word_present(ep, ep_len, 0xFF800000u, 0xEB000000u));
+  jello_jit_code_free(&code);
+  printf("test_golden_13e_to_dyn_physeq: PASS\n");
+}
 #else
 static void test_golden_12b_add_i32(void) {
   printf("test_golden_13b_add_i32: SKIPPED (host is not aarch64)\n");
@@ -141,12 +192,16 @@ static void test_golden_12c_back_edge_branch(void) {
 static void test_golden_12d_bl_call_patch(void) {
   printf("test_golden_13d_bl_call_patch: SKIPPED (host is not aarch64)\n");
 }
+static void test_golden_12e_to_dyn_physeq(void) {
+  printf("test_golden_13e_to_dyn_physeq: SKIPPED (host is not aarch64)\n");
+}
 #endif
 
 int main(void) {
   test_golden_12b_add_i32();
   test_golden_12c_back_edge_branch();
   test_golden_12d_bl_call_patch();
+  test_golden_12e_to_dyn_physeq();
   printf("chapter13_jit_golden_tests: all tests passed\n");
   return 0;
 }
