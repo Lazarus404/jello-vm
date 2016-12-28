@@ -27,11 +27,13 @@ for fixture in "${FIXDIR}"/*.jlo.txt; do
     continue
   fi
   actual="$("${JLO_TOOL}" run "${bin}" 2>"${TMP}/${base}.run.err" || true)"
+  actual_line="$(printf '%s\n' "${actual}" | head -1)"
   expected="$(cat "${expect_file}")"
-  if [[ "${actual}" != "${expected}" ]]; then
-    fail "${base}: expected [${expected}] got [${actual}] $(cat "${TMP}/${base}.run.err")"
+  expected_line="$(printf '%s\n' "${expected}" | head -1)"
+  if [[ "${actual_line}" != "${expected_line}" ]]; then
+    fail "${base}: expected [${expected_line}] got [${actual_line}] $(cat "${TMP}/${base}.run.err")"
   else
-    echo "dyn_fixtures: ${base} -> ${actual}"
+    echo "dyn_fixtures: ${base} -> ${actual_line}"
   fi
 done
 

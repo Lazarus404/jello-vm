@@ -26,10 +26,11 @@ else
     echo "name_atom_roundtrip: named_functions -- both names round-tripped"
   fi
   run_out="$("${JLO_TOOL}" run "${NAMED_BIN}")"
-  if [[ "${run_out}" != "RESULT kind=I32 value=42" ]]; then
-    fail "named_functions: expected [RESULT kind=I32 value=42] got [${run_out}]"
+  run_line="$(printf '%s\n' "${run_out}" | head -1)"
+  if [[ "${run_line}" != "RESULT kind=I32 value=42" ]]; then
+    fail "named_functions: expected [RESULT kind=I32 value=42] got [${run_line}]"
   else
-    echo "name_atom_roundtrip: named_functions -- ${run_out}"
+    echo "name_atom_roundtrip: named_functions -- ${run_line}"
   fi
 fi
 
