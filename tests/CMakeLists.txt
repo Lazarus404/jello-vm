@@ -182,6 +182,14 @@ if(JELLO_ENABLE_JIT)
     add_test(NAME chapter13_jit_golden
       COMMAND chapter13_jit_golden_tests
       WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+    if(TARGET jlo_tool)
+      add_test(NAME chapter13_jit_arm64_native
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/chapter13_jit_arm64_native.sh"
+                "${CMAKE_CURRENT_BINARY_DIR}" "$<TARGET_FILE:jlo_tool>"
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+      set_tests_properties(chapter13_jit_arm64_native PROPERTIES TIMEOUT 120)
+    endif()
   endif()
 
   add_test(NAME chapter11_jit_numeric
