@@ -166,6 +166,9 @@ struct jello_vm {
   uint32_t trap_pc;
   uint32_t trap_func_index;
   const jello_bc_module* running_module;
+
+  uint64_t fuel_limit;
+  uint64_t fuel_remaining;
   
   /* -- quiescent tracking -- */
   atomic_int quiescent_depth;
@@ -415,6 +418,7 @@ void vm_go_quiescent(jello_vm* vm);
 void vm_wait_for_resume(jello_vm* vm);
 void vm_leave_quiescent(jello_vm* vm);
 void vm_safepoint_check(jello_vm* vm);
+int vm_fuel_charge(jello_vm* vm);
 int vm_heap_stop_the_world(jello_vm* vm);
 void vm_heap_resume_the_world(jello_vm* vm);
 

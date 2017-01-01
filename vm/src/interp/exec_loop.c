@@ -56,13 +56,27 @@ jello_exec_status vm_exec_loop(exec_ctx* ctx) {
       }
 
       case JOP_JMP:
-        if((int32_t)ins->imm < 0) vm_safepoint_check(vm);
+        if((int32_t)ins->imm < 0) {
+          vm_safepoint_check(vm);
+          if(vm_fuel_charge(vm) != 0) {
+            vm->trap_func_index = fr->func_index;
+            vm->trap_pc = fr->pc - 1u;
+            return JELLO_EXEC_TRAP;
+          }
+        }
         fr->pc = (uint32_t)((int32_t)fr->pc + (int32_t)ins->imm);
         break;
 
       case JOP_JMP_IF:
         if(vm_load_u32(rf, ins->a) != 0u) {
-          if((int32_t)ins->imm < 0) vm_safepoint_check(vm);
+          if((int32_t)ins->imm < 0) {
+            vm_safepoint_check(vm);
+            if(vm_fuel_charge(vm) != 0) {
+              vm->trap_func_index = fr->func_index;
+              vm->trap_pc = fr->pc - 1u;
+              return JELLO_EXEC_TRAP;
+            }
+          }
           fr->pc = (uint32_t)((int32_t)fr->pc + (int32_t)ins->imm);
         }
         break;
@@ -75,6 +89,11 @@ jello_exec_status vm_exec_loop(exec_ctx* ctx) {
 
       case JOP_CALL: {
         vm_safepoint_check(vm);
+        if(vm_fuel_charge(vm) != 0) {
+          vm->trap_func_index = fr->func_index;
+          vm->trap_pc = fr->pc - 1u;
+          return JELLO_EXEC_TRAP;
+        }
         if(!vm_push_frame(vm, m, ins->imm, ins->a, ins->b, ins->c, 1)) {
           vm->trap_func_index = fr->func_index;
           vm->trap_pc = fr->pc - 1u;

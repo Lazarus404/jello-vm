@@ -106,10 +106,12 @@ typedef enum jello_trap_code {
   JELLO_TRAP_NULL_DEREF = 3,
   JELLO_TRAP_BOUNDS = 4,
   JELLO_TRAP_TYPE_MISMATCH = 5,
+  JELLO_TRAP_FUEL = 6,
 } jello_trap_code;
 
 jello_trap_code jello_vm_last_trap_code(const jello_vm* vm);
 
+void jello_vm_set_fuel(jello_vm* vm, uint64_t fuel);
 uint32_t jello_vm_last_trap_pc(const jello_vm* vm);
 uint32_t jello_vm_last_trap_func_index(const jello_vm* vm);
 

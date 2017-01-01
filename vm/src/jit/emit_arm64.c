@@ -193,6 +193,10 @@ static void emit_str_w_vm(jit_exec_buf* buf, unsigned src, uint32_t disp) {
   emit_u32(buf, a64_str_w_uimm((uint8_t)src, (uint8_t)JIT_REG_VM, disp));
 }
 
+static void emit_str_x_vm(jit_exec_buf* buf, unsigned src, uint32_t disp) {
+  emit_u32(buf, a64_str_x_uimm((uint8_t)src, (uint8_t)JIT_REG_VM, disp));
+}
+
 static void emit_store_imm32_to_vm_field(jit_exec_buf* buf, uint32_t disp, uint32_t imm) {
   emit_mov_w_imm32(buf, A64_TMP1, imm);
   emit_str_w_vm(buf, A64_TMP1, disp);
@@ -585,6 +589,7 @@ typedef enum jit_trap_kind {
   JIT_TRAP_BOUNDS,
   JIT_TRAP_TYPE,
   JIT_TRAP_PASSTHROUGH,
+  JIT_TRAP_FUEL,
   JIT_TRAP_KIND_COUNT,
 } jit_trap_kind;
 
@@ -2591,6 +2596,15 @@ int jello_jit_emit_function_into(const jello_bc_module* m, uint32_t fi, jit_exec
       emit_mov_x_rr(buf, A64_X0, (unsigned)JIT_REG_VM);
       emit_call_fn(buf, (void*)vm_safepoint_check);
       jit_reg_state_clobber_call(&ra);
+      emit_ldr_x_vm(buf, A64_TMP0, (uint32_t)offsetof(jello_vm, fuel_limit));
+      emit_tst_x_rr(buf, A64_TMP0, A64_TMP0);
+      size_t fuel_skip = emit_b_cond_placeholder(buf, 0x84, 0); /* EQ: fuel_limit == 0, disabled */
+      emit_ldr_x_vm(buf, A64_TMP0, (uint32_t)offsetof(jello_vm, fuel_remaining));
+      emit_tst_x_rr(buf, A64_TMP0, A64_TMP0);
+      emit_jcc_trap(&ctx, 0x84, JIT_TRAP_FUEL); /* EQ: fuel_remaining == 0 -- trap-PC captured centrally, Sec 4.3 */
+      emit_u32(buf, a64_sub_x_imm(A64_TMP0, A64_TMP0, 1));
+      emit_str_x_vm(buf, A64_TMP0, (uint32_t)offsetof(jello_vm, fuel_remaining));
+      patch_b_cond(buf, fuel_skip, buf->len);
       goto insn_done;
     }
     if(allow_calls && (op == JIR_CALL_SELF || op == JIR_CALL_DIRECT)) {
@@ -2620,6 +2634,8 @@ int jello_jit_emit_function_into(const jello_bc_module* m, uint32_t fi, jit_exec
     emit_epilogue_trap_generic(&ctx, (void*)jit_trap_type_mismatch);
     trap_off_by_kind[JIT_TRAP_PASSTHROUGH] = buf->len;
     emit_epilogue_trap_generic(&ctx, NULL);
+    trap_off_by_kind[JIT_TRAP_FUEL] = buf->len;
+    emit_epilogue_trap_generic(&ctx, (void*)jit_trap_fuel);
     stack_overflow_off = buf->len;
     emit_epilogue_stack_overflow(&ctx);
     patch_trap_jumps(&ctx, trap_off_by_kind);

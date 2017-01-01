@@ -104,3 +104,7 @@ void jit_trap_bounds(jello_vm* vm) {
 void jit_trap_type_mismatch(jello_vm* vm) {
   vm->trap_code = JELLO_TRAP_TYPE_MISMATCH;
 }
+
+void jit_trap_fuel(jello_vm* vm) {
+  vm->trap_code = JELLO_TRAP_FUEL;
+}

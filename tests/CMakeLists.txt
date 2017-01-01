@@ -26,6 +26,10 @@ if(TARGET jlo_tool)
   add_test(NAME chapter9_jir_lowering
     COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/jir_fixtures.sh" "$<TARGET_FILE:jlo_tool>"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+  add_test(NAME chapter18_fuel_and_limits
+    COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/fuel_fixtures.sh" "$<TARGET_FILE:jlo_tool>"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 endif()
 
 add_executable(trap_pc_tests csrc/trap_pc_tests.c)

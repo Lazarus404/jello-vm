@@ -119,6 +119,23 @@ void vm_safepoint_check(jello_vm* vm) {
   vm_leave_quiescent(vm);
 }
 
+/* -- fuel -- */
+int vm_fuel_charge(jello_vm* vm) {
+  if(!vm->fuel_limit) return 0;
+  if(vm->fuel_remaining == 0) {
+    vm->trap_code = JELLO_TRAP_FUEL;
+    return -1;
+  }
+  vm->fuel_remaining--;
+  return 0;
+}
+
+void jello_vm_set_fuel(jello_vm* vm, uint64_t fuel) {
+  if(!vm) return;
+  vm->fuel_limit = fuel;
+  vm->fuel_remaining = fuel;
+}
+
 uint32_t jello_vm_last_trap_pc(const jello_vm* vm) {
   return vm ? vm->trap_pc : 0;
 }
