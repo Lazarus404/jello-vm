@@ -119,6 +119,14 @@ void vm_safepoint_check(jello_vm* vm) {
   vm_leave_quiescent(vm);
 }
 
+uint32_t jello_vm_last_trap_pc(const jello_vm* vm) {
+  return vm ? vm->trap_pc : 0;
+}
+
+uint32_t jello_vm_last_trap_func_index(const jello_vm* vm) {
+  return vm ? vm->trap_func_index : 0;
+}
+
 void jello_vm_blocking(jello_vm* vm, int is_blocking) {
   if(!vm) abort();
   if(is_blocking) {

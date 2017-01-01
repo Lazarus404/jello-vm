@@ -28,6 +28,17 @@ if(TARGET jlo_tool)
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 endif()
 
+add_executable(trap_pc_tests csrc/trap_pc_tests.c)
+target_link_libraries(trap_pc_tests PRIVATE jello_vm)
+jello_enable_warnings(trap_pc_tests)
+if(JELLO_WARNINGS_AS_ERRORS)
+  target_compile_options(trap_pc_tests PRIVATE -Werror)
+endif()
+
+add_test(NAME chapter18_trap_pc
+  COMMAND trap_pc_tests
+  WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
 add_library(test_native_jdll MODULE jdll/test_native.c)
 target_include_directories(test_native_jdll PRIVATE "${CMAKE_SOURCE_DIR}/src/include")
 set_target_properties(test_native_jdll PROPERTIES

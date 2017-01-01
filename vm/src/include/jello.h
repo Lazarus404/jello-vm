@@ -110,6 +110,9 @@ typedef enum jello_trap_code {
 
 jello_trap_code jello_vm_last_trap_code(const jello_vm* vm);
 
+uint32_t jello_vm_last_trap_pc(const jello_vm* vm);
+uint32_t jello_vm_last_trap_func_index(const jello_vm* vm);
+
 /* -- the Dynamic boundary -- */
 typedef uintptr_t jello_value;
 

@@ -76,6 +76,8 @@ jello_exec_status vm_exec_loop(exec_ctx* ctx) {
       case JOP_CALL: {
         vm_safepoint_check(vm);
         if(!vm_push_frame(vm, m, ins->imm, ins->a, ins->b, ins->c, 1)) {
+          vm->trap_func_index = fr->func_index;
+          vm->trap_pc = fr->pc - 1u;
           return JELLO_EXEC_TRAP;
         }
         break;
@@ -222,7 +224,11 @@ jello_exec_status vm_exec_loop(exec_ctx* ctx) {
 
       default: {
         op_result r = op_dispatch(ctx, ins);
-        if(r == OP_TRAP) return JELLO_EXEC_TRAP;
+        if(r == OP_TRAP) {
+          vm->trap_func_index = fr->func_index;
+          vm->trap_pc = fr->pc - 1u;
+          return JELLO_EXEC_TRAP;
+        }
         break;
       }
     }
@@ -241,6 +247,8 @@ static jello_exec_status vm_exec_numeric_impl(jello_vm* vm, const jello_bc_modul
   vm->running_module = m;
 
   if(!vm_push_frame(vm, m, jello_bc_get_entry(m), 0, 0, 0, 0)) {
+    vm->trap_func_index = jello_bc_get_entry(m);
+    vm->trap_pc = 0;
     atomic_store(&vm->in_exec, 0);
     return JELLO_EXEC_TRAP;
   }

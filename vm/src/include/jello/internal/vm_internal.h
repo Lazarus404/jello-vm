@@ -163,6 +163,8 @@ struct jello_vm {
   uint32_t frame_layouts_cap;
 
   jello_trap_code trap_code;
+  uint32_t trap_pc;
+  uint32_t trap_func_index;
   const jello_bc_module* running_module;
   
   /* -- quiescent tracking -- */

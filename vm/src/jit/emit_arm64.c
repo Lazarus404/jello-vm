@@ -193,6 +193,11 @@ static void emit_str_w_vm(jit_exec_buf* buf, unsigned src, uint32_t disp) {
   emit_u32(buf, a64_str_w_uimm((uint8_t)src, (uint8_t)JIT_REG_VM, disp));
 }
 
+static void emit_store_imm32_to_vm_field(jit_exec_buf* buf, uint32_t disp, uint32_t imm) {
+  emit_mov_w_imm32(buf, A64_TMP1, imm);
+  emit_str_w_vm(buf, A64_TMP1, disp);
+}
+
 static void emit_ldr_x_disp(jit_exec_buf* buf, unsigned dst, unsigned base, uint32_t disp) {
   if(disp <= 32760u && (disp & 7u) == 0)
     emit_u32(buf, a64_ldr_x_uimm((uint8_t)dst, (uint8_t)base, disp));
@@ -594,6 +599,7 @@ typedef struct emit_ctx {
   const jello_bc_module* m;
   const jello_bc_function* f;
   uint32_t fi;
+  uint32_t cur_bc_pc;
   int allow_calls;
   jit_trap_jump* trap_jumps;
   size_t trap_jump_cap;
@@ -615,6 +621,8 @@ typedef struct emit_ctx {
 } emit_ctx;
 
 static void emit_jmp_stack_overflow(emit_ctx* ctx) {
+  emit_store_imm32_to_vm_field(ctx->buf, (uint32_t)offsetof(jello_vm, trap_func_index), ctx->fi);
+  emit_store_imm32_to_vm_field(ctx->buf, (uint32_t)offsetof(jello_vm, trap_pc), ctx->cur_bc_pc);
   size_t at = emit_b_placeholder(ctx->buf);
   if(ctx->stack_overflow_jump_count < ctx->stack_overflow_jump_cap)
     ctx->stack_overflow_jumps[ctx->stack_overflow_jump_count++] = at;
@@ -646,7 +654,13 @@ static void patch_stack_overflow_jumps(emit_ctx* ctx, size_t so_off) {
 }
 
 static void emit_jcc_trap(emit_ctx* ctx, uint8_t cc, uint8_t kind) {
-  size_t at = emit_b_cond_placeholder(ctx->buf, cc, 0);
+  size_t skip = emit_b_cond_placeholder(ctx->buf, (uint8_t)(cc ^ 1u), 0);
+  if(kind != JIT_TRAP_PASSTHROUGH) {
+    emit_store_imm32_to_vm_field(ctx->buf, (uint32_t)offsetof(jello_vm, trap_func_index), ctx->fi);
+    emit_store_imm32_to_vm_field(ctx->buf, (uint32_t)offsetof(jello_vm, trap_pc), ctx->cur_bc_pc);
+  }
+  size_t at = emit_b_placeholder(ctx->buf);
+  patch_b_cond(ctx->buf, skip, ctx->buf->len);
   if(ctx->trap_jump_count < ctx->trap_jump_cap) {
     ctx->trap_jumps[ctx->trap_jump_count].at = at;
     ctx->trap_jumps[ctx->trap_jump_count].kind = kind;
@@ -658,7 +672,9 @@ static void patch_trap_jumps(emit_ctx* ctx, const size_t* trap_off_by_kind) {
   for(size_t i = 0; i < ctx->trap_jump_count; i++) {
     size_t at = ctx->trap_jumps[i].at;
     size_t trap_off = trap_off_by_kind[ctx->trap_jumps[i].kind];
-    if(ctx->trap_jumps[i].kind == 255) patch_b(ctx->buf, at, trap_off);
+    uint32_t word;
+    memcpy(&word, ctx->buf->mem + at, 4);
+    if((word >> 26) == 0x5u) patch_b(ctx->buf, at, trap_off);
     else patch_b_cond(ctx->buf, at, trap_off);
   }
 }
@@ -1190,7 +1206,6 @@ static void emit_cmp_float(emit_ctx* ctx, const jello_jit_ir_insn* ins, int is_f
   if(is_f64) emit_fcmp_d(ctx->buf, li, ri);
   else emit_fcmp_s(ctx->buf, li, ri);
   int d = jit_reg_alloc_gpr(ctx->ra, ins->a, 0);
-  /* UCOMISS/D only define ZF/PF/CF -- use sete (EQ) / setb (LT), not setl. */
   emit_setcc_from_flags(ctx->buf, (jello_jir_cmp)ins->imm == JIR_CMP_EQ ? 0x94 : 0x92, (unsigned)d);
   emit_mov_w_rr(ctx->buf, (unsigned)d, (unsigned)d);
   jit_reg_store_home_gpr32(ctx->ra, ins->a, d);
@@ -2545,6 +2560,7 @@ int jello_jit_emit_function_into(const jello_bc_module* m, uint32_t fi, jit_exec
   for(uint32_t i = 0; i < ir->ninsns && ok; i++) {
     const jello_jit_ir_insn* ins = &ir->insns[i];
     uint32_t bc = ins->bc_pc;
+    ctx.cur_bc_pc = bc;
     if(bc < f->ninsns && is_target[bc] && !discarded[bc]) {
       jit_reg_state_discard_currents(&ra);
       discarded[bc] = 1;

@@ -1159,7 +1159,7 @@ static void print_numeric_result(const jello_numeric_result* r, FILE* out) {
   }
 }
 
-static int cmd_run(const char* in_path, int repeat, int gc_stats) {
+static int cmd_run(const char* in_path, int repeat, int gc_stats, int trap_pc) {
   FILE* f = fopen(in_path, "rb");
   if(!f) { fprintf(stderr, "%s: cannot open\n", in_path); return 1; }
   if(fseek(f, 0, SEEK_END) != 0) { fclose(f); return 1; }
@@ -1194,6 +1194,9 @@ static int cmd_run(const char* in_path, int repeat, int gc_stats) {
     print_numeric_result(&result, stdout);
   } else {
     printf("TRAP code=%s\n", trap_code_name(jello_vm_last_trap_code(vm)));
+    if(trap_pc) {
+      printf("TRAP_PC func_index=%u pc=%u\n", jello_vm_last_trap_func_index(vm), jello_vm_last_trap_pc(vm));
+    }
   }
   if(repeat > 1) {
     double ms = (double)(t1 - t0) * 1000.0 / (double)CLOCKS_PER_SEC;
@@ -1464,7 +1467,7 @@ static char* read_whole_file(const char* path, size_t* out_len) {
 static void usage(const char* prog) {
   fprintf(stderr, "usage: %s asm <in.jlo.txt> -o <out.jlo>\n", prog);
   fprintf(stderr, "       %s disasm <in.jlo> [-o <out.jlo.txt>]\n", prog);
-  fprintf(stderr, "       %s run <in.jlo> [--repeat N] [--gc-stats]\n", prog);
+  fprintf(stderr, "       %s run <in.jlo> [--repeat N] [--gc-stats] [--trap-pc]\n", prog);
   fprintf(stderr, "       %s dumpir <in.jlo> [--func N]\n", prog);
 }
 
@@ -1527,11 +1530,13 @@ int main(int argc, char** argv) {
   int gc_stats = 0;
   int func_filter = 0;
   int has_func_filter = 0;
+  int trap_pc = 0;
   for(int i = 3; i < argc; i++) {
     if(strcmp(argv[i], "-o") == 0 && i + 1 < argc) { out_path = argv[i + 1]; i++; }
     else if(strcmp(argv[i], "--repeat") == 0 && i + 1 < argc) { repeat = atoi(argv[i + 1]); i++; }
     else if(strcmp(argv[i], "--gc-stats") == 0) { gc_stats = 1; }
     else if(strcmp(argv[i], "--func") == 0 && i + 1 < argc) { func_filter = atoi(argv[i + 1]); has_func_filter = 1; i++; }
+    else if(strcmp(argv[i], "--trap-pc") == 0) { trap_pc = 1; }
   }
 
   if(strcmp(subcmd, "asm") == 0) {
@@ -1542,7 +1547,7 @@ int main(int argc, char** argv) {
     return cmd_disasm(in_path, out_path);
   }
   if(strcmp(subcmd, "run") == 0) {
-    return cmd_run(in_path, repeat > 0 ? repeat : 1, gc_stats);
+    return cmd_run(in_path, repeat > 0 ? repeat : 1, gc_stats, trap_pc);
   }
   if(strcmp(subcmd, "dumpir") == 0) {
     return cmd_dumpir(in_path, func_filter, has_func_filter);

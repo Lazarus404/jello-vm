@@ -542,6 +542,20 @@ static void emit_store_r32_to_r12_disp(jit_exec_buf* buf, unsigned src, uint32_t
   jit_exec_buf_write(buf, bytes, n);
 }
 
+static void emit_store_imm32_to_vm_field(jit_exec_buf* buf, uint32_t disp, uint32_t imm) {
+  uint8_t bytes[12];
+  size_t n = 0;
+  bytes[n++] = 0x41;
+  bytes[n++] = 0xC7;
+  bytes[n++] = 0x84;
+  bytes[n++] = 0x24;
+  memcpy(&bytes[n], &disp, 4);
+  n += 4;
+  memcpy(&bytes[n], &imm, 4);
+  n += 4;
+  jit_exec_buf_write(buf, bytes, n);
+}
+
 static void emit_mov_r64_from_r64_disp(jit_exec_buf* buf, unsigned dst, unsigned base, uint32_t disp) {
   uint8_t bytes[7];
   size_t n = 0;
@@ -652,6 +666,7 @@ typedef struct emit_ctx {
   const jello_bc_module* m;
   const jello_bc_function* f;
   uint32_t fi;
+  uint32_t cur_bc_pc;
   int allow_calls;
   jit_trap_jump* trap_jumps;
   size_t trap_jump_cap;
@@ -676,6 +691,8 @@ typedef struct emit_ctx {
 } emit_ctx;
 
 static void emit_jmp_stack_overflow(emit_ctx* ctx) {
+  emit_store_imm32_to_vm_field(ctx->buf, (uint32_t)offsetof(jello_vm, trap_func_index), ctx->fi);
+  emit_store_imm32_to_vm_field(ctx->buf, (uint32_t)offsetof(jello_vm, trap_pc), ctx->cur_bc_pc);
   size_t at = emit_jmp_rel32(ctx->buf, 0);
   if(ctx->stack_overflow_jump_count < ctx->stack_overflow_jump_cap)
     ctx->stack_overflow_jumps[ctx->stack_overflow_jump_count++] = at;
@@ -707,7 +724,13 @@ static void patch_stack_overflow_jumps(emit_ctx* ctx, size_t so_off) {
 }
 
 static void emit_jcc_trap(emit_ctx* ctx, uint8_t cc, uint8_t kind) {
-  size_t at = emit_jcc_rel32(ctx->buf, cc, 0);
+  size_t skip = emit_jcc_rel32(ctx->buf, (uint8_t)(cc ^ 1u), 0);
+  if(kind != JIT_TRAP_PASSTHROUGH) {
+    emit_store_imm32_to_vm_field(ctx->buf, (uint32_t)offsetof(jello_vm, trap_func_index), ctx->fi);
+    emit_store_imm32_to_vm_field(ctx->buf, (uint32_t)offsetof(jello_vm, trap_pc), ctx->cur_bc_pc);
+  }
+  size_t at = emit_jmp_rel32(ctx->buf, 0);
+  patch_jcc_rel32(ctx->buf, skip, (int32_t)(ctx->buf->len - (skip + 6)));
   if(ctx->trap_jump_count < ctx->trap_jump_cap) {
     ctx->trap_jumps[ctx->trap_jump_count].at = at;
     ctx->trap_jumps[ctx->trap_jump_count].kind = kind;
@@ -2935,6 +2958,7 @@ int jello_jit_emit_function_into(const jello_bc_module* m, uint32_t fi, jit_exec
   for(uint32_t i = 0; i < ir->ninsns && ok; i++) {
     const jello_jit_ir_insn* ins = &ir->insns[i];
     uint32_t bc = ins->bc_pc;
+    ctx.cur_bc_pc = bc;
     if(bc < f->ninsns && is_target[bc] && !discarded[bc]) {
       jit_reg_state_discard_currents(&ra);
       discarded[bc] = 1;
