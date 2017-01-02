@@ -169,6 +169,7 @@ struct jello_vm {
 
   uint64_t fuel_limit;
   uint64_t fuel_remaining;
+  uint32_t max_bytes_len;
   
   /* -- quiescent tracking -- */
   atomic_int quiescent_depth;

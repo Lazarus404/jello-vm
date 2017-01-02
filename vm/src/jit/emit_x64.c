@@ -665,6 +665,7 @@ typedef enum jit_trap_kind {
   JIT_TRAP_TYPE,
   JIT_TRAP_PASSTHROUGH,
   JIT_TRAP_FUEL,
+  JIT_TRAP_LIMIT,
   JIT_TRAP_KIND_COUNT,
 } jit_trap_kind;
 
@@ -2016,6 +2017,12 @@ static void emit_bytes_new(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
   jit_exec_buf* buf = ctx->buf;
   int len = jit_reg_get_gpr(ctx->ra, ins->b, 1);
   emit_mov_r32_r32(buf, X64_RAX, (unsigned)len);
+  emit_mov_r32_from_r12_disp(buf, X64_RCX, (uint32_t)offsetof(jello_vm, max_bytes_len));
+  emit_test_r32_r32(buf, X64_RCX, X64_RCX);
+  size_t limit_skip = emit_jcc_rel32(buf, 0x84, 0); /* JE: max_bytes_len == 0, disabled */
+  emit_cmp_r32_r32(buf, X64_RAX, X64_RCX);
+  emit_jcc_trap(ctx, 0x87, JIT_TRAP_LIMIT); /* JA: len > max_bytes_len -- trap-PC captured centrally, Sec 4.3 */
+  patch_jcc_rel32(buf, limit_skip, (int32_t)(buf->len - (limit_skip + 6)));
   jit_reg_state_discard_currents(ctx->ra);
   emit_mov_r64_r64(buf, X64_RDI, (unsigned)JIT_REG_VM);
   emit_mov_r32_r32(buf, X64_RSI, X64_RAX);
@@ -3049,6 +3056,8 @@ int jello_jit_emit_function_into(const jello_bc_module* m, uint32_t fi, jit_exec
     emit_epilogue_trap_generic(&ctx, NULL);
     trap_off_by_kind[JIT_TRAP_FUEL] = buf->len;
     emit_epilogue_trap_generic(&ctx, (void*)jit_trap_fuel);
+    trap_off_by_kind[JIT_TRAP_LIMIT] = buf->len;
+    emit_epilogue_trap_generic(&ctx, (void*)jit_trap_limit);
     stack_overflow_off = buf->len;
     emit_epilogue_stack_overflow(&ctx);
     patch_trap_jumps(&ctx, trap_off_by_kind);

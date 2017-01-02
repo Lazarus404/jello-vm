@@ -108,3 +108,7 @@ void jit_trap_type_mismatch(jello_vm* vm) {
 void jit_trap_fuel(jello_vm* vm) {
   vm->trap_code = JELLO_TRAP_FUEL;
 }
+
+void jit_trap_limit(jello_vm* vm) {
+  vm->trap_code = JELLO_TRAP_LIMIT;
+}

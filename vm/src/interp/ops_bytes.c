@@ -12,6 +12,10 @@ static call_frame* current_frame(exec_ctx* ctx) {
 op_result op_bytes_new(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   uint32_t len = vm_load_u32(&fr->rf, ins->b);
+  if(ctx->vm->max_bytes_len && len > ctx->vm->max_bytes_len) {
+    ctx->vm->trap_code = JELLO_TRAP_LIMIT;
+    return OP_TRAP;
+  }
   jello_bytes* b = jello_bytes_new(ctx->vm, len);
   void* p = (void*)b;
   memcpy(vm_reg_ptr(&fr->rf, ins->a), &p, sizeof(void*));

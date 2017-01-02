@@ -52,6 +52,22 @@ else
   echo "fuel_fixtures: recursive_countdown (--fuel 10) -> ${line}"
 fi
 
+echo "== max_bytes_len: disabled by default, enforced once set (Sec 3.1) =="
+if assemble "bytes_over_limit"; then
+  line="$("${JLO_TOOL}" run "${TMP}/bytes_over_limit.jlo" 2>"${TMP}/bol.run.err" | head -1 || true)"
+  if [[ "${line}" != "RESULT kind=PTR value=NON_NULL" ]]; then
+    fail "bytes_over_limit (no limit): expected [RESULT kind=PTR value=NON_NULL] got [${line}] $(cat "${TMP}/bol.run.err")"
+  else
+    echo "fuel_fixtures: bytes_over_limit (no limit) -> ${line}"
+  fi
+  line="$("${JLO_TOOL}" run "${TMP}/bytes_over_limit.jlo" --max-bytes-len 100 2>"${TMP}/bol.limit.err" | head -1 || true)"
+  if [[ "${line}" != "TRAP code=LIMIT" ]]; then
+    fail "bytes_over_limit (--max-bytes-len 100): expected [TRAP code=LIMIT] got [${line}] $(cat "${TMP}/bol.limit.err")"
+  else
+    echo "fuel_fixtures: bytes_over_limit (--max-bytes-len 100) -> ${line}"
+  fi
+fi
+
 if [[ ${failures} -gt 0 ]]; then
   echo "chapter18_fuel_and_limits: ${failures} failure(s)" >&2
   exit 1

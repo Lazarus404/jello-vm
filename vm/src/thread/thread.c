@@ -136,6 +136,11 @@ void jello_vm_set_fuel(jello_vm* vm, uint64_t fuel) {
   vm->fuel_remaining = fuel;
 }
 
+void jello_vm_set_max_bytes_len(jello_vm* vm, uint32_t max_len) {
+  if(!vm) return;
+  vm->max_bytes_len = max_len;
+}
+
 uint32_t jello_vm_last_trap_pc(const jello_vm* vm) {
   return vm ? vm->trap_pc : 0;
 }

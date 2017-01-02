@@ -590,6 +590,7 @@ typedef enum jit_trap_kind {
   JIT_TRAP_TYPE,
   JIT_TRAP_PASSTHROUGH,
   JIT_TRAP_FUEL,
+  JIT_TRAP_LIMIT,
   JIT_TRAP_KIND_COUNT,
 } jit_trap_kind;
 
@@ -1665,9 +1666,13 @@ static void emit_bits_write(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
 static void emit_bytes_new(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
   jit_exec_buf* buf = ctx->buf;
   int len = jit_reg_get_gpr(ctx->ra, ins->b, 1);
-  /* Chapter 12e regression: same pre-discard pool-register clobber class
-   * as emit_obj_copy above -- stage through A64_TMP0, never A64_X9. */
   emit_mov_w_rr(buf, A64_TMP0, (unsigned)len);
+  emit_ldr_w_vm(buf, A64_TMP1, (uint32_t)offsetof(jello_vm, max_bytes_len));
+  emit_tst_w_rr(buf, A64_TMP1, A64_TMP1);
+  size_t limit_skip = emit_b_cond_placeholder(buf, 0x84, 0); /* EQ: max_bytes_len == 0, disabled */
+  emit_cmp_w_rr(buf, A64_TMP0, A64_TMP1);
+  emit_jcc_trap(ctx, 0x87, JIT_TRAP_LIMIT); /* HI: len > max_bytes_len -- trap-PC captured centrally, Sec 4.3 */
+  patch_b_cond(buf, limit_skip, buf->len);
   jit_reg_state_discard_currents(ctx->ra);
   emit_mov_x_rr(buf, A64_X0, (unsigned)JIT_REG_VM);
   emit_mov_w_rr(buf, A64_X1, A64_TMP0);
@@ -2636,6 +2641,8 @@ int jello_jit_emit_function_into(const jello_bc_module* m, uint32_t fi, jit_exec
     emit_epilogue_trap_generic(&ctx, NULL);
     trap_off_by_kind[JIT_TRAP_FUEL] = buf->len;
     emit_epilogue_trap_generic(&ctx, (void*)jit_trap_fuel);
+    trap_off_by_kind[JIT_TRAP_LIMIT] = buf->len;
+    emit_epilogue_trap_generic(&ctx, (void*)jit_trap_limit);
     stack_overflow_off = buf->len;
     emit_epilogue_stack_overflow(&ctx);
     patch_trap_jumps(&ctx, trap_off_by_kind);
