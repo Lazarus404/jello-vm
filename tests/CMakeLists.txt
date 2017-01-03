@@ -30,6 +30,11 @@ if(TARGET jlo_tool)
   add_test(NAME chapter18_fuel_and_limits
     COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/fuel_fixtures.sh" "$<TARGET_FILE:jlo_tool>"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+  add_test(NAME chapter18_stress_bytecode
+    COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/stress_fixtures.sh" "$<TARGET_FILE:jlo_tool>"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+  set_tests_properties(chapter18_stress_bytecode PROPERTIES TIMEOUT 180)
 endif()
 
 add_executable(trap_pc_tests csrc/trap_pc_tests.c)
