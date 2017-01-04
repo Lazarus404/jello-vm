@@ -21,6 +21,9 @@ static void build_fib_module(jello_type_entry* types, jello_type_id* r0, jello_t
   r0[0] = 0; r0[1] = 0;
   r1[0] = 0; r1[1] = 1; r1[2] = 0; r1[3] = 0; r1[4] = 0; r1[5] = 0; r1[6] = 0;
 
+  memset(e0, 0, 3 * sizeof(jello_insn));
+  memset(e1, 0, 9 * sizeof(jello_insn));
+
   e0[0].op = (uint8_t)JOP_CONST_I32; e0[0].a = 0; e0[0].imm = n;
   e0[1].op = (uint8_t)JOP_CALL; e0[1].a = 1; e0[1].b = 0; e0[1].c = 1; e0[1].imm = 1;
   e0[2].op = (uint8_t)JOP_RET; e0[2].a = 1;
@@ -35,8 +38,10 @@ static void build_fib_module(jello_type_entry* types, jello_type_id* r0, jello_t
   e1[7].op = (uint8_t)JOP_RET; e1[7].a = 6;
   e1[8].op = (uint8_t)JOP_RET; e1[8].a = 0;
 
-  funcs[0].nregs = 2; funcs[0].cap_start = 0; funcs[0].reg_types = r0; funcs[0].ninsns = 3; funcs[0].insns = e0;
-  funcs[1].nregs = 7; funcs[1].cap_start = 0; funcs[1].reg_types = r1; funcs[1].ninsns = 9; funcs[1].insns = e1;
+  funcs[0].name_atom = JELLO_BC_NO_NAME;
+  funcs[0].nargs = 0; funcs[0].nregs = 2; funcs[0].cap_start = 2; funcs[0].reg_types = r0; funcs[0].ninsns = 3; funcs[0].insns = e0;
+  funcs[1].name_atom = JELLO_BC_NO_NAME;
+  funcs[1].nargs = 1; funcs[1].nregs = 7; funcs[1].cap_start = 7; funcs[1].reg_types = r1; funcs[1].ninsns = 9; funcs[1].insns = e1;
 
   memset(m, 0, sizeof(*m));
   m->ntypes = 2; m->types = types; m->nfuncs = 2; m->funcs = funcs; m->entry = 0;
@@ -840,6 +845,102 @@ static void test_wx_icache_repeated_create_destroy_then_persistent(void) {
   jello_vm_destroy(vm);
   printf("test_wx_icache_repeated_create_destroy_then_persistent: PASS\n");
 }
+
+static void test_reload_cycling_stress(void) {
+  jello_type_entry types_a[1], types_b[1];
+  jello_type_id r0_a[1], r1_a[1], r0_b[1], r1_b[1];
+  jello_insn e0_a[2], e1_a[2], e0_b[2], e1_b[2];
+  jello_bc_function funcs_a[2], funcs_b[2];
+  jello_bc_module ma, mb;
+  build_named_two_func_module(types_a, r0_a, r1_a, e0_a, e1_a, funcs_a, &ma, 0, 1, 100);
+  ma.atoms = g_two_func_atoms; ma.natoms = 2;
+  build_named_two_func_module(types_b, r0_b, r1_b, e0_b, e1_b, funcs_b, &mb, 0, 1, 200);
+  mb.atoms = g_two_func_atoms; mb.natoms = 2;
+
+  jello_jit_module* jm = jello_jit_module_create(&ma);
+  assert(jm != NULL);
+  jello_vm* vm = jello_vm_create();
+  assert(vm != NULL);
+
+  jello_numeric_result out;
+  memset(&out, 0, sizeof(out));
+  assert(jello_vm_exec_numeric_with_jit(vm, jm, &ma, &out) == JELLO_EXEC_OK);
+  assert(out.kind == JELLO_NUM_I32 && out.as.i32 == 100);
+
+  jello_jit_module_prepare_count = 0;
+  const jello_bc_module* cur = &ma;
+  int32_t expect = 100;
+  for(int i = 0; i < 50; i++) {
+    const jello_bc_module* nxt = (cur == &ma) ? &mb : &ma;
+    int32_t nxt_expect = (cur == &ma) ? 200 : 100;
+    jello_jit_reload_report report;
+    int rc = jello_jit_module_reload(vm, jm, cur, nxt, 0, &report);
+    assert(rc == 1);
+    assert(report.n_changed == 1);
+    jello_jit_reload_report_free(&report);
+    memset(&out, 0, sizeof(out));
+    assert(jello_vm_exec_numeric_with_jit(vm, jm, nxt, &out) == JELLO_EXEC_OK);
+    assert(out.kind == JELLO_NUM_I32 && out.as.i32 == nxt_expect);
+    cur = nxt;
+    expect = nxt_expect;
+  }
+  assert(jello_jit_module_prepare_count == 50);
+  (void)expect;
+
+  jello_jit_module_destroy(jm);
+  jello_vm_destroy(vm);
+  printf("test_reload_cycling_stress: PASS\n");
+}
+
+static void test_reload_cycling_stress_with_conflicts(void) {
+  jello_type_entry types_ok_a[1], types_ok_b[1], types_bad[1];
+  jello_type_id r0_a[1], r1_a[1], r0_b[1], r1_b[1], r0_bad[2], r1_bad[1];
+  jello_insn e0_a[2], e1_a[2], e0_b[2], e1_b[2], e0_bad[3], e1_bad[1];
+  jello_bc_function funcs_a[2], funcs_b[2], funcs_bad[2];
+  jello_bc_module ma, mb, mbad;
+  build_named_two_func_module(types_ok_a, r0_a, r1_a, e0_a, e1_a, funcs_a, &ma, 0, 1, 100);
+  ma.atoms = g_two_func_atoms; ma.natoms = 2;
+  build_named_two_func_module(types_ok_b, r0_b, r1_b, e0_b, e1_b, funcs_b, &mb, 0, 1, 200);
+  mb.atoms = g_two_func_atoms; mb.natoms = 2;
+  build_two_func_module_arity_variant(types_bad, r0_bad, r1_bad, e0_bad, e1_bad, funcs_bad, &mbad, 0, 1, 777);
+  mbad.atoms = g_two_func_atoms; mbad.natoms = 2;
+
+  jello_jit_module* jm = jello_jit_module_create(&ma);
+  assert(jm != NULL);
+  jello_vm* vm = jello_vm_create();
+  assert(vm != NULL);
+
+  const jello_bc_module* cur = &ma;
+  int32_t expect = 100;
+  for(int i = 0; i < 50; i++) {
+    jello_jit_reload_report report;
+    jello_numeric_result out;
+    if((i % 2) == 0) {
+      int rc = jello_jit_module_reload(vm, jm, cur, &mbad, 0, &report);
+      assert(rc == 0);
+      assert(report.n_signature_conflicts == 1);
+      jello_jit_reload_report_free(&report);
+      memset(&out, 0, sizeof(out));
+      assert(jello_vm_exec_numeric_with_jit(vm, jm, cur, &out) == JELLO_EXEC_OK);
+      assert(out.kind == JELLO_NUM_I32 && out.as.i32 == expect);
+    } else {
+      const jello_bc_module* nxt = (cur == &ma) ? &mb : &ma;
+      int32_t nxt_expect = (cur == &ma) ? 200 : 100;
+      int rc = jello_jit_module_reload(vm, jm, cur, nxt, 1, &report);
+      assert(rc == 1);
+      jello_jit_reload_report_free(&report);
+      memset(&out, 0, sizeof(out));
+      assert(jello_vm_exec_numeric_with_jit(vm, jm, nxt, &out) == JELLO_EXEC_OK);
+      assert(out.kind == JELLO_NUM_I32 && out.as.i32 == nxt_expect);
+      cur = nxt;
+      expect = nxt_expect;
+    }
+  }
+
+  jello_jit_module_destroy(jm);
+  jello_vm_destroy(vm);
+  printf("test_reload_cycling_stress_with_conflicts: PASS\n");
+}
 #endif
 
 static void test_pause_resume_all_idle_succeeds(void) {
@@ -976,10 +1077,10 @@ int main(void) {
   test_reload_allow_conflicts_recompiles_even_if_body_unchanged();
   test_reload_new_function_recompiles_even_if_nothing_changed();
 #if defined(__x86_64__) || defined(__aarch64__)
-  test_persistent_handle_no_per_call_recompile();
-  test_persistent_handle_null_falls_back_correctly();
   test_reload_refuses_signature_conflict_by_default();
   test_reload_allow_conflicts_overrides_refusal();
+  test_persistent_handle_no_per_call_recompile();
+  test_persistent_handle_null_falls_back_correctly();
 #endif
 #if defined(__x86_64__)
   test_persistent_handle_matches_fresh_path();
@@ -994,6 +1095,8 @@ int main(void) {
 #endif
 #if defined(__x86_64__) || defined(__aarch64__)
   test_wx_icache_repeated_create_destroy_then_persistent();
+  test_reload_cycling_stress();
+  test_reload_cycling_stress_with_conflicts();
 #endif
   printf("jit_reload_tests: all tests passed\n");
   return 0;
