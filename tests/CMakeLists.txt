@@ -209,6 +209,11 @@ if(JELLO_ENABLE_JIT)
                 "${CMAKE_CURRENT_BINARY_DIR}" "$<TARGET_FILE:jlo_tool>"
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
       set_tests_properties(chapter13_jit_arm64_native PROPERTIES TIMEOUT 120)
+
+    add_test(NAME chapter18_stress_reg_pressure_x64
+      COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/stress_reg_pressure_x64.sh"
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(chapter18_stress_reg_pressure_x64 PROPERTIES TIMEOUT 180)
     endif()
   endif()
 
