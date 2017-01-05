@@ -233,3 +233,17 @@ if(JELLO_ENABLE_JIT)
     COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/jit_cfg_x64.sh"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 endif()
+
+add_executable(thread_stress_tests csrc/thread_stress_tests.c)
+target_link_libraries(thread_stress_tests PRIVATE jello_vm)
+jello_enable_warnings(thread_stress_tests)
+if(JELLO_WARNINGS_AS_ERRORS)
+  target_compile_options(thread_stress_tests PRIVATE -Werror)
+endif()
+
+add_test(NAME chapter18_thread_stress
+  COMMAND thread_stress_tests
+  WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+set_tests_properties(chapter18_thread_stress PROPERTIES
+  ENVIRONMENT "JELLO_JDLL_PATH=$<TARGET_FILE_DIR:test_native_jdll>:$<TARGET_FILE_DIR:jello_std_jdll>;${JELLO_JDLL_ASAN_OPTIONS}"
+  TIMEOUT 120)
