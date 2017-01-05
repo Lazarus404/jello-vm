@@ -247,3 +247,17 @@ add_test(NAME chapter18_thread_stress
 set_tests_properties(chapter18_thread_stress PROPERTIES
   ENVIRONMENT "JELLO_JDLL_PATH=$<TARGET_FILE_DIR:test_native_jdll>:$<TARGET_FILE_DIR:jello_std_jdll>;${JELLO_JDLL_ASAN_OPTIONS}"
   TIMEOUT 120)
+
+add_executable(capstone_stress_test csrc/capstone_stress_test.c)
+target_link_libraries(capstone_stress_test PRIVATE jello_vm)
+jello_enable_warnings(capstone_stress_test)
+if(JELLO_WARNINGS_AS_ERRORS)
+  target_compile_options(capstone_stress_test PRIVATE -Werror)
+endif()
+
+add_test(NAME chapter18_capstone
+  COMMAND capstone_stress_test
+  WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+set_tests_properties(chapter18_capstone PROPERTIES
+  ENVIRONMENT "JELLO_JDLL_PATH=$<TARGET_FILE_DIR:test_native_jdll>:$<TARGET_FILE_DIR:jello_std_jdll>;${JELLO_JDLL_ASAN_OPTIONS}"
+  TIMEOUT 120)
