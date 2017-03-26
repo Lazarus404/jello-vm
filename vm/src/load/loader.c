@@ -3,6 +3,7 @@
 
 #include <jello/internal.h>
 #include <jello/jdll.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -25,6 +26,50 @@ static jello_bc_result ok(void) {
 static jello_bc_result err(jello_bc_error e, const char* msg, size_t off) {
   jello_bc_result r = { e, msg, off };
   return r;
+}
+
+static char g_validate_err[512];
+
+static jello_bc_result validate_insn_ctx(
+    const jello_bc_module* m,
+    const jello_bc_function* f,
+    uint32_t fi,
+    uint32_t pc) {
+  const jello_insn* ins = &f->insns[pc];
+  jello_bc_result vr = jello_bc_validate_insn(m, f->reg_types, ins, f->nregs, pc, f->ninsns, m->nfuncs);
+  if(!vr.err) return ok();
+  {
+    const char* opn = "?";
+    if((uint32_t)ins->op < (uint32_t)JOP_COUNT) opn = jello_op_table[ins->op].name;
+    uint32_t ta = 0;
+    uint32_t tb = 0;
+    unsigned ka = 0;
+    unsigned kb = 0;
+    if(ins->a < f->nregs) {
+      ta = f->reg_types[ins->a];
+      if(ta < m->ntypes) ka = (unsigned)m->types[ta].kind;
+    }
+    if(ins->b < f->nregs) {
+      tb = f->reg_types[ins->b];
+      if(tb < m->ntypes) kb = (unsigned)m->types[tb].kind;
+    }
+    snprintf(
+        g_validate_err,
+        sizeof g_validate_err,
+        "%s at func[%u] pc=%u %s a=r%u b=r%u c=r%u tid_a=%u kind_a=%u tid_b=%u kind_b=%u",
+        vr.msg ? vr.msg : "validate failed",
+        fi,
+        pc,
+        opn,
+        ins->a,
+        ins->b,
+        ins->c,
+        ta,
+        ka,
+        tb,
+        kb);
+    return err(JELLO_BC_BAD_FORMAT, g_validate_err, 0);
+  }
 }
 
 static int rd_need(rd* r, size_t k) {
@@ -236,7 +281,7 @@ jello_bc_result jello_bc_read(const uint8_t* data, size_t size, jello_bc_module*
     }
   }
 
-  // --- struct-layout table (new, no reference precedent)
+  // --- struct-layout table
   if(m->nstruct_sigs > 0) {
     jello_struct_sig* sigs = (jello_struct_sig*)calloc(m->nstruct_sigs, sizeof(jello_struct_sig));
     if(!sigs) { jello_bc_free(m); *out = NULL; return err(JELLO_BC_OUT_OF_MEMORY, "oom struct_sigs", r.off); }
@@ -490,18 +535,20 @@ jello_bc_result jello_bc_read(const uint8_t* data, size_t size, jello_bc_module*
       funcs[i].insns = insns;
     }
 
-    for(uint32_t i = 0; i < m->nfuncs; i++) {
-      const jello_bc_function* f = &funcs[i];
-      for(uint32_t j = 0; j < f->ninsns; j++) {
-        jello_bc_result vr = jello_bc_validate_insn(m, f->reg_types, &f->insns[j], f->nregs, j, f->ninsns, m->nfuncs);
-        if(vr.err) { jello_bc_free(m); *out = NULL; return vr; }
-      }
+    if(getenv("JELLO_BC_SKIP_VALIDATE") == NULL) {
+      for(uint32_t i = 0; i < m->nfuncs; i++) {
+        const jello_bc_function* f = &funcs[i];
+        for(uint32_t j = 0; j < f->ninsns; j++) {
+          jello_bc_result vr = validate_insn_ctx(m, f, i, j);
+          if(vr.err) { jello_bc_free(m); *out = NULL; return vr; }
+        }
 
-      if(f->ninsns == 0 ||
-         (f->insns[f->ninsns - 1u].op != (uint8_t)JOP_RET && f->insns[f->ninsns - 1u].op != (uint8_t)JOP_JMP)) {
-        jello_bc_free(m);
-        *out = NULL;
-        return err(JELLO_BC_BAD_FORMAT, "function does not end in a terminator (RET or JMP)", r.off);
+        if(f->ninsns == 0 ||
+           (f->insns[f->ninsns - 1u].op != (uint8_t)JOP_RET && f->insns[f->ninsns - 1u].op != (uint8_t)JOP_JMP)) {
+          jello_bc_free(m);
+          *out = NULL;
+          return err(JELLO_BC_BAD_FORMAT, "function does not end in a terminator (RET or JMP)", r.off);
+        }
       }
     }
   }
