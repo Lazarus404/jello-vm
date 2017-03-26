@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <stdio.h>
 
 /* -- object header + size classes -- */
 static const uint32_t GC_SIZE_CLASSES[GC_NUM_SIZE_CLASSES] = {
@@ -80,7 +81,11 @@ void jello_gc_pop_roots(jello_vm* vm, uint32_t n) {
   if(!vm) abort();
   jello_heap* heap = vm->heap;
   pthread_mutex_lock(&heap->alloc_lock);
-  if(n > heap->gc_roots_len) abort();
+  if(n > heap->gc_roots_len) {
+    fprintf(stderr, "DIAG: gc_pop_roots underflow n=%u len=%u\n", n, heap->gc_roots_len);
+    fflush(stderr);
+    abort();
+  }
   heap->gc_roots_len -= n;
   pthread_mutex_unlock(&heap->alloc_lock);
 }
@@ -246,7 +251,8 @@ void jello_gc_collect(jello_vm* vm) {
 
   heap->gc_collections++;
 
-  clock_t t0 = clock();
+  struct timespec t0, t1;
+  clock_gettime(CLOCK_MONOTONIC, &t0);
 
   mark_stack ms = {0};
 
@@ -288,18 +294,18 @@ void jello_gc_collect(jello_vm* vm) {
   heap->gc_bytes_live = live_bytes;
   heap->gc_next_collect = (live_bytes < 256u * 1024u) ? (512u * 1024u) : (live_bytes * 2u);
 
-  clock_t t1 = clock();
-  heap->gc_pause_ms += (double)(t1 - t0) * 1000.0 / (double)CLOCKS_PER_SEC;
+  clock_gettime(CLOCK_MONOTONIC, &t1);
+  heap->gc_pause_ms += (double)(t1.tv_sec - t0.tv_sec) * 1000.0 + (double)(t1.tv_nsec - t0.tv_nsec) / 1e6;
 
   vm_heap_resume_the_world(vm);
 }
 
-/* -- Bytes-- */
+/* -- Bytes -- */
 
 jello_bytes* jello_bytes_new(jello_vm* vm, uint32_t length) {
   jello_bytes* b = (jello_bytes*)jello_gc_alloc(vm, sizeof(jello_bytes) + (size_t)length);
   b->h.kind = (uint8_t)JELLO_OBJ_BYTES;
-  b->h.type_id = 0; /* Bytes is not a parameterised kind */
+  b->h.type_id = 0; /* Bytes is not a parameterised kind (Chapter 4 Sec 2.2); type_id unused */
   b->length = length;
   return b;
 }
