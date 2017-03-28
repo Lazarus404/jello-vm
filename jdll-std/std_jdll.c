@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #if defined(__APPLE__)
 #include <crt_externs.h>
@@ -120,9 +121,18 @@ static void std_file_write(jdlo_ctx* c) {
   jdl_return_bool(c, written == (size_t)len);
 }
 
+static void std_file_exists(jdlo_ctx* c) {
+  char* path = nul_terminated_copy(jdl_arg_bytes_data(c, 0), jdl_arg_bytes_len(c, 0));
+  if(!path) { jdl_fail(c, "std.file_exists: out of memory"); return; }
+  int ok = access(path, F_OK) == 0;
+  free(path);
+  jdl_return_bool(c, ok);
+}
+
 static const jello_jdll_export STD_EXPORTS[] = {
   {"file_read", std_file_read, (uint8_t)JELLO_T_BYTES, 1, {(uint8_t)JELLO_T_BYTES}},
   {"file_write", std_file_write, (uint8_t)JELLO_T_BOOL, 2, {(uint8_t)JELLO_T_BYTES, (uint8_t)JELLO_T_BYTES}},
+  {"file_exists", std_file_exists, (uint8_t)JELLO_T_BOOL, 1, {(uint8_t)JELLO_T_BYTES}},
   {"get_env", std_get_env, (uint8_t)JELLO_T_BYTES, 1, {(uint8_t)JELLO_T_BYTES}},
   {"argv_count", std_argv_count, (uint8_t)JELLO_T_I32, 0, {0}},
   {"argv_get", std_argv_get, (uint8_t)JELLO_T_BYTES, 1, {(uint8_t)JELLO_T_I32}},
