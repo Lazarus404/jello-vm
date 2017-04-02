@@ -49,8 +49,6 @@ typedef enum jello_op_flags {
   JELLO_OPF_UNIMPLEMENTED   = 1u << 6, /* no interpreter handler exists yet (jit/ir.c lowers these to JIR_SLOW); always disqualifies a function from JIR's own `numeric_fast` eligibility flag */
 } jello_op_flags;
 
-
-
 typedef struct jello_op_info {
   const char* name;                 /* "ADD_I32" -- generated once, replaces jlo_tool's own hand-kept table */
   uint8_t a_role, b_role, c_role;   /* jello_operand_role */
@@ -72,11 +70,11 @@ typedef struct jello_op_info {
   OP(JOP_SWITCH_KIND, "SWITCH_KIND", REG, T_DYNAMIC, IMM_RAW, 0, UNUSED, 0, IMM_JUMP, JELLO_OPF_UNIMPLEMENTED | JELLO_OPF_IS_BRANCH, op_unimplemented) \
   OP(JOP_CASE_KIND, "CASE_KIND", IMM_RAW, 0, UNUSED, 0, UNUSED, 0, IMM_JUMP, JELLO_OPF_UNIMPLEMENTED, op_unimplemented) \
   OP(JOP_CALL, "CALL", REG, POLY, REG, POLY, IMM_RAW, 0, IMM_POOL, JELLO_OPF_CAN_CALL, op_unimplemented) \
-  OP(JOP_CALLR, "CALLR", REG, POLY, REG, POLY, IMM_RAW, 0, IMM_POOL, JELLO_OPF_UNIMPLEMENTED | JELLO_OPF_CAN_CALL, op_unimplemented) \
-  OP(JOP_TAILCALL, "TAILCALL", REG, POLY, REG, POLY, IMM_RAW, 0, IMM_POOL, JELLO_OPF_UNIMPLEMENTED | JELLO_OPF_CAN_CALL | JELLO_OPF_IS_TERMINATOR, op_unimplemented) \
-  OP(JOP_TAILCALLR, "TAILCALLR", REG, POLY, REG, POLY, IMM_RAW, 0, IMM_POOL, JELLO_OPF_UNIMPLEMENTED | JELLO_OPF_CAN_CALL | JELLO_OPF_IS_TERMINATOR, op_unimplemented) \
-  OP(JOP_CONST_FUN, "CONST_FUN", REG, POLY, REG, POLY, IMM_RAW, 0, IMM_POOL, JELLO_OPF_UNIMPLEMENTED, op_unimplemented) \
-  OP(JOP_CLOSURE, "CLOSURE", REG, POLY, REG, POLY, IMM_RAW, 0, IMM_POOL, JELLO_OPF_UNIMPLEMENTED | JELLO_OPF_CAN_ALLOC, op_unimplemented) \
+  OP(JOP_CALLR, "CALLR", REG, POLY, REG, POLY, IMM_RAW, 0, IMM_POOL, JELLO_OPF_CAN_CALL, op_callr) \
+  OP(JOP_TAILCALL, "TAILCALL", REG, POLY, REG, POLY, IMM_RAW, 0, IMM_POOL, JELLO_OPF_CAN_CALL | JELLO_OPF_IS_TERMINATOR, op_tailcall) \
+  OP(JOP_TAILCALLR, "TAILCALLR", REG, POLY, REG, POLY, IMM_RAW, 0, IMM_POOL, JELLO_OPF_CAN_CALL | JELLO_OPF_IS_TERMINATOR, op_tailcallr) \
+  OP(JOP_CONST_FUN, "CONST_FUN", REG, POLY, REG, POLY, IMM_RAW, 0, IMM_POOL, JELLO_OPF_CAN_ALLOC, op_const_fun) \
+  OP(JOP_CLOSURE, "CLOSURE", REG, POLY, REG, POLY, IMM_RAW, 0, IMM_POOL, JELLO_OPF_CAN_ALLOC, op_closure) \
   OP(JOP_BIND_THIS, "BIND_THIS", REG, POLY, REG, POLY, UNUSED, 0, IMM_NONE, JELLO_OPF_UNIMPLEMENTED, op_unimplemented) \
   OP(JOP_CONST_I8_IMM, "CONST_I8_IMM", REG, POLY, UNUSED, 0, UNUSED, 0, IMM_RAW, JELLO_OPF_NONE, op_unimplemented) \
   OP(JOP_CONST_I32, "CONST_I32", REG, T_I32, UNUSED, 0, UNUSED, 0, IMM_RAW, JELLO_OPF_NONE, op_unimplemented) \

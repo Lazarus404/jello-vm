@@ -172,6 +172,49 @@ static jello_bc_result validate_mov(const jello_bc_module* m, const jello_type_i
   return err(JELLO_BC_BAD_FORMAT, "mov type mismatch", 0);
 }
 
+static jello_bc_result validate_direct_call(
+    const jello_bc_module* m,
+    const jello_type_id* reg_types,
+    const jello_insn* ins,
+    uint32_t nregs,
+    uint32_t nfuncs,
+    int check_dest) {
+  if(ins->imm >= nfuncs) return err(JELLO_BC_BAD_FORMAT, "function index out of range", 0);
+  if(check_dest && ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "call dest reg out of range", 0);
+  if((uint64_t)ins->b + (uint64_t)ins->c > (uint64_t)nregs) {
+    return err(JELLO_BC_BAD_FORMAT, "call arg regs out of range", 0);
+  }
+  {
+    const jello_bc_function* callee = &m->funcs[ins->imm];
+    if(ins->c > callee->nregs) return err(JELLO_BC_BAD_FORMAT, "call passes more args than callee has registers", 0);
+    for(uint32_t i = 0; i < ins->c; i++) {
+      jello_type_kind ck = reg_kind(m, reg_types, ins->b + i);
+      jello_type_kind pk = vm_reg_kind(m, callee, i);
+      if(ck != pk && ck != JELLO_T_DYNAMIC && pk != JELLO_T_DYNAMIC) {
+        return err(JELLO_BC_BAD_FORMAT, "call arg type mismatch", 0);
+      }
+    }
+  }
+  return ok();
+}
+
+static jello_bc_result validate_callr_window(
+    const jello_bc_module* m,
+    const jello_type_id* reg_types,
+    const jello_insn* ins,
+    uint32_t nregs,
+    int check_dest) {
+  if(check_dest && ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "callr dest reg out of range", 0);
+  if(ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "callr callee reg out of range", 0);
+  if(rk_ne(m, reg_types, ins->b, JELLO_T_FUNCTION)) {
+    return err(JELLO_BC_BAD_FORMAT, "callr callee must be Function or Dynamic", 0);
+  }
+  if((uint64_t)ins->imm + (uint64_t)ins->c > (uint64_t)nregs) {
+    return err(JELLO_BC_BAD_FORMAT, "callr arg window out of range", 0);
+  }
+  return ok();
+}
+
 jello_bc_result jello_bc_validate_insn(
     const jello_bc_module* m,
     const jello_type_id* reg_types,
@@ -222,29 +265,41 @@ jello_bc_result jello_bc_validate_insn(
       }
       return ok();
 
-    case JOP_CALL: {
+    case JOP_CALL:
+      return validate_direct_call(m, reg_types, ins, nregs, nfuncs, 1);
+
+    case JOP_TAILCALL:
+      return validate_direct_call(m, reg_types, ins, nregs, nfuncs, 0);
+
+    case JOP_CALLR:
+      return validate_callr_window(m, reg_types, ins, nregs, 1);
+
+    case JOP_TAILCALLR:
+      return validate_callr_window(m, reg_types, ins, nregs, 0);
+
+    case JOP_CONST_FUN:
+    case JOP_CLOSURE: {
       if(ins->imm >= nfuncs) return err(JELLO_BC_BAD_FORMAT, "function index out of range", 0);
-      if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "call dest reg out of range", 0);
-      if((uint64_t)ins->b + (uint64_t)ins->c > (uint64_t)nregs) {
-        return err(JELLO_BC_BAD_FORMAT, "call arg regs out of range", 0);
+      if((jello_op)op == JOP_CONST_FUN && ins->c != 0) {
+        return err(JELLO_BC_BAD_FORMAT, "const_fun capture count must be 0", 0);
       }
-      const jello_bc_function* callee = &m->funcs[ins->imm];
-      if(ins->c > callee->nregs) return err(JELLO_BC_BAD_FORMAT, "call passes more args than callee has registers", 0);
+      if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "closure dest reg out of range", 0);
+      if((uint64_t)ins->b + (uint64_t)ins->c > (uint64_t)nregs) {
+        return err(JELLO_BC_BAD_FORMAT, "closure capture window out of range", 0);
+      }
       for(uint32_t i = 0; i < ins->c; i++) {
-        if(reg_kind(m, reg_types, ins->b + i) != vm_reg_kind(m, callee, i)) {
-          return err(JELLO_BC_BAD_FORMAT, "call arg type mismatch", 0);
+        if(reg_kind(m, reg_types, ins->b + i) != JELLO_T_DYNAMIC) {
+          return err(JELLO_BC_BAD_FORMAT, "closure capture must be Dynamic", 0);
+        }
+      }
+      {
+        const jello_bc_function* callee = &m->funcs[ins->imm];
+        if(callee->cap_start + (uint32_t)ins->c > callee->nregs) {
+          return err(JELLO_BC_BAD_FORMAT, "closure cap_start out of range", 0);
         }
       }
       return ok();
     }
-
-    case JOP_CALLR:
-    case JOP_TAILCALL:
-    case JOP_TAILCALLR:
-    case JOP_CONST_FUN:
-    case JOP_CLOSURE:
-      if(ins->imm >= nfuncs) return err(JELLO_BC_BAD_FORMAT, "function index out of range", 0);
-      return ok();
 
     case JOP_CONST_I8_IMM:
       if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "const reg out of range", 0);

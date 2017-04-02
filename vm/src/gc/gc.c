@@ -203,6 +203,24 @@ static void trace_object(mark_stack* ms, const jello_bc_module* m, void* p) {
       }
       return;
     }
+    case JELLO_OBJ_FUNCTION: {
+      const jello_function* fn = (const jello_function*)p;
+      const jello_bc_function* callee = &m->funcs[fn->func_index];
+      for(uint32_t i = 0; i < fn->ncaps; i++) {
+        jello_type_kind ck = vm_reg_kind(m, callee, callee->cap_start + i);
+        if(ck == JELLO_T_DYNAMIC) {
+          jello_value v;
+          memcpy(&v, &fn->captures[i], sizeof(jello_value));
+          if(jello_is_ptr(v)) mark_ptr(ms, jello_as_ptr(v));
+        } else if(ck == JELLO_T_BYTES || ck == JELLO_T_STRUCT || ck == JELLO_T_OBJECT ||
+                  ck == JELLO_T_ARRAY || ck == JELLO_T_FUNCTION) {
+          void* fp;
+          memcpy(&fp, &fn->captures[i], sizeof(void*));
+          mark_ptr(ms, fp);
+        }
+      }
+      return;
+    }
     default:
       return;
   }
@@ -231,7 +249,7 @@ static void scan_typed_frames(jello_vm* vm, mark_stack* ms) {
     reg_frame* rf = &fr->rf;
     for(uint32_t r = 0; r < f->nregs; r++) {
       jello_type_kind k = vm_reg_kind_fast(rf, r);
-      if(k == JELLO_T_BYTES || k == JELLO_T_STRUCT || k == JELLO_T_OBJECT) {
+      if(k == JELLO_T_BYTES || k == JELLO_T_STRUCT || k == JELLO_T_OBJECT || k == JELLO_T_FUNCTION) {
         void* p = NULL;
         memcpy(&p, vm_reg_ptr(rf, r), sizeof(void*));
         mark_ptr(ms, p);
@@ -339,6 +357,17 @@ jello_box_f16* jello_box_f16_new(jello_vm* vm, uint16_t bits) {
   b->h.type_id = 0;
   b->value = bits;
   return b;
+}
+
+/* -- Function -- */
+jello_function* jello_function_new(jello_vm* vm, uint32_t func_index, uint32_t ncaps) {
+  jello_function* fn = (jello_function*)jello_gc_alloc(vm, sizeof(jello_function) + (size_t)ncaps * sizeof(uint64_t));
+  fn->h.kind = (uint8_t)JELLO_OBJ_FUNCTION;
+  fn->h.type_id = 0;
+  fn->func_index = func_index;
+  fn->ncaps = ncaps;
+  for(uint32_t i = 0; i < ncaps; i++) fn->captures[i] = 0;
+  return fn;
 }
 
 /* -- Struct -- */

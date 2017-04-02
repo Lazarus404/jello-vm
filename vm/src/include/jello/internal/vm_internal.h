@@ -252,7 +252,12 @@ jello_type_kind vm_reg_kind(const jello_bc_module* m, const jello_bc_function* f
 
 /* -- frame stack + per-function layout cache (frame.c) -- */
 int vm_push_frame(jello_vm* vm, const jello_bc_module* m, uint32_t func_index,
-                   uint32_t caller_dst, uint32_t arg_first, uint32_t arg_count, uint8_t has_caller);
+                  uint32_t caller_dst, uint32_t arg_first, uint32_t arg_count, uint8_t has_caller);
+int vm_push_frame_raw(jello_vm* vm, const jello_bc_module* m, uint32_t func_index,
+                      uint32_t caller_dst, uint8_t has_caller,
+                      const uint64_t* argbuf, uint32_t arg_count,
+                      const uint64_t* capbuf, uint32_t ncaps);
+void vm_copy_captures_into_top(jello_vm* vm, const jello_function* fn);
 void vm_pop_frame(jello_vm* vm);
 void vm_frame_reset(jello_vm* vm);
 void vm_free_layouts(jello_vm* vm);
@@ -395,6 +400,11 @@ op_result op_kindof(exec_ctx* ctx, const jello_insn* ins);
 op_result op_physeq(exec_ctx* ctx, const jello_insn* ins);
 op_result op_const_null(exec_ctx* ctx, const jello_insn* ins);
 op_result op_const_atom(exec_ctx* ctx, const jello_insn* ins);
+op_result op_const_fun(exec_ctx* ctx, const jello_insn* ins);
+op_result op_closure(exec_ctx* ctx, const jello_insn* ins);
+op_result op_callr(exec_ctx* ctx, const jello_insn* ins);
+op_result op_tailcall(exec_ctx* ctx, const jello_insn* ins);
+op_result op_tailcallr(exec_ctx* ctx, const jello_insn* ins);
 
 /* -- Struct opcode handlers (ops_struct.c) -- */
 op_result op_struct_new(exec_ctx* ctx, const jello_insn* ins);

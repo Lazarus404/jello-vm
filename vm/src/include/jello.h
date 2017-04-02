@@ -226,6 +226,7 @@ typedef enum jello_obj_kind {
   JELLO_OBJ_BOX_F64 = 5,
   JELLO_OBJ_BOX_F32 = 6,
   JELLO_OBJ_BOX_F16 = 7,
+  JELLO_OBJ_FUNCTION = 9,
 } jello_obj_kind;
 
 typedef struct jello_obj_header {
@@ -289,6 +290,16 @@ typedef struct jello_object {
   jello_value* vals;
   uint8_t* states;
 } jello_object;
+
+/* -- Function -- */
+typedef struct jello_function {
+  jello_obj_header h;
+  uint32_t func_index;
+  uint32_t ncaps;
+  uint64_t captures[];
+} jello_function;
+
+jello_function* jello_function_new(jello_vm* vm, uint32_t func_index, uint32_t ncaps);
 
 jello_object* jello_object_new(jello_vm* vm, uint32_t type_id);
 int jello_object_has(const jello_object* o, uint32_t atom_id);

@@ -43,7 +43,8 @@ void vm_free_layouts(jello_vm* vm) {
 }
 
 static int is_pointer_kind(jello_type_kind k) {
-  return k == JELLO_T_BYTES || k == JELLO_T_STRUCT || k == JELLO_T_OBJECT || k == JELLO_T_DYNAMIC;
+  return k == JELLO_T_BYTES || k == JELLO_T_STRUCT || k == JELLO_T_OBJECT || k == JELLO_T_DYNAMIC ||
+         k == JELLO_T_FUNCTION;
 }
 
 static void null_init_dynamic_regs(uint32_t nregs, reg_frame* rf) {
@@ -137,25 +138,25 @@ uint8_t* jit_current_frame_mem(jello_vm* vm) {
   return vm->call_frames[vm->call_frames_len - 1u].rf.mem;
 }
 
-int vm_push_frame(jello_vm* vm, const jello_bc_module* m, uint32_t func_index,
-                   uint32_t caller_dst, uint32_t arg_first, uint32_t arg_count, uint8_t has_caller) {
+static call_frame* push_frame_shell(jello_vm* vm, const jello_bc_module* m, uint32_t func_index,
+                                     uint32_t caller_dst, uint8_t has_caller) {
   const jello_bc_function* f = &m->funcs[func_index];
   frame_layout* fl = get_layout(vm, m, f);
 
   if((uint64_t)vm->frame_stack_top + fl->total > JIT_FRAME_STACK_MAX || vm->call_frames_len >= JIT_CALL_FRAMES_MAX) {
     vm->trap_code = JELLO_TRAP_STACK_OVERFLOW;
-    return 0;
+    return NULL;
   }
   if(!frame_stack_grow(vm, fl->total)) {
     vm->trap_code = JELLO_TRAP_STACK_OVERFLOW;
-    return 0;
+    return NULL;
   }
   if(vm->call_frames_len == vm->call_frames_cap) {
     uint32_t new_cap = vm->call_frames_cap ? vm->call_frames_cap * 2u : 64u;
     call_frame* p = (call_frame*)realloc(vm->call_frames, (size_t)new_cap * sizeof(call_frame));
     if(!p) {
       vm->trap_code = JELLO_TRAP_STACK_OVERFLOW;
-      return 0;
+      return NULL;
     }
     vm->call_frames = p;
     vm->call_frames_cap = new_cap;
@@ -164,7 +165,6 @@ int vm_push_frame(jello_vm* vm, const jello_bc_module* m, uint32_t func_index,
   uint8_t* mem = vm->frame_stack + vm->frame_stack_top;
   vm->frame_stack_top += fl->total;
 
-  call_frame* caller = has_caller ? &vm->call_frames[vm->call_frames_len - 1u] : NULL;
   call_frame* fr = &vm->call_frames[vm->call_frames_len];
   fr->f = f;
   fr->func_index = func_index;
@@ -182,8 +182,17 @@ int vm_push_frame(jello_vm* vm, const jello_bc_module* m, uint32_t func_index,
     null_init_dynamic_regs(f->nregs, &fr->rf);
   }
 
+  return fr;
+}
+
+int vm_push_frame(jello_vm* vm, const jello_bc_module* m, uint32_t func_index,
+                  uint32_t caller_dst, uint32_t arg_first, uint32_t arg_count, uint8_t has_caller) {
+  call_frame* fr = push_frame_shell(vm, m, func_index, caller_dst, has_caller);
+  if(!fr) return 0;
+  call_frame* caller = has_caller ? &vm->call_frames[vm->call_frames_len - 1u] : NULL;
+
   for(uint32_t i = 0; i < arg_count; i++) {
-    if(fl->wide[i]) {
+    if(vm_reg_is_wide(&fr->rf, i)) {
       vm_store_i64(&fr->rf, i, vm_load_i64(&caller->rf, arg_first + i));
     } else {
       vm_store_u32(&fr->rf, i, vm_load_u32(&caller->rf, arg_first + i));
@@ -192,6 +201,37 @@ int vm_push_frame(jello_vm* vm, const jello_bc_module* m, uint32_t func_index,
 
   vm->call_frames_len++;
   return 1;
+}
+
+int vm_push_frame_raw(jello_vm* vm, const jello_bc_module* m, uint32_t func_index,
+                       uint32_t caller_dst, uint8_t has_caller,
+                       const uint64_t* argbuf, uint32_t arg_count,
+                       const uint64_t* capbuf, uint32_t ncaps) {
+  call_frame* fr = push_frame_shell(vm, m, func_index, caller_dst, has_caller);
+  if(!fr) return 0;
+
+  for(uint32_t i = 0; i < arg_count; i++) {
+    if(vm_reg_is_wide(&fr->rf, i)) vm_store_i64(&fr->rf, i, (int64_t)argbuf[i]);
+    else vm_store_u32(&fr->rf, i, (uint32_t)argbuf[i]);
+  }
+  uint32_t cap_start = fr->f->cap_start;
+  for(uint32_t i = 0; i < ncaps; i++) {
+    if(vm_reg_is_wide(&fr->rf, cap_start + i)) vm_store_i64(&fr->rf, cap_start + i, (int64_t)capbuf[i]);
+    else vm_store_u32(&fr->rf, cap_start + i, (uint32_t)capbuf[i]);
+  }
+
+  vm->call_frames_len++;
+  return 1;
+}
+
+void vm_copy_captures_into_top(jello_vm* vm, const jello_function* fn) {
+  if(!fn || fn->ncaps == 0) return;
+  call_frame* fr = &vm->call_frames[vm->call_frames_len - 1u];
+  uint32_t cap_start = fr->f->cap_start;
+  for(uint32_t i = 0; i < fn->ncaps; i++) {
+    if(vm_reg_is_wide(&fr->rf, cap_start + i)) vm_store_i64(&fr->rf, cap_start + i, (int64_t)fn->captures[i]);
+    else vm_store_u32(&fr->rf, cap_start + i, (uint32_t)fn->captures[i]);
+  }
 }
 
 void vm_pop_frame(jello_vm* vm) {
