@@ -334,6 +334,7 @@ op_result op_f16_from_i32(exec_ctx* ctx, const jello_insn* ins);
 op_result op_i32_from_f16(exec_ctx* ctx, const jello_insn* ins);
 
 /* -- Bytes opcode handlers (ops_bytes.c) -- */
+op_result op_const_bytes(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_new(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_len(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_get_u8(exec_ctx* ctx, const jello_insn* ins);

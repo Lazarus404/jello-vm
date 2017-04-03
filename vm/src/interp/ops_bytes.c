@@ -9,6 +9,22 @@ static call_frame* current_frame(exec_ctx* ctx) {
   return &ctx->vm->call_frames[ctx->vm->call_frames_len - 1u];
 }
 
+op_result op_const_bytes(exec_ctx* ctx, const jello_insn* ins) {
+  call_frame* fr = current_frame(ctx);
+  const jello_bc_module* m = ctx->m;
+  uint32_t idx = ins->imm;
+  if(idx >= m->nconst_bytes) {
+    ctx->vm->trap_code = JELLO_TRAP_BOUNDS;
+    return OP_TRAP;
+  }
+  uint32_t len = m->const_bytes_len[idx];
+  uint32_t off = m->const_bytes_off[idx];
+  jello_bytes* b = jello_bytes_new(ctx->vm, len);
+  if(len > 0) memcpy(b->data, m->const_bytes_data + off, len);
+  vm_store_ptr(&fr->rf, ins->a, b);
+  return OP_CONTINUE;
+}
+
 op_result op_bytes_new(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   uint32_t len = vm_load_u32(&fr->rf, ins->b);
