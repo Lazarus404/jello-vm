@@ -121,6 +121,7 @@ uint32_t vm_kindof_dynamic(jello_value v) {
     case JELLO_OBJ_BOX_F64: return 8u;
     case JELLO_OBJ_BOX_F32: return 9u;
     case JELLO_OBJ_BOX_F16: return 10u;
+    case JELLO_OBJ_ARRAY: return 11u;
     case JELLO_OBJ_FUNCTION: return 12u;
     default: return 0x7fffffffu;
   }

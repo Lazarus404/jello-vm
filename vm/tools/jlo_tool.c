@@ -33,6 +33,7 @@ static const kind_name_entry KIND_NAMES[] = {
   {"F32", JELLO_T_F32},
   {"F64", JELLO_T_F64},
   {"BYTES", JELLO_T_BYTES},
+  {"ARRAY", JELLO_T_ARRAY},
   {"STRUCT", JELLO_T_STRUCT},
   {"OBJECT", JELLO_T_OBJECT},
   {"DYNAMIC", JELLO_T_DYNAMIC},

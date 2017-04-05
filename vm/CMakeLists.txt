@@ -25,6 +25,7 @@ add_library(jello_vm STATIC
   src/interp/ops_dyn.c
   src/interp/ops_struct.c
   src/interp/ops_obj.c
+  src/interp/ops_array.c
   src/value/value.c
   src/gc/gc.c
   src/gc/object.c

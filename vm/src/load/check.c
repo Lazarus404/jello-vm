@@ -715,6 +715,27 @@ jello_bc_result jello_bc_validate_insn(
       return ok();
     }
 
+    case JOP_ARRAY_NEW:
+      if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "array_new reg out of range", 0);
+      if(rk_ne(m, reg_types, ins->a, JELLO_T_ARRAY)) return err(JELLO_BC_BAD_FORMAT, "array_new dest must be Array", 0);
+      if(rk_ne(m, reg_types, ins->b, JELLO_T_I32)) return err(JELLO_BC_BAD_FORMAT, "array_new length must be I32", 0);
+      return ok();
+
+    case JOP_ARRAY_LEN:
+      if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "array_len reg out of range", 0);
+      if(rk_ne(m, reg_types, ins->a, JELLO_T_I32)) return err(JELLO_BC_BAD_FORMAT, "array_len dest must be I32", 0);
+      if(rk_ne(m, reg_types, ins->b, JELLO_T_ARRAY)) return err(JELLO_BC_BAD_FORMAT, "array_len src must be Array", 0);
+      return ok();
+
+    case JOP_ARRAY_GET:
+    case JOP_ARRAY_SET:
+      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) {
+        return err(JELLO_BC_BAD_FORMAT, "array_get/set reg out of range", 0);
+      }
+      if(rk_ne(m, reg_types, ins->b, JELLO_T_ARRAY)) return err(JELLO_BC_BAD_FORMAT, "array_get/set src must be Array", 0);
+      if(rk_ne(m, reg_types, ins->c, JELLO_T_I32)) return err(JELLO_BC_BAD_FORMAT, "array_get/set index must be I32", 0);
+      return ok();
+
     default:
       return ok();
   }

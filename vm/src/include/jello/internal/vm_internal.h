@@ -412,6 +412,14 @@ op_result op_struct_new(exec_ctx* ctx, const jello_insn* ins);
 op_result op_struct_get(exec_ctx* ctx, const jello_insn* ins);
 op_result op_struct_set(exec_ctx* ctx, const jello_insn* ins);
 
+/* -- Array opcode handlers (ops_array.c) -- */
+op_result op_array_new(exec_ctx* ctx, const jello_insn* ins);
+op_result op_array_len(exec_ctx* ctx, const jello_insn* ins);
+op_result op_array_get(exec_ctx* ctx, const jello_insn* ins);
+op_result op_array_set(exec_ctx* ctx, const jello_insn* ins);
+op_result op_array_resize(exec_ctx* ctx, const jello_insn* ins);
+op_result op_array_concat2(exec_ctx* ctx, const jello_insn* ins);
+
 /* -- Object opcode handlers (ops_obj.c) -- */
 op_result op_obj_new(exec_ctx* ctx, const jello_insn* ins);
 op_result op_obj_has_atom(exec_ctx* ctx, const jello_insn* ins);

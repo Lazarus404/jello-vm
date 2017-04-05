@@ -203,6 +203,23 @@ static void trace_object(mark_stack* ms, const jello_bc_module* m, void* p) {
       }
       return;
     }
+    case JELLO_OBJ_ARRAY: {
+      const jello_array* a = (const jello_array*)p;
+      jello_type_id elem_tid = m->types[a->h.type_id].as.unary.elem;
+      jello_type_kind ek = m->types[elem_tid].kind;
+      if(ek == JELLO_T_DYNAMIC) {
+        const jello_value* vals = (const jello_value*)a->data;
+        for(uint32_t i = 0; i < a->length; i++) {
+          if(jello_is_ptr(vals[i])) mark_ptr(ms, jello_as_ptr(vals[i]));
+        }
+      } else if(ek == JELLO_T_BYTES || ek == JELLO_T_STRUCT || ek == JELLO_T_OBJECT || ek == JELLO_T_ARRAY) {
+        void* const* ptrs = (void* const*)a->data;
+        for(uint32_t i = 0; i < a->length; i++) {
+          mark_ptr(ms, ptrs[i]);
+        }
+      }
+      return;
+    }
     case JELLO_OBJ_FUNCTION: {
       const jello_function* fn = (const jello_function*)p;
       const jello_bc_function* callee = &m->funcs[fn->func_index];
@@ -234,6 +251,11 @@ static void destroy_object(void* p) {
       free(o->keys); /* keys is the malloc base for the whole keys+vals+states block */
       return;
     }
+    case JELLO_OBJ_ARRAY: {
+      jello_array* a = (jello_array*)p;
+      free(a->data);
+      return;
+    }
     default:
       return;
   }
@@ -249,7 +271,7 @@ static void scan_typed_frames(jello_vm* vm, mark_stack* ms) {
     reg_frame* rf = &fr->rf;
     for(uint32_t r = 0; r < f->nregs; r++) {
       jello_type_kind k = vm_reg_kind_fast(rf, r);
-      if(k == JELLO_T_BYTES || k == JELLO_T_STRUCT || k == JELLO_T_OBJECT || k == JELLO_T_FUNCTION) {
+      if(k == JELLO_T_BYTES || k == JELLO_T_STRUCT || k == JELLO_T_OBJECT || k == JELLO_T_ARRAY || k == JELLO_T_FUNCTION) {
         void* p = NULL;
         memcpy(&p, vm_reg_ptr(rf, r), sizeof(void*));
         mark_ptr(ms, p);
@@ -357,6 +379,40 @@ jello_box_f16* jello_box_f16_new(jello_vm* vm, uint16_t bits) {
   b->h.type_id = 0;
   b->value = bits;
   return b;
+}
+
+/* -- Array -- */
+static uint32_t array_elem_size(const jello_bc_module* m, uint32_t array_type_id) {
+  jello_type_id elem_tid = m->types[array_type_id].as.unary.elem;
+  return (uint32_t)jello_slot_size(m->types[elem_tid].kind);
+}
+
+jello_array* jello_array_new(jello_vm* vm, const jello_bc_module* m, uint32_t array_type_id, uint32_t length) {
+  jello_array* a = (jello_array*)jello_gc_alloc(vm, sizeof(jello_array));
+  a->h.kind = (uint8_t)JELLO_OBJ_ARRAY;
+  a->h.type_id = array_type_id;
+  a->length = 0;
+  a->cap = 0;
+  a->data = NULL;
+  jello_array_resize(vm, m, a, length);
+  return a;
+}
+
+void jello_array_resize(jello_vm* vm, const jello_bc_module* m, jello_array* a, uint32_t new_length) {
+  (void)vm;
+  uint32_t elem_size = array_elem_size(m, a->h.type_id);
+  if(new_length > a->cap) {
+    uint32_t new_cap = a->cap ? a->cap : 8u;
+    while(new_cap < new_length) new_cap *= 2u;
+    void* grown = realloc(a->data, (size_t)new_cap * (size_t)elem_size);
+    if(!grown) abort();
+    a->data = grown;
+    memset((uint8_t*)a->data + (size_t)a->cap * elem_size, 0, (size_t)(new_cap - a->cap) * elem_size);
+    a->cap = new_cap;
+  } else if(new_length > a->length) {
+    memset((uint8_t*)a->data + (size_t)a->length * elem_size, 0, (size_t)(new_length - a->length) * elem_size);
+  }
+  a->length = new_length;
 }
 
 /* -- Function -- */

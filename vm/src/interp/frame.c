@@ -44,7 +44,7 @@ void vm_free_layouts(jello_vm* vm) {
 
 static int is_pointer_kind(jello_type_kind k) {
   return k == JELLO_T_BYTES || k == JELLO_T_STRUCT || k == JELLO_T_OBJECT || k == JELLO_T_DYNAMIC ||
-         k == JELLO_T_FUNCTION;
+         k == JELLO_T_ARRAY || k == JELLO_T_FUNCTION;
 }
 
 static void null_init_dynamic_regs(uint32_t nregs, reg_frame* rf) {
