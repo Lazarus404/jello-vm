@@ -176,6 +176,7 @@ static call_frame* push_frame_shell(jello_vm* vm, const jello_bc_module* m, uint
   fr->has_caller = has_caller;
   fr->has_pointer = (uint8_t)fl->has_pointer;
   fr->caller_dst = caller_dst;
+  fr->try_stack_len = 0;
 
   if(fl->has_pointer) {
     memset(mem, 0, fl->total);

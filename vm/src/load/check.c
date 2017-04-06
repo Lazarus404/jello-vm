@@ -715,6 +715,20 @@ jello_bc_result jello_bc_validate_insn(
       return ok();
     }
 
+    case JOP_TRY:
+      if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "try reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_DYNAMIC) {
+        return err(JELLO_BC_BAD_FORMAT, "try dest must be Dynamic", 0);
+      }
+      return ok();
+
+    case JOP_ENDTRY:
+      return ok();
+
+    case JOP_THROW:
+      if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "throw reg out of range", 0);
+      return ok();
+
     case JOP_ARRAY_NEW:
       if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "array_new reg out of range", 0);
       if(rk_ne(m, reg_types, ins->a, JELLO_T_ARRAY)) return err(JELLO_BC_BAD_FORMAT, "array_new dest must be Array", 0);

@@ -1237,6 +1237,7 @@ static const char* trap_code_name(jello_trap_code tc) {
     case JELLO_TRAP_TYPE_MISMATCH: return "TYPE_MISMATCH";
     case JELLO_TRAP_FUEL: return "FUEL";
     case JELLO_TRAP_LIMIT: return "LIMIT";
+    case JELLO_TRAP_UNCAUGHT_THROW: return "UNCAUGHT_THROW";
     default: return "UNKNOWN";
   }
 }

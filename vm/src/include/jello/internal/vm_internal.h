@@ -95,6 +95,13 @@ static inline int vm_reg_is_wide(const reg_frame* rf, uint32_t r) {
   return rf->wide[r] != 0;
 }
 
+#define JELLO_TRY_STACK_MAX 16u
+
+typedef struct try_scope {
+  uint32_t catch_pc;
+  uint32_t payload_reg;
+} try_scope;
+
 typedef struct call_frame {
   const jello_bc_function* f;
   uint32_t func_index;
@@ -103,6 +110,8 @@ typedef struct call_frame {
   uint8_t has_caller;
   uint8_t has_pointer;
   uint32_t caller_dst; /* register in the caller's frame that RET writes into */
+  try_scope try_stack[JELLO_TRY_STACK_MAX];
+  uint32_t try_stack_len;
 } call_frame;
 
 typedef struct frame_layout {
@@ -419,6 +428,11 @@ op_result op_array_get(exec_ctx* ctx, const jello_insn* ins);
 op_result op_array_set(exec_ctx* ctx, const jello_insn* ins);
 op_result op_array_resize(exec_ctx* ctx, const jello_insn* ins);
 op_result op_array_concat2(exec_ctx* ctx, const jello_insn* ins);
+
+/* -- Exception-handling opcode handlers (ops_exc.c) -- */
+op_result op_try(exec_ctx* ctx, const jello_insn* ins);
+op_result op_endtry(exec_ctx* ctx, const jello_insn* ins);
+op_result op_throw(exec_ctx* ctx, const jello_insn* ins);
 
 /* -- Object opcode handlers (ops_obj.c) -- */
 op_result op_obj_new(exec_ctx* ctx, const jello_insn* ins);
