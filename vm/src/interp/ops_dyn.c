@@ -177,3 +177,64 @@ op_result op_tailcallr(exec_ctx* ctx, const jello_insn* ins) {
   if(!vm_push_frame_raw(vm, ctx->m, func_index, caller_dst, has_caller, argbuf, arg_count, capbuf, ncaps)) return OP_TRAP;
   return OP_CONTINUE;
 }
+
+/* -- SPILL_PUSH/SPILL_POP (Chapter 16 self-host) ------------------------------
+ * Overflow storage for functions whose own virtual-register count exceeds
+ * the 256-physical-register file (call_frame's own spill_slots comment,
+ * vm_internal.h). Always boxed through the same vm_box_from_typed/
+ * vm_store_from_boxed pair TO_DYN/FROM_DYN_* already use -- correct
+ * regardless of which physical register jello-refined's own lsra.jello
+ * happens to have picked as the scratch slot these route through.
+ */
+static int spill_ensure_cap(call_frame* fr, uint32_t slot) {
+  if(slot < fr->spill_cap) return 1;
+  uint32_t new_cap = fr->spill_cap ? fr->spill_cap * 2u : 8u;
+  while(new_cap <= slot) new_cap *= 2u;
+  jello_value* p = (jello_value*)realloc(fr->spill_slots, (size_t)new_cap * sizeof(jello_value));
+  if(!p) return 0;
+  for(uint32_t i = fr->spill_cap; i < new_cap; i++) p[i] = jello_make_null();
+  fr->spill_slots = p;
+  fr->spill_cap = new_cap;
+  return 1;
+}
+
+op_result op_spill_push(exec_ctx* ctx, const jello_insn* ins) {
+  call_frame* fr = current_frame(ctx);
+  jello_value v = vm_box_from_typed(ctx->vm, ctx->m, fr->f, &fr->rf, ins->a);
+  fr = current_frame(ctx);
+  if(!spill_ensure_cap(fr, ins->imm)) { fprintf(stderr, "DIAG: spill_ensure_cap OOM slot=%u\n", ins->imm); fflush(stderr); abort(); }
+  fr->spill_slots[ins->imm] = v;
+  return OP_CONTINUE;
+}
+
+op_result op_spill_pop(exec_ctx* ctx, const jello_insn* ins) {
+  call_frame* fr = current_frame(ctx);
+  jello_value v = (ins->imm < fr->spill_cap) ? fr->spill_slots[ins->imm] : jello_make_null();
+  if(!vm_store_from_boxed(ctx->vm, ctx->m, fr->f, &fr->rf, ins->a, v)) return OP_TRAP;
+  return OP_CONTINUE;
+}
+
+/* -- SWITCH_KIND/CASE_KIND -- */
+op_result op_switch_kind(exec_ctx* ctx, const jello_insn* ins) {
+  call_frame* fr = current_frame(ctx);
+  jello_value v = vm_load_val(&fr->rf, ins->a);
+  uint32_t kind = vm_dynamic_static_kind(v);
+  uint32_t ncases = (uint32_t)ins->b;
+  uint32_t table_pc = fr->pc;
+  uint32_t after_table = table_pc + ncases;
+  for(uint32_t i = 0; i < ncases; i++) {
+    const jello_insn* row = &fr->f->insns[table_pc + i];
+    if((uint32_t)row->a == kind) {
+      fr->pc = (uint32_t)((int32_t)after_table + (int32_t)row->imm);
+      return OP_CONTINUE;
+    }
+  }
+  fr->pc = (uint32_t)((int32_t)after_table + (int32_t)ins->imm);
+  return OP_CONTINUE;
+}
+
+op_result op_case_kind(exec_ctx* ctx, const jello_insn* ins) {
+  (void)ctx;
+  (void)ins;
+  return OP_CONTINUE;
+}

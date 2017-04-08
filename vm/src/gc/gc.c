@@ -266,6 +266,10 @@ static void scan_typed_frames(jello_vm* vm, mark_stack* ms) {
   if(!m) return;
   for(uint32_t fi = 0; fi < vm->call_frames_len; fi++) {
     call_frame* fr = &vm->call_frames[fi];
+    for(uint32_t s = 0; s < fr->spill_cap; s++) {
+      jello_value v = fr->spill_slots[s];
+      if(jello_is_ptr(v)) mark_ptr(ms, jello_as_ptr(v));
+    }
     if(!fr->has_pointer) continue;
     const jello_bc_function* f = fr->f;
     reg_frame* rf = &fr->rf;

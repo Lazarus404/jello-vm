@@ -177,6 +177,8 @@ static call_frame* push_frame_shell(jello_vm* vm, const jello_bc_module* m, uint
   fr->has_pointer = (uint8_t)fl->has_pointer;
   fr->caller_dst = caller_dst;
   fr->try_stack_len = 0;
+  fr->spill_slots = NULL;
+  fr->spill_cap = 0;
 
   if(fl->has_pointer) {
     memset(mem, 0, fl->total);
@@ -237,6 +239,9 @@ void vm_copy_captures_into_top(jello_vm* vm, const jello_function* fn) {
 
 void vm_pop_frame(jello_vm* vm) {
   call_frame* fr = &vm->call_frames[vm->call_frames_len - 1u];
+  free(fr->spill_slots);
+  fr->spill_slots = NULL;
+  fr->spill_cap = 0;
   vm->frame_stack_top -= fr->rf.size;
   vm->call_frames_len--;
 }

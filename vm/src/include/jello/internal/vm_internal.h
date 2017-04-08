@@ -112,6 +112,8 @@ typedef struct call_frame {
   uint32_t caller_dst; /* register in the caller's frame that RET writes into */
   try_scope try_stack[JELLO_TRY_STACK_MAX];
   uint32_t try_stack_len;
+  jello_value* spill_slots;
+  uint32_t spill_cap;
 } call_frame;
 
 typedef struct frame_layout {
@@ -389,6 +391,7 @@ jello_value vm_box_from_typed(jello_vm* vm, const jello_bc_module* m, const jell
 int vm_store_from_boxed(jello_vm* vm, const jello_bc_module* m, const jello_bc_function* f,
                          reg_frame* rf, uint32_t dst, jello_value v);
 uint32_t vm_kindof_dynamic(jello_value v);
+uint32_t vm_dynamic_static_kind(jello_value v);
 
 /* -- JIT-facing Object wrappers (ops_obj.c) -- */
 jello_value jit_obj_chain_get(jello_vm* vm, const jello_bc_module* m, jello_object* o, uint32_t atom_id);
@@ -415,6 +418,10 @@ op_result op_closure(exec_ctx* ctx, const jello_insn* ins);
 op_result op_callr(exec_ctx* ctx, const jello_insn* ins);
 op_result op_tailcall(exec_ctx* ctx, const jello_insn* ins);
 op_result op_tailcallr(exec_ctx* ctx, const jello_insn* ins);
+op_result op_spill_push(exec_ctx* ctx, const jello_insn* ins);
+op_result op_spill_pop(exec_ctx* ctx, const jello_insn* ins);
+op_result op_switch_kind(exec_ctx* ctx, const jello_insn* ins);
+op_result op_case_kind(exec_ctx* ctx, const jello_insn* ins);
 
 /* -- Struct opcode handlers (ops_struct.c) -- */
 op_result op_struct_new(exec_ctx* ctx, const jello_insn* ins);

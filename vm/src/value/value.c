@@ -107,6 +107,26 @@ int vm_store_from_boxed(jello_vm* vm, const jello_bc_module* m, const jello_bc_f
   }
 }
 
+/* -- SWITCH_KIND/CASE_KIND's own kind numbering -- */
+uint32_t vm_dynamic_static_kind(jello_value v) {
+  if(jello_is_bool(v)) return (uint32_t)JELLO_T_BOOL;
+  if(jello_is_i32(v)) return (uint32_t)JELLO_T_I32;
+  if(jello_is_atom(v)) return (uint32_t)JELLO_T_ATOM;
+  if(jello_is_null(v) || !jello_is_ptr(v) || jello_as_ptr(v) == NULL) return (uint32_t)JELLO_T_DYNAMIC;
+  switch(((const jello_obj_header*)jello_as_ptr(v))->kind) {
+    case JELLO_OBJ_BYTES: return (uint32_t)JELLO_T_BYTES;
+    case JELLO_OBJ_STRUCT: return (uint32_t)JELLO_T_STRUCT;
+    case JELLO_OBJ_OBJECT: return (uint32_t)JELLO_T_OBJECT;
+    case JELLO_OBJ_BOX_I64: return (uint32_t)JELLO_T_I64;
+    case JELLO_OBJ_BOX_F64: return (uint32_t)JELLO_T_F64;
+    case JELLO_OBJ_BOX_F32: return (uint32_t)JELLO_T_F32;
+    case JELLO_OBJ_BOX_F16: return (uint32_t)JELLO_T_F16;
+    case JELLO_OBJ_ARRAY: return (uint32_t)JELLO_T_ARRAY;
+    case JELLO_OBJ_FUNCTION: return (uint32_t)JELLO_T_FUNCTION;
+    default: return (uint32_t)JELLO_T_DYNAMIC;
+  }
+}
+
 uint32_t vm_kindof_dynamic(jello_value v) {
   if(jello_is_null(v)) return 0u;   /* JELLO_KINDOF_NULL */
   if(jello_is_bool(v)) return 1u;   /* JELLO_KINDOF_BOOL */
