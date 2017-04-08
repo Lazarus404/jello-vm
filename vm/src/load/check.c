@@ -762,6 +762,19 @@ jello_bc_result jello_bc_validate_insn(
       if(rk_ne(m, reg_types, ins->c, JELLO_T_I32)) return err(JELLO_BC_BAD_FORMAT, "array_get/set index must be I32", 0);
       return ok();
 
+    case JOP_LIST_NIL:
+    case JOP_LIST_CONS:
+    case JOP_LIST_HEAD:
+    case JOP_LIST_TAIL:
+    case JOP_LIST_IS_NIL:
+    case JOP_ENUM_NEW:
+    case JOP_ENUM_TAG:
+    case JOP_ENUM_GET:
+    case JOP_OBJ_KEYS:
+    case JOP_BIND_THIS:
+    case JOP_BYTES_CONCAT_MANY:
+      return err(JELLO_BC_BAD_FORMAT, "opcode not implemented", 0);
+
     default:
       return ok();
   }
