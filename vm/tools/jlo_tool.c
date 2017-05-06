@@ -1242,6 +1242,50 @@ static const char* trap_code_name(jello_trap_code tc) {
   }
 }
 
+static void print_host_result(const jello_numeric_result* r, FILE* out) {
+  switch(r->kind) {
+    case JELLO_NUM_VOID: fputs("null\n", out); break;
+    case JELLO_NUM_BOOL: fputs(r->as.b ? "true\n" : "false\n", out); break;
+    case JELLO_NUM_I32: fprintf(out, "%d\n", r->as.i32); break;
+    case JELLO_NUM_I64: fprintf(out, "%lld\n", (long long)r->as.i64); break;
+    case JELLO_NUM_F32: fprintf(out, "%g\n", (double)r->as.f32); break;
+    case JELLO_NUM_F64: fprintf(out, "%g\n", r->as.f64); break;
+    case JELLO_NUM_PTR: {
+      void* p = r->as.ptr;
+      if(!p) { fputs("null\n", out); break; }
+      const jello_obj_header* h = (const jello_obj_header*)p;
+      if(h->kind == (uint8_t)JELLO_OBJ_BYTES) {
+        const jello_bytes* b = (const jello_bytes*)p;
+        fwrite(b->data, 1, b->length, out);
+        fputc('\n', out);
+      } else {
+        fprintf(out, "ptr(%p)\n", p);
+      }
+      break;
+    }
+    case JELLO_NUM_DYN: {
+      jello_value v = r->as.dyn;
+      if(jello_is_null(v)) fputs("null\n", out);
+      else if(jello_is_bool(v)) fputs(jello_as_bool(v) ? "true\n" : "false\n", out);
+      else if(jello_is_i32(v)) fprintf(out, "%d\n", jello_as_i32(v));
+      else if(jello_is_atom(v)) fprintf(out, "atom(%u)\n", jello_as_atom(v));
+      else if(jello_is_ptr(v) && jello_as_ptr(v)) {
+        const jello_obj_header* h = (const jello_obj_header*)jello_as_ptr(v);
+        if(h->kind == (uint8_t)JELLO_OBJ_BYTES) {
+          const jello_bytes* b = (const jello_bytes*)jello_as_ptr(v);
+          fwrite(b->data, 1, b->length, out);
+          fputc('\n', out);
+        } else {
+          fprintf(out, "ptr(%p)\n", (void*)jello_as_ptr(v));
+        }
+      } else {
+        fputs("<value>\n", out);
+      }
+      break;
+    }
+  }
+}
+
 static void print_numeric_result(const jello_numeric_result* r, FILE* out) {
   switch(r->kind) {
     case JELLO_NUM_VOID: fprintf(out, "RESULT kind=VOID\n"); break;
@@ -1265,7 +1309,7 @@ static void print_numeric_result(const jello_numeric_result* r, FILE* out) {
   }
 }
 
-static int cmd_run(const char* in_path, int repeat, int gc_stats, uint64_t fuel, uint32_t max_bytes_len, int trap_pc) {
+static int cmd_run(const char* in_path, int repeat, int gc_stats, uint64_t fuel, uint32_t max_bytes_len, int trap_pc, int host_print) {
   FILE* f = fopen(in_path, "rb");
   if(!f) { fprintf(stderr, "%s: cannot open\n", in_path); return 1; }
   if(fseek(f, 0, SEEK_END) != 0) { fclose(f); return 1; }
@@ -1299,11 +1343,13 @@ static int cmd_run(const char* in_path, int repeat, int gc_stats, uint64_t fuel,
   clock_t t1 = clock();
 
   if(st == JELLO_EXEC_OK) {
-    print_numeric_result(&result, stdout);
+    if(host_print) print_host_result(&result, stdout);
+    else print_numeric_result(&result, stdout);
   } else {
-    printf("TRAP code=%s\n", trap_code_name(jello_vm_last_trap_code(vm)));
+    if(host_print) fprintf(stderr, "TRAP code=%s\n", trap_code_name(jello_vm_last_trap_code(vm)));
+    else printf("TRAP code=%s\n", trap_code_name(jello_vm_last_trap_code(vm)));
     if(trap_pc) {
-      printf("TRAP_PC func_index=%u pc=%u\n", jello_vm_last_trap_func_index(vm), jello_vm_last_trap_pc(vm));
+      fprintf(host_print ? stderr : stdout, "TRAP_PC func_index=%u pc=%u\n", jello_vm_last_trap_func_index(vm), jello_vm_last_trap_pc(vm));
     }
   }
   if(repeat > 1) {
@@ -1321,6 +1367,7 @@ static int cmd_run(const char* in_path, int repeat, int gc_stats, uint64_t fuel,
 
   jello_vm_destroy(vm);
   jello_bc_free(m);
+  if(host_print && st != JELLO_EXEC_OK) return 1;
   return 0;
 }
 
@@ -1575,7 +1622,7 @@ static char* read_whole_file(const char* path, size_t* out_len) {
 static void usage(const char* prog) {
   fprintf(stderr, "usage: %s asm <in.jlo.txt> -o <out.jlo>\n", prog);
   fprintf(stderr, "       %s disasm <in.jlo> [-o <out.jlo.txt>]\n", prog);
-  fprintf(stderr, "       %s run <in.jlo> [--repeat N] [--gc-stats] [--fuel N] [--max-bytes-len N] [--trap-pc]\n", prog);
+  fprintf(stderr, "       %s run <in.jlo> [--print] [--repeat N] [--gc-stats] [--fuel N] [--max-bytes-len N] [--trap-pc]\n", prog);
   fprintf(stderr, "       %s dumpir <in.jlo> [--func N]\n", prog);
 }
 
@@ -1641,6 +1688,7 @@ int main(int argc, char** argv) {
   uint64_t fuel = 0;
   uint32_t max_bytes_len = 0;
   int trap_pc = 0;
+  int host_print = 0;
   for(int i = 3; i < argc; i++) {
     if(strcmp(argv[i], "-o") == 0 && i + 1 < argc) { out_path = argv[i + 1]; i++; }
     else if(strcmp(argv[i], "--repeat") == 0 && i + 1 < argc) { repeat = atoi(argv[i + 1]); i++; }
@@ -1649,6 +1697,7 @@ int main(int argc, char** argv) {
     else if(strcmp(argv[i], "--fuel") == 0 && i + 1 < argc) { fuel = strtoull(argv[i + 1], NULL, 10); i++; }
     else if(strcmp(argv[i], "--max-bytes-len") == 0 && i + 1 < argc) { max_bytes_len = (uint32_t)strtoul(argv[i + 1], NULL, 10); i++; }
     else if(strcmp(argv[i], "--trap-pc") == 0) { trap_pc = 1; }
+    else if(strcmp(argv[i], "--print") == 0) { host_print = 1; }
   }
 
   if(strcmp(subcmd, "asm") == 0) {
@@ -1659,7 +1708,7 @@ int main(int argc, char** argv) {
     return cmd_disasm(in_path, out_path);
   }
   if(strcmp(subcmd, "run") == 0) {
-    return cmd_run(in_path, repeat > 0 ? repeat : 1, gc_stats, fuel, max_bytes_len, trap_pc);
+    return cmd_run(in_path, repeat > 0 ? repeat : 1, gc_stats, fuel, max_bytes_len, trap_pc, host_print);
   }
   if(strcmp(subcmd, "dumpir") == 0) {
     return cmd_dumpir(in_path, func_filter, has_func_filter);
