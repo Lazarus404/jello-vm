@@ -63,15 +63,7 @@ op_result op_const_atom(exec_ctx* ctx, const jello_insn* ins) {
   return OP_CONTINUE;
 }
 
-
-/* -- Function values (Chapter 16 self-host) -----------------------------------
- * CONST_FUN and CLOSURE both produce a jello_function heap object (jello.h's
- * own "Function" comment) -- CONST_FUN is exactly CLOSURE with ncaps == 0,
- * never a bare func_index stashed directly in the register the way this
- * opcode's own pre-Chapter-16 placeholder body did. That uniformity is what
- * lets CALLR/TAILCALLR treat every Function-kind value identically, whether
- * or not it actually closes over anything.
- */
+/* -- Function values -- */
 op_result op_const_fun(exec_ctx* ctx, const jello_insn* ins) {
   jello_function* fn = jello_function_new(ctx->vm, ins->imm, 0);
   call_frame* fr = current_frame(ctx);
@@ -93,31 +85,21 @@ op_result op_closure(exec_ctx* ctx, const jello_insn* ins) {
   return OP_CONTINUE;
 }
 
-/* -- indirect/tail calls through a Function value (Chapter 16 self-host) -----
- * CALLR/TAILCALLR's own `b` register is the *first slot of a contiguous
- * window*: the Function value itself, immediately followed by its actual
- * call arguments -- jello-refined's own emit.jello em_phys CALL-family
- * override (b = ra_map(args[0]), c = Array.len(args), where args[0] is the
- * callee and args[1..] are its real arguments) is the live producer this
- * contract matches (JELLO_COMPILER_OPTIMISATION.md's own Chapter 16
- * findings on the encoding this VM must consume).
- */
+/* -- indirect/tail calls through a Function value -- */
 op_result op_callr(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
-  void* p = vm_load_ptr(&fr->rf, ins->b);
+  jello_value v = vm_load_val(&fr->rf, ins->b);
+  if(jello_is_null(v) || !jello_is_ptr(v)) {
+    ctx->vm->trap_code = jello_is_null(v) ? JELLO_TRAP_NULL_DEREF : JELLO_TRAP_TYPE_MISMATCH;
+    return OP_TRAP;
+  }
+  void* p = jello_as_ptr(v);
   if(!p) { ctx->vm->trap_code = JELLO_TRAP_NULL_DEREF; return OP_TRAP; }
   jello_function* fn = (jello_function*)p;
-  /* Matches the host jellovm's own (pre-existing, authoritative --
-   * jellovm/src/vm/ops/ops_call.c) CALLR contract: the callee register
-   * (b) and the argument-window base are two genuinely separate fields,
-   * not one combined "callee+args" window starting at b. c is the real
-   * argument count outright; imm names where that count of consecutive
-   * registers actually starts. Chapter 16 self-host bug: this opcode's
-   * own first implementation folded the callee into the same window as
-   * its arguments (b, b+1, b+2, ...), which jello-refined's own compiler
-   * emission (emit.jello) was written to match -- correct only relative
-   * to itself, and silently incompatible with the host jellovm every
-   * Stage 1/Stage 2 bootstrap run actually depends on. */
+  if(fn->h.kind != (uint8_t)JELLO_OBJ_FUNCTION) {
+    ctx->vm->trap_code = JELLO_TRAP_TYPE_MISMATCH;
+    return OP_TRAP;
+  }
   uint32_t arg_count = (uint32_t)ins->c;
   uint32_t arg_first = (uint32_t)ins->imm;
   if(!vm_push_frame(ctx->vm, ctx->m, fn->func_index, ins->a, arg_first, arg_count, 1)) return OP_TRAP;
@@ -125,18 +107,6 @@ op_result op_callr(exec_ctx* ctx, const jello_insn* ins) {
   return OP_CONTINUE;
 }
 
-/* TAILCALL/TAILCALLR replace the current frame outright rather than
- * growing the frame stack -- required for a self-tail-recursive Jello
- * function (pervasive throughout lower's own recursive AST walk modules)
- * not to blow JIT_FRAME_STACK_MAX the way an ordinary CALL-per-recursion
- * would. Arguments (and, for TAILCALLR, captures) are copied out to a flat
- * buffer *before* the current frame is popped, since both live in
- * registers that frame owns and would otherwise vanish under it -- see
- * vm_push_frame_raw's own header comment (vm_internal.h). emit.jello
- * appends a synthetic RET immediately after every TAILCALL/TAILCALLR
- * (Chapter 16 audit finding); that RET is unreachable dead code once this
- * opcode has genuinely replaced the frame, not a real fallback path this
- * handler needs to cooperate with. */
 op_result op_tailcall(exec_ctx* ctx, const jello_insn* ins) {
   jello_vm* vm = ctx->vm;
   call_frame* fr = &vm->call_frames[vm->call_frames_len - 1u];
@@ -156,10 +126,18 @@ op_result op_tailcall(exec_ctx* ctx, const jello_insn* ins) {
 op_result op_tailcallr(exec_ctx* ctx, const jello_insn* ins) {
   jello_vm* vm = ctx->vm;
   call_frame* fr = &vm->call_frames[vm->call_frames_len - 1u];
-  void* p = vm_load_ptr(&fr->rf, ins->b);
+  jello_value v = vm_load_val(&fr->rf, ins->b);
+  if(jello_is_null(v) || !jello_is_ptr(v)) {
+    vm->trap_code = jello_is_null(v) ? JELLO_TRAP_NULL_DEREF : JELLO_TRAP_TYPE_MISMATCH;
+    return OP_TRAP;
+  }
+  void* p = jello_as_ptr(v);
   if(!p) { vm->trap_code = JELLO_TRAP_NULL_DEREF; return OP_TRAP; }
   jello_function* fn = (jello_function*)p;
-  /* Same contract fix as op_callr's own -- see its comment. */
+  if(fn->h.kind != (uint8_t)JELLO_OBJ_FUNCTION) {
+    vm->trap_code = JELLO_TRAP_TYPE_MISMATCH;
+    return OP_TRAP;
+  }
   uint32_t arg_count = (uint32_t)ins->c;
   uint32_t arg_first = (uint32_t)ins->imm;
   uint64_t argbuf[256];
@@ -178,14 +156,7 @@ op_result op_tailcallr(exec_ctx* ctx, const jello_insn* ins) {
   return OP_CONTINUE;
 }
 
-/* -- SPILL_PUSH/SPILL_POP (Chapter 16 self-host) ------------------------------
- * Overflow storage for functions whose own virtual-register count exceeds
- * the 256-physical-register file (call_frame's own spill_slots comment,
- * vm_internal.h). Always boxed through the same vm_box_from_typed/
- * vm_store_from_boxed pair TO_DYN/FROM_DYN_* already use -- correct
- * regardless of which physical register jello-refined's own lsra.jello
- * happens to have picked as the scratch slot these route through.
- */
+/* -- SPILL_PUSH/SPILL_POP -- */
 static int spill_ensure_cap(call_frame* fr, uint32_t slot) {
   if(slot < fr->spill_cap) return 1;
   uint32_t new_cap = fr->spill_cap ? fr->spill_cap * 2u : 8u;
