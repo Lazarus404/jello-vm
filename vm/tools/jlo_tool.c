@@ -1346,10 +1346,15 @@ static int cmd_run(const char* in_path, int repeat, int gc_stats, uint64_t fuel,
     if(host_print) print_host_result(&result, stdout);
     else print_numeric_result(&result, stdout);
   } else {
-    if(host_print) fprintf(stderr, "TRAP code=%s\n", trap_code_name(jello_vm_last_trap_code(vm)));
-    else printf("TRAP code=%s\n", trap_code_name(jello_vm_last_trap_code(vm)));
-    if(trap_pc) {
-      fprintf(host_print ? stderr : stdout, "TRAP_PC func_index=%u pc=%u\n", jello_vm_last_trap_func_index(vm), jello_vm_last_trap_pc(vm));
+    if(host_print) {
+      fprintf(stderr, "TRAP code=%s\n", trap_code_name(jello_vm_last_trap_code(vm)));
+      fprintf(stderr, "TRAP_PC func_index=%u pc=%u\n",
+              jello_vm_last_trap_func_index(vm), jello_vm_last_trap_pc(vm));
+    } else {
+      printf("TRAP code=%s\n", trap_code_name(jello_vm_last_trap_code(vm)));
+      if(trap_pc) {
+        printf("TRAP_PC func_index=%u pc=%u\n", jello_vm_last_trap_func_index(vm), jello_vm_last_trap_pc(vm));
+      }
     }
   }
   if(repeat > 1) {
@@ -1622,7 +1627,7 @@ static char* read_whole_file(const char* path, size_t* out_len) {
 static void usage(const char* prog) {
   fprintf(stderr, "usage: %s asm <in.jlo.txt> -o <out.jlo>\n", prog);
   fprintf(stderr, "       %s disasm <in.jlo> [-o <out.jlo.txt>]\n", prog);
-  fprintf(stderr, "       %s run <in.jlo> [--print] [--repeat N] [--gc-stats] [--fuel N] [--max-bytes-len N] [--trap-pc]\n", prog);
+  fprintf(stderr, "       %s run [--print] <in.jlo> [--print] [--repeat N] [--gc-stats] [--fuel N] [--max-bytes-len N] [--trap-pc]\n", prog);
   fprintf(stderr, "       %s dumpir <in.jlo> [--func N]\n", prog);
 }
 
@@ -1676,10 +1681,10 @@ static int cmd_disasm(const char* in_path, const char* out_path) {
 }
 
 int main(int argc, char** argv) {
-  if(argc < 3) { usage(argv[0]); return 1; }
+  if(argc < 2) { usage(argv[0]); return 1; }
 
   const char* subcmd = argv[1];
-  const char* in_path = argv[2];
+  const char* in_path = NULL;
   const char* out_path = NULL;
   int repeat = 1;
   int gc_stats = 0;
@@ -1689,7 +1694,7 @@ int main(int argc, char** argv) {
   uint32_t max_bytes_len = 0;
   int trap_pc = 0;
   int host_print = 0;
-  for(int i = 3; i < argc; i++) {
+  for(int i = 2; i < argc; i++) {
     if(strcmp(argv[i], "-o") == 0 && i + 1 < argc) { out_path = argv[i + 1]; i++; }
     else if(strcmp(argv[i], "--repeat") == 0 && i + 1 < argc) { repeat = atoi(argv[i + 1]); i++; }
     else if(strcmp(argv[i], "--gc-stats") == 0) { gc_stats = 1; }
@@ -1698,7 +1703,10 @@ int main(int argc, char** argv) {
     else if(strcmp(argv[i], "--max-bytes-len") == 0 && i + 1 < argc) { max_bytes_len = (uint32_t)strtoul(argv[i + 1], NULL, 10); i++; }
     else if(strcmp(argv[i], "--trap-pc") == 0) { trap_pc = 1; }
     else if(strcmp(argv[i], "--print") == 0) { host_print = 1; }
+    else if(!in_path) { in_path = argv[i]; }
+    else { usage(argv[0]); return 1; }
   }
+  if(!in_path) { usage(argv[0]); return 1; }
 
   if(strcmp(subcmd, "asm") == 0) {
     if(!out_path) { usage(argv[0]); return 1; }
