@@ -806,7 +806,7 @@ static void emit_prologue(jit_exec_buf* buf, size_t* out_body_off, int any_armed
     emit_sp_adjust(buf, 0, 16);
     emit_str_x_sp(buf, (unsigned)JIT_REG_SURVIVE, 0);
 #ifndef NDEBUG
-    emit_mov_x_rr(buf, A64_X9, A64_SP);
+    emit_mov_x_rr(buf, A64_X0, A64_SP);
     emit_call_fn(buf, (void*)jit_debug_assert_rsp_aligned16);
 #endif
   }
