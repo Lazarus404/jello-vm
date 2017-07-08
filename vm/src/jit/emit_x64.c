@@ -2528,14 +2528,12 @@ static int emit_insn(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
       break;
     case JIR_MOV: {
       jello_type_kind dk = vm_reg_kind(ctx->m, ctx->f, ins->a);
-      if(dk == JELLO_T_I64 || dk == JELLO_T_F64) {
-        int s = jit_reg_get_gpr(ctx->ra, ins->b, 1);
-        int d = jit_reg_alloc_gpr(ctx->ra, ins->a, 0);
+      int s = jit_reg_get_gpr(ctx->ra, ins->b, 1);
+      int d = jit_reg_alloc_gpr(ctx->ra, ins->a, 0);
+      if(jello_slot_size(dk) == 8u) {
         emit_mov_r64_r64(ctx->buf, (unsigned)d, (unsigned)s);
         jit_reg_store_home_gpr64(ctx->ra, ins->a, d);
       } else {
-        int s = jit_reg_get_gpr(ctx->ra, ins->b, 1);
-        int d = jit_reg_alloc_gpr(ctx->ra, ins->a, 0);
         emit_mov_r32_r32(ctx->buf, (unsigned)d, (unsigned)s);
         jit_reg_store_home_gpr32(ctx->ra, ins->a, d);
       }

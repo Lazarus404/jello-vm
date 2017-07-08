@@ -1,0 +1,12 @@
+.jlo module version=1 features=[] entry=0
+types: [I32, STRUCT(0)]
+sigs: []
+atoms: [x]
+struct_sigs: [{ nfields=1 named=1 mutable=1 fields=[I32] names=[x] }]
+func[0] nregs=4 reg_types=[STRUCT, I32, STRUCT, I32]
+  0: STRUCT_NEW a=r0 b=r0 c=r0 imm=0
+  1: CONST_I32 a=r1 b=r0 c=r0 imm=77
+  2: STRUCT_SET a=r1 b=r0 c=r0 imm=0
+  3: MOV a=r2 b=r0 c=r0 imm=0
+  4: STRUCT_GET a=r3 b=r2 c=r0 imm=0
+  5: RET a=r3 b=r0 c=r0 imm=0
