@@ -229,6 +229,7 @@ typedef enum jello_obj_kind {
   JELLO_OBJ_BOX_F16 = 7,
   JELLO_OBJ_ARRAY = 8,
   JELLO_OBJ_FUNCTION = 9,
+  JELLO_OBJ_LIST = 10,
 } jello_obj_kind;
 
 typedef struct jello_obj_header {
@@ -303,6 +304,15 @@ typedef struct jello_array {
 
 jello_array* jello_array_new(jello_vm* vm, const jello_bc_module* m, uint32_t array_type_id, uint32_t length);
 void jello_array_resize(jello_vm* vm, const jello_bc_module* m, jello_array* a, uint32_t new_length);
+
+/* -- List -- */
+typedef struct jello_list {
+  jello_obj_header h;
+  jello_value head;
+  struct jello_list* tail;
+} jello_list;
+
+jello_list* jello_list_cons(jello_vm* vm, uint32_t type_id, jello_value head, jello_list* tail);
 
 /* -- Function -- */
 typedef struct jello_function {

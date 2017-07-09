@@ -212,12 +212,19 @@ static void trace_object(mark_stack* ms, const jello_bc_module* m, void* p) {
         for(uint32_t i = 0; i < a->length; i++) {
           if(jello_is_ptr(vals[i])) mark_ptr(ms, jello_as_ptr(vals[i]));
         }
-      } else if(ek == JELLO_T_BYTES || ek == JELLO_T_STRUCT || ek == JELLO_T_OBJECT || ek == JELLO_T_ARRAY) {
+      } else if(ek == JELLO_T_BYTES || ek == JELLO_T_STRUCT || ek == JELLO_T_OBJECT || ek == JELLO_T_ARRAY ||
+                 ek == JELLO_T_LIST) {
         void* const* ptrs = (void* const*)a->data;
         for(uint32_t i = 0; i < a->length; i++) {
           mark_ptr(ms, ptrs[i]);
         }
       }
+      return;
+    }
+    case JELLO_OBJ_LIST: {
+      const jello_list* l = (const jello_list*)p;
+      if(jello_is_ptr(l->head)) mark_ptr(ms, jello_as_ptr(l->head));
+      if(l->tail) mark_ptr(ms, l->tail);
       return;
     }
     case JELLO_OBJ_FUNCTION: {
@@ -230,7 +237,7 @@ static void trace_object(mark_stack* ms, const jello_bc_module* m, void* p) {
           memcpy(&v, &fn->captures[i], sizeof(jello_value));
           if(jello_is_ptr(v)) mark_ptr(ms, jello_as_ptr(v));
         } else if(ck == JELLO_T_BYTES || ck == JELLO_T_STRUCT || ck == JELLO_T_OBJECT ||
-                  ck == JELLO_T_ARRAY || ck == JELLO_T_FUNCTION) {
+                  ck == JELLO_T_ARRAY || ck == JELLO_T_FUNCTION || ck == JELLO_T_LIST) {
           void* fp;
           memcpy(&fp, &fn->captures[i], sizeof(void*));
           mark_ptr(ms, fp);
@@ -275,7 +282,8 @@ static void scan_typed_frames(jello_vm* vm, mark_stack* ms) {
     reg_frame* rf = &fr->rf;
     for(uint32_t r = 0; r < f->nregs; r++) {
       jello_type_kind k = vm_reg_kind_fast(rf, r);
-      if(k == JELLO_T_BYTES || k == JELLO_T_STRUCT || k == JELLO_T_OBJECT || k == JELLO_T_ARRAY || k == JELLO_T_FUNCTION) {
+      if(k == JELLO_T_BYTES || k == JELLO_T_STRUCT || k == JELLO_T_OBJECT || k == JELLO_T_ARRAY || k == JELLO_T_FUNCTION ||
+         k == JELLO_T_LIST) {
         void* p = NULL;
         memcpy(&p, vm_reg_ptr(rf, r), sizeof(void*));
         mark_ptr(ms, p);
@@ -349,7 +357,7 @@ void jello_gc_collect(jello_vm* vm) {
 jello_bytes* jello_bytes_new(jello_vm* vm, uint32_t length) {
   jello_bytes* b = (jello_bytes*)jello_gc_alloc(vm, sizeof(jello_bytes) + (size_t)length);
   b->h.kind = (uint8_t)JELLO_OBJ_BYTES;
-  b->h.type_id = 0; /* Bytes is not a parameterised kind (Chapter 4 Sec 2.2); type_id unused */
+  b->h.type_id = 0; /* Bytes is not a parameterised kind */
   b->length = length;
   return b;
 }

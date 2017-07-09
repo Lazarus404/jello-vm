@@ -436,6 +436,13 @@ op_result op_array_set(exec_ctx* ctx, const jello_insn* ins);
 op_result op_array_resize(exec_ctx* ctx, const jello_insn* ins);
 op_result op_array_concat2(exec_ctx* ctx, const jello_insn* ins);
 
+/* -- List opcode handlers (ops_list.c) -- */
+op_result op_list_nil(exec_ctx* ctx, const jello_insn* ins);
+op_result op_list_cons(exec_ctx* ctx, const jello_insn* ins);
+op_result op_list_head(exec_ctx* ctx, const jello_insn* ins);
+op_result op_list_tail(exec_ctx* ctx, const jello_insn* ins);
+op_result op_list_is_nil(exec_ctx* ctx, const jello_insn* ins);
+
 /* -- Exception-handling opcode handlers (ops_exc.c) -- */
 op_result op_try(exec_ctx* ctx, const jello_insn* ins);
 op_result op_endtry(exec_ctx* ctx, const jello_insn* ins);

@@ -261,3 +261,14 @@ add_test(NAME chapter18_capstone
 set_tests_properties(chapter18_capstone PROPERTIES
   ENVIRONMENT "JELLO_JDLL_PATH=$<TARGET_FILE_DIR:test_native_jdll>:$<TARGET_FILE_DIR:jello_std_jdll>;${JELLO_JDLL_ASAN_OPTIONS}"
   TIMEOUT 120)
+
+add_executable(list_tests csrc/list_tests.c)
+target_link_libraries(list_tests PRIVATE jello_vm)
+jello_enable_warnings(list_tests)
+if(JELLO_WARNINGS_AS_ERRORS)
+  target_compile_options(list_tests PRIVATE -Werror)
+endif()
+
+add_test(NAME containers_lists
+  COMMAND list_tests
+  WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")

@@ -763,10 +763,47 @@ jello_bc_result jello_bc_validate_insn(
       return ok();
 
     case JOP_LIST_NIL:
+      if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "list_nil reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_LIST) return err(JELLO_BC_BAD_FORMAT, "list_nil dst must be List", 0);
+      return ok();
+
     case JOP_LIST_CONS:
+      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) {
+        return err(JELLO_BC_BAD_FORMAT, "list_cons reg out of range", 0);
+      }
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_LIST) return err(JELLO_BC_BAD_FORMAT, "list_cons dst must be List", 0);
+      if(reg_kind(m, reg_types, ins->c) != JELLO_T_LIST) return err(JELLO_BC_BAD_FORMAT, "list_cons tail must be List", 0);
+      if(reg_types[ins->a] != reg_types[ins->c]) {
+        return err(JELLO_BC_BAD_FORMAT, "list_cons list type mismatch", 0);
+      }
+      if(m->types[reg_types[ins->a]].as.unary.elem != reg_types[ins->b]) {
+        return err(JELLO_BC_BAD_FORMAT, "list_cons head type mismatch", 0);
+      }
+      return ok();
+
     case JOP_LIST_HEAD:
+      if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "list_head reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->b) != JELLO_T_LIST) return err(JELLO_BC_BAD_FORMAT, "list_head src must be List", 0);
+      if(m->types[reg_types[ins->b]].as.unary.elem != reg_types[ins->a]) {
+        return err(JELLO_BC_BAD_FORMAT, "list_head dst type mismatch", 0);
+      }
+      return ok();
+
     case JOP_LIST_TAIL:
+      if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "list_tail reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_LIST) return err(JELLO_BC_BAD_FORMAT, "list_tail dst must be List", 0);
+      if(reg_kind(m, reg_types, ins->b) != JELLO_T_LIST) return err(JELLO_BC_BAD_FORMAT, "list_tail src must be List", 0);
+      if(reg_types[ins->a] != reg_types[ins->b]) {
+        return err(JELLO_BC_BAD_FORMAT, "list_tail list type mismatch", 0);
+      }
+      return ok();
+
     case JOP_LIST_IS_NIL:
+      if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "list_is_nil reg out of range", 0);
+      if(rk_ne(m, reg_types, ins->a, JELLO_T_BOOL)) return err(JELLO_BC_BAD_FORMAT, "list_is_nil dst must be Bool", 0);
+      if(reg_kind(m, reg_types, ins->b) != JELLO_T_LIST) return err(JELLO_BC_BAD_FORMAT, "list_is_nil src must be List", 0);
+      return ok();
+
     case JOP_ENUM_NEW:
     case JOP_ENUM_TAG:
     case JOP_ENUM_GET:
