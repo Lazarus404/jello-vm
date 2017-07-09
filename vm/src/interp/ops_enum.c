@@ -45,15 +45,22 @@ op_result op_enum_new(exec_ctx* ctx, const jello_insn* ins) {
     e = jello_enum_new(vm, type_id, tag, 0, NULL);
   } else {
     jello_value* fields = (jello_value*)alloca((size_t)nfields * sizeof(jello_value));
+    uint32_t nrooted = 0;
     for(uint32_t i = 0; i < nfields; i++) {
       uint32_t r = (uint32_t)ins->b + i;
       if(r >= f->nregs) {
+        if(nrooted) jello_gc_pop_roots(vm, nrooted);
         ctx->vm->trap_code = JELLO_TRAP_TYPE_MISMATCH;
         return OP_TRAP;
       }
       fields[i] = vm_box_from_typed(vm, m, f, &fr->rf, r);
+      if(jello_is_ptr(fields[i]) && jello_as_ptr(fields[i])) {
+        jello_gc_push_root(vm, jello_as_ptr(fields[i]));
+        nrooted++;
+      }
     }
     e = jello_enum_new(vm, type_id, tag, nfields, fields);
+    if(nrooted) jello_gc_pop_roots(vm, nrooted);
   }
   vm_store_ptr(&fr->rf, ins->a, e);
   return OP_CONTINUE;
