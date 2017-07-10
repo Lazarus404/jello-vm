@@ -4,16 +4,21 @@
 #include <jello/internal/jdll_internal.h>
 
 #include <dlfcn.h>
+#include <jello/internal/platform.h>
+
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 /* -- .jdll loading -- */
 
 struct jello_jdll_handle {
   void* dl;
   const jello_jdll_manifest* manifest;
+  char* path;
 };
 
 #define JELLO_JDLL_SONAME_FMT "%s.jdll"
@@ -65,6 +70,14 @@ static void* resolve_and_open(const char* library_name) {
   free(copy);
   return NULL;
 }
+
+typedef struct search {
+  char soname[256];
+  char path[PATH_MAX];
+  void* dl;
+  char tried[4096];
+  char unopened[sizeof "cannot open : " + PATH_MAX + 256];
+} search;
 
 jello_jdll_handle* jello_jdll_load(const char* library_name) {
   if(!library_name || !library_name[0]) return NULL;

@@ -2,6 +2,9 @@
 // Copyright (c) Jahred Love. All rights reserved.
 
 #include <jello/internal.h>
+#include <jello/internal/proc_internal.h>
+#include <jello/jdll.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -29,6 +32,16 @@ static int size_class_index(uint32_t total) {
 static void destroy_object(void* p);
 
 #define GC_INITIAL_THRESHOLD (1024u * 1024u) /* 1MB: a round, generous first-collection budget */
+
+typedef struct shared_head {
+  jdl_refs refs;
+  jello_gc_hdr hdr;
+} shared_head;
+
+/** Live bytes before the first collection, and the least the threshold ever falls to. */
+#define GC_MIN_THRESHOLD (4u * 1024u * 1024u)
+/** The same for a process's space, smaller, as there may be many. */
+#define GC_PROCESS_MIN_THRESHOLD (64u * 1024u)
 
 void jello_gc_init(jello_vm* vm) {
   if(!vm || !vm->heap) return;

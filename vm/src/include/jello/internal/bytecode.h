@@ -234,7 +234,12 @@ typedef struct jello_op_info {
   OP(JOP_BYTES_WRITE_I64_BE, "BYTES_WRITE_I64_BE", REG, T_I64, REG, T_BYTES, REG, T_I32, IMM_NONE, JELLO_OPF_CAN_TRAP, op_bytes_write_i64_be) \
   OP(JOP_BYTES_WRITE_F64_LE, "BYTES_WRITE_F64_LE", REG, T_F64, REG, T_BYTES, REG, T_I32, IMM_NONE, JELLO_OPF_CAN_TRAP, op_bytes_write_f64_le) \
   OP(JOP_BYTES_WRITE_F64_BE, "BYTES_WRITE_F64_BE", REG, T_F64, REG, T_BYTES, REG, T_I32, IMM_NONE, JELLO_OPF_CAN_TRAP, op_bytes_write_f64_be) \
-  OP(JOP_BYTES_BLIT, "BYTES_BLIT", REG, T_BYTES, REG, T_BYTES, REG, T_I32, IMM_NONE, JELLO_OPF_CAN_TRAP, op_bytes_blit)
+  OP(JOP_BYTES_BLIT, "BYTES_BLIT", REG, T_BYTES, REG, T_BYTES, REG, T_I32, IMM_NONE,               \
+     JELLO_OPF_CAN_TRAP, op_bytes_blit)                                                            \
+  OP(JOP_GLOBAL_GET, "GLOBAL_GET", REG, POLY, UNUSED, 0, UNUSED, 0, IMM_POOL, JELLO_OPF_NONE,      \
+     op_global_get)                                                                                \
+  OP(JOP_GLOBAL_SET, "GLOBAL_SET", REG, POLY, UNUSED, 0, UNUSED, 0, IMM_POOL, JELLO_OPF_NONE,      \
+     op_global_set)                                                                                \
 
 #define OP(id, name, ar, ak, br, bk, cr, ck, ir, fl, h) id,
 typedef enum jello_op {
@@ -242,7 +247,7 @@ typedef enum jello_op {
 } jello_op;
 #undef OP
 
-#define JOP_COUNT (JOP_BYTES_BLIT + 1)
+#define JOP_COUNT (JOP_GLOBAL_SET + 1)
 
 extern const jello_op_info jello_op_table[JOP_COUNT];
 

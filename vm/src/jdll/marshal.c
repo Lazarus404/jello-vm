@@ -3,6 +3,8 @@
 
 #include <jello/internal/jdll_internal.h>
 
+#include <stdio.h>
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -34,6 +36,16 @@ uint32_t jdl_arg_bytes_len(jdlo_ctx* c, int index) {
   return b ? b->length : 0u;
 }
 jello_value jdl_arg_value(jdlo_ctx* c, int index) { return vm_load_val(c->caller_rf, arg_reg(c, index)); }
+
+void jdl_release_ret(jdlo_ctx* c) {
+  free(c->ret_bytes);
+  c->ret_bytes = NULL;
+  c->ret_bytes_len = 0;
+  if(c->handle_class && c->handle_class->finalize) c->handle_class->finalize(c->handle_payload);
+  c->handle_class = NULL;
+  c->handle_payload = NULL;
+  c->handle_bytes = 0;
+}
 
 void jdl_return_i8(jdlo_ctx* c, int32_t v) { c->ret.i32 = v; c->ret_kind_given = JELLO_T_I8; c->returned = 1; }
 void jdl_return_i16(jdlo_ctx* c, int32_t v) { c->ret.i32 = v; c->ret_kind_given = JELLO_T_I16; c->returned = 1; }
@@ -74,3 +86,5 @@ void jdl_fail(jdlo_ctx* c, const char* msg) {
   c->failed = 1;
   c->fail_msg = msg;
 }
+
+#define HOST_MEMBER(f) .f = f,

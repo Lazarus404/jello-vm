@@ -230,6 +230,7 @@ typedef enum jello_obj_kind {
   JELLO_OBJ_ARRAY = 8,
   JELLO_OBJ_FUNCTION = 9,
   JELLO_OBJ_LIST = 10,
+  JELLO_OBJ_HANDLE = 12, /**< A native library's object, reachable only through Dynamic. */
 } jello_obj_kind;
 
 typedef struct jello_obj_header {
@@ -288,7 +289,9 @@ typedef struct jello_object {
   struct jello_object* proto;
   uint32_t cap;
   uint32_t len;
-  uint32_t tombstones;
+  uint32_t tombstones; /**< Removed slots; they count towards the load factor so a probe always
+                        * ends at an empty slot. */
+  uint32_t sealed;     /**< Sealed slots (jello_object_seal). */
   uint32_t* keys;
   jello_value* vals;
   uint8_t* states;
@@ -328,9 +331,11 @@ jello_object* jello_object_new(jello_vm* vm, uint32_t type_id);
 int jello_object_has(const jello_object* o, uint32_t atom_id);
 jello_value jello_object_get(const jello_object* o, uint32_t atom_id);
 void jello_object_set(jello_object* o, uint32_t atom_id, jello_value v);
+void jello_object_seal(jello_object* o, uint32_t atom_id, jello_value v);
 int jello_object_remove(jello_object* o, uint32_t atom_id);
 void jello_object_clear(jello_object* o);
 jello_object* jello_object_copy(jello_vm* vm, const jello_object* src);
+uint32_t jello_object_keys(const jello_object* o, int skip_proto, uint32_t* out);
 
 /* -- blocking -- */
 void jello_vm_blocking(jello_vm* vm, int is_blocking);

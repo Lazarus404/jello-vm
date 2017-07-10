@@ -132,6 +132,20 @@ jello_value jello_object_get(const jello_object* o, uint32_t atom_id) {
   return o->vals[i];
 }
 
+static void object_put(jello_object* o, uint32_t atom_id, jello_value v, uint8_t state) {
+  ensure_cap(o);
+  int found = 0;
+  uint32_t i = find_slot(o, atom_id, &found);
+  if(!found) {
+    o->keys[i] = atom_id;
+    o->len++;
+  }
+  o->sealed += (uint32_t)(state == JELLO_OBJ_SLOT_SEALED) -
+               (uint32_t)(found && o->states[i] == JELLO_OBJ_SLOT_SEALED);
+  o->states[i] = state;
+  o->vals[i] = v;
+}
+
 void jello_object_set(jello_object* o, uint32_t atom_id, jello_value v) {
   ensure_cap(o);
   int found = 0;
@@ -142,6 +156,10 @@ void jello_object_set(jello_object* o, uint32_t atom_id, jello_value v) {
     o->len++;
   }
   o->vals[i] = v;
+}
+
+void jello_object_seal(jello_object* o, uint32_t atom_id, jello_value v) {
+  object_put(o, atom_id, v, JELLO_OBJ_SLOT_SEALED);
 }
 
 int jello_object_remove(jello_object* o, uint32_t atom_id) {
@@ -169,4 +187,20 @@ jello_object* jello_object_copy(jello_vm* vm, const jello_object* src) {
   }
   dst->proto = src->proto;
   return dst;
+}
+
+static int atom_order(const void* a, const void* b) {
+  uint32_t x = *(const uint32_t*)a, y = *(const uint32_t*)b;
+  return (x > y) - (x < y);
+}
+
+uint32_t jello_object_keys(const jello_object* o, int skip_proto, uint32_t* out) {
+  uint32_t n = 0;
+  for(uint32_t i = 0; i < o->cap; i++) {
+    if(!vm_obj_slot_live(o->states[i])) continue;
+    if(skip_proto && o->keys[i] == 0u) continue;
+    out[n++] = o->keys[i];
+  }
+  qsort(out, n, sizeof *out, atom_order);
+  return n;
 }

@@ -2,6 +2,9 @@
 // Copyright (c) Jahred Love. All rights reserved.
 
 #include <jello/internal/jdll_internal.h>
+#include <jello/internal/proc_internal.h>
+
+#include <stdio.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -18,15 +21,7 @@ op_result op_call_native(exec_ctx* ctx, const jello_insn* ins) {
   }
 
   call_frame* fr = &vm->call_frames[vm->call_frames_len - 1u];
-  jdlo_ctx jctx;
-  jctx.vm = vm;
-  jctx.m = m;
-  jctx.caller_rf = &fr->rf;
-  jctx.ins = ins;
-  jctx.sig = sig;
-  jctx.returned = 0;
-  jctx.failed = 0;
-  jctx.fail_msg = NULL;
+  jdlo_ctx jctx = {.vm = vm, .m = m, .caller_rf = &fr->rf, .ins = ins, .sig = sig};
 
   vm_go_quiescent(vm);
   exp->fn(&jctx);

@@ -23,6 +23,7 @@ typedef struct jello_jit_func_code {
   uint32_t* loop_anchor_pcs;
   size_t* loop_anchor_offs;
   uint32_t nloop_anchors;
+  uint8_t tried;          /**< Compiled or declined; set once. */
 } jello_jit_func_code;
 
 typedef struct jello_jit_call_patch {

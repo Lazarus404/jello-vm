@@ -43,6 +43,8 @@ struct jello_bc_module {
   const uint32_t* const_bytes_len;
   const uint32_t* const_bytes_off;
   const uint8_t* const_bytes_data;
+  const jello_type_id* global_types;
+  uint64_t* globals;
   uint32_t nfuncs;
   const jello_bc_function* funcs;
   uint32_t entry;
@@ -59,7 +61,10 @@ enum {
   JELLO_OBJ_SLOT_EMPTY = 0,
   JELLO_OBJ_SLOT_OCCUPIED = 1,
   JELLO_OBJ_SLOT_TOMB = 2,
+  JELLO_OBJ_SLOT_SEALED = 5, /**< Holds a method that may not change (jello_object_seal). */
 };
+
+static inline int vm_obj_slot_live(uint8_t state) { return state & 1u; }
 #define JELLO_OBJECT_INIT_CAP 8u
 #define JELLO_OBJECT_LOAD_NUM 10u
 #define JELLO_OBJECT_LOAD_DEN 7u
@@ -95,6 +100,13 @@ static inline int vm_reg_is_wide(const reg_frame* rf, uint32_t r) {
   return rf->wide[r] != 0;
 }
 
+typedef struct jello_handle {
+  jello_obj_header h;
+  const struct jello_jdll_handle_class* cls;
+  void* payload;
+  uint32_t native_bytes;
+} jello_handle;
+
 #define JELLO_TRY_STACK_MAX 16u
 
 typedef struct try_scope {
@@ -116,6 +128,13 @@ typedef struct call_frame {
   uint32_t spill_cap;
 } call_frame;
 
+typedef struct frame_segment {
+  uint8_t* mem;
+  uint32_t bytes;              /**< Reserved. */
+  uint32_t limit;              /**< Committed. */
+  uint32_t top;                /**< In use. */
+} frame_segment;
+
 typedef struct frame_layout {
   const jello_bc_function* f; /* cache key */
   uint8_t* kind; /* fl->kind[r] == vm_reg_kind(m, f, r), precomputed once per function */
@@ -131,8 +150,23 @@ typedef struct jello_gc_hdr {
   uint8_t marked;
 } jello_gc_hdr;
 
+#define GC_IMMORTAL 2u
+#define GC_SHARED 3u
+
+#define VM_BYTES_SHARED_MIN 64u
+
 #define GC_NUM_SIZE_CLASSES 8
 #define GC_MAX_SIZE_CLASS_BYTES 4096u
+
+typedef struct jello_space {
+  jello_gc_hdr* objects; /**< Every live object, singly linked. */
+  jello_gc_hdr* free_classes[GC_NUM_SIZE_CLASSES];
+  uint64_t bytes_live;
+  uint64_t next_collect; /**< Allocation collects once bytes_live reaches this. */
+  uint32_t collections;
+  uint32_t finalized_handles;
+  double pause_ms; /**< Cumulative wall-clock time inside jello_gc_collect. */
+} jello_space;
 
 /* -- the shared heap -- */
 typedef struct jello_heap {
@@ -146,25 +180,39 @@ typedef struct jello_heap {
   uint32_t gc_roots_len;
   uint32_t gc_roots_cap;
   double gc_pause_ms; /* cumulative wall-clock time spent inside jello_gc_collect (Sec 2.10) */
+  jello_space space;
 
   /* -- stop-the-world -- */
   pthread_mutex_t alloc_lock;
   atomic_int stop_requested;
   pthread_mutex_t stw_lock;
   pthread_cond_t stw_resume_cv;
+  _Atomic uint32_t collections; /**< Of every space on it. */
 
   struct jello_vm** threads;
   uint32_t threads_len;
   uint32_t threads_cap;
   uint32_t refcount; /* freed once the last jello_vm registered against this heap is destroyed */
+
+  int32_t program_argc; /**< From jello_vm_set_program_args. */
+  const char* const* program_argv;
 } jello_heap;
 
 struct jello_vm {
   jello_heap* heap;
+  jello_space* space; /**< Where it allocates, and what its collections sweep: its heap's, or a
+                       * process's own. */
 
   uint8_t* frame_stack;
   uint32_t frame_stack_top;
   uint32_t frame_stack_cap;
+  uint32_t frame_stack_limit;  /**< The bytes of frame_stack committed; a push past them grows
+                                * them, through jit_try_grow_push. */
+  uint32_t frame_stack_max;    /**< Bytes of frame_stack; a push past them enters a segment above,
+                                * through jit_try_grow_push. */
+  frame_segment* segment;      /**< The current segment; first_segment, or one mapped above it. */
+  frame_segment first_segment; /**< The frame stack it was attached to. */
+  uint32_t call_frames_limit;  /**< Most call frames at once; one more traps STACK_OVERFLOW. */
 
   call_frame* call_frames;
   uint32_t call_frames_len;
@@ -177,6 +225,8 @@ struct jello_vm {
   uint32_t trap_pc;
   uint32_t trap_func_index;
   const jello_bc_module* running_module;
+  uint64_t* globals;
+  struct vm_parcel* parcel;
 
   uint64_t fuel_limit;
   uint64_t fuel_remaining;
@@ -192,6 +242,8 @@ struct jello_vm {
 
 #define JIT_FRAME_STACK_MAX (64u * 1024u * 1024u)
 #define JIT_CALL_FRAMES_MAX 200000u
+#define VM_DEFAULT_FRAME_STACK_BYTES (64u * 1024u * 1024u)
+#define VM_DEFAULT_CALL_FRAMES 1000000u
 
 void vm_warm_jit_layouts(jello_vm* vm, const jello_bc_module* m);
 int jit_try_grow_call_frames(jello_vm* vm);
@@ -423,6 +475,9 @@ op_result op_spill_pop(exec_ctx* ctx, const jello_insn* ins);
 op_result op_switch_kind(exec_ctx* ctx, const jello_insn* ins);
 op_result op_case_kind(exec_ctx* ctx, const jello_insn* ins);
 
+op_result op_global_get(exec_ctx* ctx, const jello_insn* ins);
+op_result op_global_set(exec_ctx* ctx, const jello_insn* ins);
+
 /* -- Struct opcode handlers (ops_struct.c) -- */
 op_result op_struct_new(exec_ctx* ctx, const jello_insn* ins);
 op_result op_struct_get(exec_ctx* ctx, const jello_insn* ins);
@@ -460,6 +515,19 @@ op_result op_obj_remove(exec_ctx* ctx, const jello_insn* ins);
 op_result op_obj_clear(exec_ctx* ctx, const jello_insn* ins);
 op_result op_obj_copy(exec_ctx* ctx, const jello_insn* ins);
 
+typedef struct vm_parcel {
+  jello_value value;
+  jello_gc_hdr* objects; /**< The blocks copied for it, linked as a space's are. */
+  jello_gc_hdr* tail;    /**< The last of them. */
+  uint64_t bytes;        /**< What they count live, as alloc counts it. */
+} vm_parcel;
+
+#define JELLO_BYTES_BUFFER 1u
+
+static inline int vm_bytes_is_buffer(const jello_bytes* b) {
+  return b->h.type_id == JELLO_BYTES_BUFFER;
+}
+
 /* -- threads + the shared heap (thread/thread.c) -- */
 jello_vm* jello_vm_create_joined(jello_vm* existing);
 void vm_go_quiescent(jello_vm* vm);
@@ -468,6 +536,7 @@ void vm_leave_quiescent(jello_vm* vm);
 void vm_safepoint_check(jello_vm* vm);
 int vm_fuel_charge(jello_vm* vm);
 int vm_heap_stop_the_world(jello_vm* vm);
+void vm_heap_lock(jello_vm* vm);
 void vm_heap_resume_the_world(jello_vm* vm);
 
 /* -- the JDLL ABI (jdll/loader.c, jdll/marshal.c, jdll/call_native.c) -- */

@@ -40,6 +40,41 @@ void jdl_return_atom(jdlo_ctx* c, uint32_t atom_id);
 void jdl_return_bytes_copy(jdlo_ctx* c, const uint8_t* data, uint32_t len);
 void jdl_return_value(jdlo_ctx* c, jello_value v); /* Dynamic-kind return */
 void jdl_return_void(jdlo_ctx* c);
+/** @} */
+
+/** A class of native handle; a native object (a compiled regexp, a match) that Jello holds as a
+ * Dynamic. jdl_arg_handle accepts only handles of the expected class, so an export never
+ * reinterprets another class's payload. */
+typedef struct jello_jdll_handle_class {
+  /** Drops a handle's hold on its payload, freeing it when no handle holds it; called once per
+   * handle, when it is collected or the heap is destroyed, on whichever thread collects. Must
+   * not call into the VM. May be NULL. */
+  void (*finalize)(void* payload);
+} jello_jdll_handle_class;
+
+/** The handles holding a payload, as its first member, for jdl_retain and jdl_release; 1 when
+ * the payload is made, and changed only through those two, which update it atomically. */
+typedef uint32_t jdl_refs;
+#ifdef _MSC_VER
+#include <intrin.h>
+/** Takes another hold on `payload`, whose first member is its jdl_refs; a class's `retain`. */
+static inline void jdl_retain(void* payload) { _InterlockedIncrement((volatile long*)payload); }
+/** Drops a hold on `payload`, whose first member is its jdl_refs; whether it was the last, so
+ * that `finalize` is to free it. */
+static inline int jdl_release(void* payload) {
+  return _InterlockedDecrement((volatile long*)payload) == 0;
+}
+#else
+/** Takes another hold on `payload`, whose first member is its jdl_refs; a class's `retain`. */
+static inline void jdl_retain(void* payload) {
+  __atomic_fetch_add((jdl_refs*)payload, 1u, __ATOMIC_RELAXED);
+}
+/** Drops a hold on `payload`, whose first member is its jdl_refs; whether it was the last, so
+ * that `finalize` is to free it. */
+static inline int jdl_release(void* payload) {
+  return __atomic_fetch_sub((jdl_refs*)payload, 1u, __ATOMIC_ACQ_REL) == 1u;
+}
+#endif
 
 /* -- errors -- */
 void jdl_fail(jdlo_ctx* c, const char* msg);
@@ -55,8 +90,17 @@ typedef struct jello_jdll_export {
   uint8_t arg_kinds[8]; /* v1 caps arity at 8; no varargs */
 } jello_jdll_export;
 
+/** An export that may wait, on a file, a child command or the clock. A process calling one parks
+ * while a thread of a blocking pool makes the call, so the other processes run meanwhile. */
+#define JELLO_JDLL_BLOCKING 1u
+
 #define JELLO_JDLL_MANIFEST_MAGIC 0x4D4C4444u /* 'JDLM' as bytes, LE */
-#define JELLO_JDLL_ABI_VERSION 1u
+/** The version of this ABI: the table, the manifest and export layouts, and the layouts and value
+ * encoding jello.h gives libraries; any change to one is a new version. */
+#define JELLO_JDLL_ABI_VERSION 4u
+
+#define JELLO_JDLL_API_MEMBER(f) __typeof__(f)* f;
+#undef JELLO_JDLL_API_MEMBER
 
 typedef struct jello_jdll_manifest {
   uint32_t magic;
@@ -65,6 +109,12 @@ typedef struct jello_jdll_manifest {
   const jello_jdll_export* exports;
   uint32_t nexports;
 } jello_jdll_manifest;
+
+#if defined(_WIN32)
+#else
+#define JELLO_JDLL_EXPORT __attribute__((visibility("default")))
+#define JELLO_JDLL_HIDDEN __attribute__((visibility("hidden")))
+#endif
 
 #ifdef __cplusplus
 }

@@ -17,6 +17,8 @@ struct jdlo_ctx {
   int returned;
   int failed;
   const char* fail_msg;
+  jello_trap_code trap; /**< The trap a failed built-in export asks for; TYPE_MISMATCH when 0. */
+  int fail_said;        /**< Whether jdl_fail gave a message, which is then the VM's trap detail. */
   jello_type_kind ret_kind_given; /* which jdl_return_* was actually called */
   union {
     int32_t i32;
@@ -29,6 +31,13 @@ struct jdlo_ctx {
       uint32_t len;
     } bytes;
   } ret;
+  
+  uint8_t* ret_bytes;
+  uint32_t ret_bytes_len;
+  const jello_jdll_handle_class* handle_class;
+  void* handle_payload;
+  uint32_t handle_bytes;
 };
+void jdl_release_ret(jdlo_ctx* c);
 
 #endif /* JELLO_JDLL_INTERNAL_H */

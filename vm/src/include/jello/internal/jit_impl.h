@@ -209,6 +209,7 @@ typedef struct jit_exec_buf {
   size_t len;    /* bytes written so far -- grows as the emitter writes, capped at `cap` */
   int finalized; /* 1 once jit_finalize_exec_buf has mprotect'd this region RX */
   int patch_open;
+  size_t limit;   /**< Writes stop here; cap, or the end of an open append window. */
 } jit_exec_buf;
 
 jit_exec_buf jit_alloc_exec_buf(size_t cap);

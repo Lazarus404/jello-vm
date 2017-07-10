@@ -2,6 +2,8 @@
 // Copyright (c) Jahred Love. All rights reserved.
 
 #include <jello/internal.h>
+#include <jello/internal/platform.h>
+#include <jello/internal/proc_internal.h>
 #include <stdlib.h>
 #include <sys/mman.h>
 
@@ -90,6 +92,14 @@ void jello_vm_destroy(jello_vm* vm) {
   free(vm->call_frames);
   vm_free_layouts(vm);
   free(vm);
+}
+
+void vm_heap_lock(jello_vm* vm) {
+  jello_heap* heap = vm->heap;
+  if(pthread_mutex_trylock(&heap->alloc_lock) == 0) return;
+  vm_go_quiescent(vm);
+  pthread_mutex_lock(&heap->alloc_lock);
+  atomic_fetch_sub(&vm->quiescent_depth, 1);
 }
 
 /* -- quiescent tracking -- */
