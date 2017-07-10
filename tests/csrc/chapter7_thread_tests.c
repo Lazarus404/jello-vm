@@ -6,10 +6,21 @@
 #include <jello/internal.h>
 #include <jello/jdll.h>
 
+/* This file's own assert()s gate real side effects (pthread_create/
+ * pthread_join's return codes) as well as pass/fail -- a test file that
+ * relied on assert() alone would silently stop creating and joining
+ * threads at all under a -DNDEBUG (Release) build, passing trivially by
+ * doing nothing rather than actually exercising anything. #undef before
+ * including <assert.h> makes assert() unconditional in this translation
+ * unit regardless of the build's own global NDEBUG setting -- test code
+ * must never depend on NDEBUG being unset, since a test suite that only
+ * tests something in one build configuration is not a test suite. */
 #undef NDEBUG
 #include <assert.h>
+#include <limits.h>
 #include <pthread.h>
 #include <signal.h>
+#include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,11 +34,13 @@ static void watchdog_handler(int sig) {
   fflush(stderr);
   _exit(99);
 }
+#include <jello/internal/platform.h>
+#include "watchdog.h"
 
 static double now_ms(void) {
-  struct timeval tv;
-  gettimeofday(&tv, NULL);
-  return (double)tv.tv_sec * 1000.0 + (double)tv.tv_usec / 1000.0;
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
 }
 
 /* -- fixture 1: two joined VMs, one allocating, one blocked in a native call -- */
@@ -43,6 +56,12 @@ typedef struct alloc_thread_arg {
 static void* alloc_thread_main(void* argp) {
   alloc_thread_arg* arg = (alloc_thread_arg*)argp;
   for(int i = 0; i < ALLOC_ROUNDS; i++) {
+    /* Each Bytes object is garbage the instant this loop iterates again --
+     * nothing roots it (this thread never pushes a call_frame at all), so
+     * every one of these allocations is reclaimable by the very next
+     * collection. Big enough (300 bytes) to cross several size classes and
+     * force real threshold-driven collections within this loop,
+     * not just a handful. */
     jello_bytes* b = jello_bytes_new(arg->vm, 300);
     (void)b;
   }
@@ -53,6 +72,11 @@ static void* alloc_thread_main(void* argp) {
   return NULL;
 }
 
+/* A minimal hand-assembled module: one function, no args, that loads `ms`
+ * as a literal, CALL_NATIVEs "sleep_ms" (imported from test_native) with
+ * it, then returns the Bool result. Built directly as a jello_bc_module
+ * here (bypassing jlo_tool's text format entirely) -- this file only needs
+ * one fixed program, not a general-purpose assembler. */
 static jello_bc_module* build_sleep_module(int ms) {
   jello_bc_module* m = (jello_bc_module*)calloc(1, sizeof(jello_bc_module));
 
@@ -153,6 +177,10 @@ static void test_shared_heap_alloc_and_blocking_call(void) {
 
   assert(b_arg.ok && "blocking native call must still return the correct value");
   assert(a_arg.collections_seen > 0 && "allocation loop must have triggered at least one real collection");
+  /* Not `< SLEEP_MS + alloc time summed` -- the two threads' work must
+   * overlap, not serialise behind one another. A generous multiple of
+   * SLEEP_MS alone (not sleep + a full allocation-loop's worth of serial
+   * collections) is what proves that. */
   assert(elapsed < (double)(SLEEP_MS * 8) && "threads must not have serialised behind one another");
 
   free((void*)m->types);
@@ -211,6 +239,14 @@ static jello_bc_module* build_counting_loop_module(int32_t iterations) {
   return m;
 }
 
+static void free_counting_loop_module(jello_bc_module* m) {
+  free((void*)m->types);
+  free((void*)m->funcs[0].reg_types);
+  free((void*)m->funcs[0].insns);
+  free((void*)m->funcs);
+  free(m);
+}
+
 typedef struct loop_thread_arg {
   jello_vm* vm;
   const jello_bc_module* m;
@@ -221,6 +257,10 @@ static void* loop_thread_main(void* argp) {
   loop_thread_arg* arg = (loop_thread_arg*)argp;
   jello_numeric_result out;
   jello_exec_status st = jello_vm_exec_numeric(arg->vm, arg->m, &out);
+  /* The module's own JMP_IF checks "r0 < iterations" *before* incrementing
+   * r0 on that same pass, so the increment that makes the condition go
+   * false still runs once before RET -- final r0 is iterations + 1, not
+   * iterations. A test bytecode detail, not a VM correctness property. */
   arg->ok = (st == JELLO_EXEC_OK && out.kind == JELLO_NUM_I32 && out.as.i32 == LOOP_ITERATIONS + 1);
   return NULL;
 }
@@ -269,16 +309,26 @@ static void test_safepoint_at_loop_backedge(void) {
   printf("  loop_ok=%d\n", l_arg.ok);
   assert(l_arg.ok && "counting loop must finish with the correct result while collections run concurrently");
 
-  free((void*)m->types);
-  free((void*)m->funcs[0].reg_types);
-  free((void*)m->funcs[0].insns);
-  free((void*)m->funcs);
-  free(m);
+  free_counting_loop_module(m);
 
   jello_vm_destroy(vm_collector);
   jello_vm_destroy(vm_loop);
   printf("  PASS\n");
 }
+
+/* -- fixture 2b: compiled code parks at a pending stop-the-world ----------
+ * The counting loop runs compiled for about 2^31 iterations, seconds of work. Once it is
+ * running, another thread stops the world, which returns only when the loop's thread has
+ * parked at a JIR_SAFEPOINT, and while it is stopped sets that VM's fuel to exhausted. The loop
+ * must then end with a fuel trap: had the stop waited for the loop to finish, it would return
+ * its count instead.
+ */
+
+typedef struct jit_loop_arg {
+  jello_vm* vm;
+  jello_jit_module* jm;
+  const jello_bc_module* m;
+} jit_loop_arg;
 
 /* -- fixture 3: the std JDLL's file I/O, get_env, argv -- */
 
@@ -301,6 +351,8 @@ static void ib_push(insn_buf* b, jello_op op, uint8_t a, uint8_t bb, uint8_t cc,
   in->imm = (uint32_t)imm;
 }
 
+/* Emits BYTES_NEW dst,(len) then one CONST_I32+BYTES_SET_U8 pair per byte,
+ * using idx_reg/byte_reg as scratch. */
 static void emit_bytes_literal(insn_buf* b, uint8_t dst, uint8_t idx_reg, uint8_t byte_reg,
                                 uint8_t len_reg, const char* s) {
   uint32_t len = (uint32_t)strlen(s);
@@ -309,10 +361,26 @@ static void emit_bytes_literal(insn_buf* b, uint8_t dst, uint8_t idx_reg, uint8_
   for(uint32_t i = 0; i < len; i++) {
     ib_push(b, JOP_CONST_I32, idx_reg, 0, 0, (int32_t)i);
     ib_push(b, JOP_CONST_I32, byte_reg, 0, 0, (int32_t)(unsigned char)s[i]);
+    /* BYTES_SET_U8: a=value(I32), b=dst(Bytes), c=index(I32) -- not the
+     * dst/idx/value order the parallel BYTES_NEW/GET_U8 calls above might
+     * suggest at a glance (ops_bytes.c's own op_bytes_set_u8). */
     ib_push(b, JOP_BYTES_SET_U8, byte_reg, dst, idx_reg, 0);
   }
 }
 
+/* Every build_std_*_module function below takes an *already-loaded*
+ * std.jdll handle rather than calling jello_jdll_load itself: dlopen()ing
+ * and dlclose()ing the same shared library repeatedly within one process
+ * is exactly the pattern that trips ASan's ODR-violation detector on
+ * Darwin (dyld re-runs an image's static initializers, including ASan's
+ * own global-registration hooks, on some but not all reload cycles) --
+ * loading each distinct library exactly once per process, like a real
+ * embedder would, avoids the whole class of issue rather than working
+ * around one specific symptom of it. main() below owns the one load/unload
+ * pair for "std" that every std-related fixture shares.
+ *
+ * r0=path(Bytes) r1=data(Bytes) r2=I32 scratch r3=I32 scratch r4=I32 scratch(len)
+ * r5=Bool(write_ok) r6=Bytes(read_back) r7=I32(read byte 0) r8=Bool(result) */
 static jello_bc_module* build_std_file_roundtrip_module(jello_jdll_handle* h, const char* path, const char* data) {
   jello_bc_module* m = (jello_bc_module*)calloc(1, sizeof(jello_bc_module));
 
@@ -347,6 +415,8 @@ static jello_bc_module* build_std_file_roundtrip_module(jello_jdll_handle* h, co
   m->jdll_handles = NULL; /* not owned by this module -- main() unloads "std" once */
   m->njdll_handles = 0;
 
+  /* r0=path r1=data r2..r4=I32 scratch r5=Bool write_ok r6=Bytes read_back
+   * r7=I32 first-byte-of-readback r8=Bool result */
   jello_type_id* reg_types = (jello_type_id*)malloc(sizeof(jello_type_id) * 9u);
   reg_types[0] = 1; reg_types[1] = 1; reg_types[2] = 0; reg_types[3] = 0; reg_types[4] = 0;
   reg_types[5] = 2; reg_types[6] = 1; reg_types[7] = 0; reg_types[8] = 2;
@@ -385,8 +455,14 @@ static void free_std_module(jello_bc_module* m) {
 
 static void test_std_jdll_file_roundtrip(jello_jdll_handle* std_h) {
   printf("== fixture: std JDLL file_write/file_read round-trip ==\n");
-  const char* path = "/tmp/jello_chapter7_std_test.tmp";
-  const char* data = "hello, chapter 7";
+  /* A temporary directory from the environment, since Windows has no /tmp. */
+  const char* dir = getenv("TMPDIR");
+  if(!dir || !*dir) dir = getenv("TEMP");
+  if(!dir || !*dir) dir = getenv("TMP");
+  if(!dir || !*dir) dir = "/tmp";
+  char path[PATH_MAX];
+  snprintf(path, sizeof path, "%s/jello_thread_tests_std.tmp", dir);
+  const char* data = "hello, thread tests";
 
   jello_vm* vm = jello_vm_create();
   jello_bc_module* m = build_std_file_roundtrip_module(std_h, path, data);
@@ -403,6 +479,8 @@ static void test_std_jdll_file_roundtrip(jello_jdll_handle* std_h) {
   printf("  PASS\n");
 }
 
+/* r0=name(Bytes) r1..r3=I32 scratch r4=Bytes(env value) r5=I32(first byte)
+ * r6=Bool(result) */
 static jello_bc_module* build_std_get_env_module(jello_jdll_handle* h, const char* name, char expected_first_char) {
   jello_bc_module* m = (jello_bc_module*)calloc(1, sizeof(jello_bc_module));
 
@@ -501,6 +579,18 @@ static jello_bc_module* build_std_argv_count_module(jello_jdll_handle* h) {
   return m;
 }
 
+/* The VM's register-frame layout cache once used an invalidation rule
+ * that compared a jello_bc_module pointer to decide "is this still the
+ * same module" -- unsound once a module is freed and a *different* module
+ * happens to be allocated at the exact same, now-reused address (ordinary,
+ * correct C behaviour for any allocator, not a bug in malloc), which read
+ * as "same module, keep the cache" and served one module's own register
+ * kinds for a completely different module's registers. This one iteration
+ * already reproduced that bug intermittently (its own failure depends on
+ * the allocator's history, not this test's own logic) -- the loop below
+ * repeats the exact free-then-immediately-allocate-same-shape pattern that
+ * triggers it enough times that a real regression here fails reliably,
+ * not roughly one time in thirty. */
 static void test_std_jdll_get_env_and_argv(jello_jdll_handle* std_h) {
   printf("== fixture: std JDLL get_env + argv ==\n");
   setenv("JELLO_CHAPTER7_TEST_VAR", "chapter7", 1);
@@ -532,11 +622,19 @@ int main(void) {
   test_shared_heap_alloc_and_blocking_call();
   test_safepoint_at_loop_backedge();
 
+  /* "std" is loaded exactly once for the whole process, shared by both
+   * fixtures below -- see build_std_file_roundtrip_module's own comment
+   * for why repeated dlopen/dlclose of the same library is worth avoiding
+   * outright rather than working around. */
   jello_jdll_handle* std_h = jello_jdll_load("std");
-  if(!std_h) { fprintf(stderr, "main: failed to load std.jdll (check JELLO_JDLL_PATH)\n"); return 1; }
-  test_std_jdll_file_roundtrip(std_h);
-  test_std_jdll_get_env_and_argv(std_h);
-  jello_jdll_unload(std_h);
+  if(std_h) {
+    test_std_jdll_file_roundtrip(std_h);
+    test_std_jdll_get_env_and_argv(std_h);
+    jello_jdll_unload(std_h);
+  } else {
+    fprintf(stderr, "std JDLL fixtures: std.jdll not found on JELLO_JDLL_PATH\n");
+    return 1;
+  }
 
   printf("chapter7_thread_tests: all fixtures passed\n");
   return 0;

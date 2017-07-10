@@ -81,17 +81,17 @@ if asm "${FIXDIR}/frames_ceiling.jlo.txt" "${TMP}/frames_ceiling.jlo"; then
     "${TMP}/frames_ceiling.jlo"
   expect_trap_pc "frames_ceiling --fuel 50000 (CALL_FRAMES_MAX not reached) interp" \
     "TRAP code=FUEL" 0 0 1 "${TMP}/frames_ceiling.jlo" --fuel 50000
-  expect_trap_pc "frames_ceiling --fuel 250000 (frames ceiling wins) interp" \
-    "TRAP code=STACK_OVERFLOW" 0 0 1 "${TMP}/frames_ceiling.jlo" --fuel 250000
+  expect_trap_pc "frames_ceiling --fuel 1500000 (frames ceiling wins) interp" \
+    "TRAP code=STACK_OVERFLOW" 0 0 1 "${TMP}/frames_ceiling.jlo" --fuel 1500000
   expect_trap_pc "frames_ceiling (no fuel) jit" "TRAP code=STACK_OVERFLOW" 0 0 0 \
     "${TMP}/frames_ceiling.jlo"
 fi
 
 if asm "${TMP}/gen/bytes_stack_ceiling.jlo.txt" "${TMP}/bytes_stack_ceiling.jlo"; then
-  expect_trap_pc "bytes_stack_ceiling --fuel 50000 (64MiB wins before fuel) interp" \
-    "TRAP code=STACK_OVERFLOW" 0 0 1 "${TMP}/bytes_stack_ceiling.jlo" --fuel 50000
-  expect_trap_pc "bytes_stack_ceiling --fuel 50000 jit" \
-    "TRAP code=STACK_OVERFLOW" 0 0 0 "${TMP}/bytes_stack_ceiling.jlo" --fuel 50000
+  expect_trap_pc "bytes_stack_ceiling --fuel 700000 (frame bytes win before fuel) interp" \
+    "TRAP code=STACK_OVERFLOW" 0 0 1 "${TMP}/bytes_stack_ceiling.jlo" --fuel 700000
+  expect_trap_pc "bytes_stack_ceiling --fuel 700000 jit" \
+    "TRAP code=STACK_OVERFLOW" 0 0 0 "${TMP}/bytes_stack_ceiling.jlo" --fuel 700000
 fi
 
 if asm "${TMP}/gen/nregs_at_loader_maximum.jlo.txt" "${TMP}/nregs_at.jlo"; then
@@ -219,12 +219,12 @@ echo "== 18-8: fuel vs stack-overflow ordering + fuel under survive =="
 if asm "${FIXDIR}/frames_ceiling.jlo.txt" "${TMP}/fuel_race.jlo"; then
   expect_trap_pc "fuel wins (budget 1000) interp" "TRAP code=FUEL" 0 0 1 \
     "${TMP}/fuel_race.jlo" --fuel 1000
-  expect_trap_pc "stack overflow wins (budget 250000) interp" "TRAP code=STACK_OVERFLOW" 0 0 1 \
-    "${TMP}/fuel_race.jlo" --fuel 250000
+  expect_trap_pc "stack overflow wins (budget 1500000) interp" "TRAP code=STACK_OVERFLOW" 0 0 1 \
+    "${TMP}/fuel_race.jlo" --fuel 1500000
   expect_trap_pc "fuel wins jit" "TRAP code=FUEL" 0 0 0 \
     "${TMP}/fuel_race.jlo" --fuel 1000
   expect_trap_pc "stack overflow wins jit" "TRAP code=STACK_OVERFLOW" 0 0 0 \
-    "${TMP}/fuel_race.jlo" --fuel 250000
+    "${TMP}/fuel_race.jlo" --fuel 1500000
 fi
 if asm "${FIXDIR}/fuel_under_survive.jlo.txt" "${TMP}/fuel_surv.jlo"; then
   expect_line "fuel_under_survive unlimited interp" "RESULT kind=I32 value=144" 1 "${TMP}/fuel_surv.jlo"

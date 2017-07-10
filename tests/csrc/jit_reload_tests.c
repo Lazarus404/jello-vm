@@ -11,6 +11,11 @@
 #include <string.h>
 #include <time.h>
 
+/* fib(n) = n<2 ? n : fib(n-1)+fib(n-2) -- the same shape the survive fixtures
+ * in jit_calls_tests.c use, reused here because it is call-heavy enough to
+ * make "did this actually skip recompiling" an observable difference, not
+ * just a trivial one-instruction function that would compile equally fast
+ * either way. */
 static void build_fib_module(jello_type_entry* types, jello_type_id* r0, jello_type_id* r1,
     jello_insn* e0, jello_insn* e1, jello_bc_function* funcs, jello_bc_module* m, uint32_t n) {
   types[0].kind = JELLO_T_I32;
@@ -62,6 +67,9 @@ static void test_module_create_destroy_roundtrip(void) {
   printf("test_module_create_destroy_roundtrip: PASS\n");
 }
 
+/* The signature/body-hash analysis is standalone and compile-free --
+ * unit-testable against hand-built old/new function pairs directly, no
+ * jello_jit_module or W^X state involved at all. */
 static void build_one_func_module(jello_type_entry* types, jello_type_id* r,
     jello_insn* insns, uint32_t ninsns, uint32_t nregs, uint32_t nargs,
     jello_bc_function* f, jello_bc_module* m) {
@@ -180,6 +188,9 @@ static void test_module_create_rejects_empty_module(void) {
   printf("test_module_create_rejects_empty_module: PASS\n");
 }
 
+/* jello_jit_module_reload end to end. Two named functions ("main" calls
+ * "helper"); variant B changes only helper's own constant. Not
+ * architecture-gated: the tests using it compile code but never execute it. */
 static void build_named_two_func_module(jello_type_entry* types, jello_type_id* r0,
     jello_type_id* r1, jello_insn* e0, jello_insn* e1, jello_bc_function* funcs,
     jello_bc_module* m, uint32_t main_name_atom, uint32_t helper_name_atom, int32_t helper_const) {
@@ -236,6 +247,16 @@ static void test_reload_unchanged_is_successful_noop(void) {
   printf("test_reload_unchanged_is_successful_noop: PASS\n");
 }
 
+/* The struct type-conflict cascade, end to end through
+ * jello_jit_module_reload itself (not just the standalone
+ * jello_reload_struct_sig_changed/jello_reload_function_uses_struct_sig unit
+ * calls) -- deliberately not architecture-gated: the
+ * refuse-by-default path returns before calling
+ * jello_jit_module_prepare, so nothing here executes JIT'd code. A single named function "main" declares one register of struct type;
+ * the struct's own field count changes shape between old_m and new_m (1 field
+ * -> 2), while main's own instructions are untouched -- proving the cascade
+ * is what forces the conflict, not a body-hash difference that would have
+ * been caught anyway. */
 static void build_struct_using_module(jello_type_entry* types, jello_struct_sig* sig,
     uint32_t* field_type, uint32_t* field_offset, uint32_t nfields, jello_type_id* r,
     jello_insn* insns, jello_bc_function* f, jello_bc_module* m, uint32_t name_atom) {
@@ -282,6 +303,14 @@ static void test_reload_refuses_struct_type_conflict_by_default(void) {
   build_struct_using_module(types_b, &sig_b, field_type_b, field_offset_b, 2, r_b, insns_b, &f_b, &new_m, 0);
   new_m.atoms = g_one_func_atom; new_m.natoms = 1;
 
+  /* The cascade's own two preconditions, confirmed directly rather than
+   * only implied by the end-to-end report below. Note the plain
+   * signature/body analysis alone already calls this pair CHANGED here
+   * (register 0's own type hash folds in the struct's shape, and that
+   * shape moved) -- the cascade's real job, proven by the report below
+   * rather than this call, is reclassifying it as a *type* conflict
+   * specifically (n_type_conflicts, not n_changed) so an embedder can
+   * tell "an ordinary edit" apart from "a struct shape moved under you." */
   assert(jello_reload_struct_sig_changed(&old_m, &new_m, 0) == 1);
   assert(jello_reload_function_uses_struct_sig(&old_m, &f_a, 0) == 1);
   assert(jello_reload_analyze_function(&old_m, &f_a, &new_m, &f_b) == JELLO_RELOAD_FN_CHANGED);
@@ -303,6 +332,14 @@ static void test_reload_refuses_struct_type_conflict_by_default(void) {
   printf("test_reload_refuses_struct_type_conflict_by_default: PASS\n");
 }
 
+/* A signature-conflicting function whose *body bytes* did not change (only
+ * its declared nargs did) gives n_changed == 0, yet allow_conflicts asked for
+ * the change to be applied, so it must still be compiled.
+ * Host-independent, like the fixtures above: jello_jit_module_prepare emits
+ * real x64 bytes on any host (only *executing* them needs one), so
+ * jello_jit_module_prepare_count (module.c, same reset-and-assert idiom as
+ * test_persistent_handle_no_per_call_recompile) proves a real recompile
+ * happened without needing Rosetta. */
 static void build_one_named_func_module(jello_type_entry* types, jello_type_id* r,
     jello_insn* insns, jello_bc_function* f, jello_bc_module* m, uint32_t nargs, uint32_t name_atom) {
   types[0].kind = JELLO_T_I32;
@@ -329,6 +366,7 @@ static void test_reload_allow_conflicts_recompiles_even_if_body_unchanged(void) 
   build_one_named_func_module(types_b, r_b, insns_b, &f_b, &new_m, 1, 0); /* nargs 1 -- only difference */
   new_m.atoms = g_one_func_atom; new_m.natoms = 1;
 
+  /* Confirms the premise directly: same body bytes, signature conflict. */
   assert(jello_reload_analyze_function(&old_m, &f_a, &new_m, &f_b) == JELLO_RELOAD_FN_SIGNATURE_CONFLICT);
 
   jello_jit_module* jm = jello_jit_module_create(&old_m);
@@ -341,6 +379,7 @@ static void test_reload_allow_conflicts_recompiles_even_if_body_unchanged(void) 
   assert(rc == 1);
   assert(report.n_changed == 0);
   assert(report.n_signature_conflicts == 1);
+  /* jello_jit_module_prepare ran for new_m. */
   assert(jello_jit_module_prepare_count == 1);
   jello_jit_reload_report_free(&report);
 
@@ -349,6 +388,9 @@ static void test_reload_allow_conflicts_recompiles_even_if_body_unchanged(void) 
   printf("test_reload_allow_conflicts_recompiles_even_if_body_unchanged: PASS\n");
 }
 
+/* A brand-new function (n_new > 0) with every existing function unchanged is
+ * compiled too: jm's funcs[] is sized to the old module, so without a
+ * recompile the new function would only ever run in the interpreter. */
 static void test_reload_new_function_recompiles_even_if_nothing_changed(void) {
   jello_type_entry types_a[1], types_b[1];
   jello_type_id r_a[1];
@@ -389,6 +431,8 @@ static void test_reload_new_function_recompiles_even_if_nothing_changed(void) {
   assert(report.n_changed == 0);
   assert(report.n_signature_conflicts == 0);
   assert(report.n_type_conflicts == 0);
+  /* The actual proof: a real recompile ran, so jm now actually covers the
+   * new function too, rather than silently staying sized to old_m. */
   assert(jello_jit_module_prepare_count == 1);
   assert(jm->nfuncs == 2);
   jello_jit_reload_report_free(&report);
@@ -400,6 +444,18 @@ static void test_reload_new_function_recompiles_even_if_nothing_changed(void) {
 
 #if defined(__x86_64__) || defined(__aarch64__)
 
+/* A signature-conflicting "helper" (nargs 0 -> 1) must refuse the *entire*
+ * reload by default, leaving jm still fully, correctly running old_m -- not
+ * silently swap in new_m's own code the way an unconditional swap would.
+ * "main" is rewritten consistently with new_m's own new "helper" (passes it
+ * one argument); if this reload were wrongly allowed to apply anyway, new_m
+ * would still run correctly on its own terms, which is exactly why the
+ * refusal has to come from reload's own conflict check, not from new_m being
+ * broken on its own. Architecture-gated like the other fixtures in this
+ * block: unlike test_reload_unchanged_succeeds, which executes nothing,
+ * this one actually executes JIT'd x64 code via
+ * jello_vm_exec_numeric_with_jit both before and after the refused/allowed
+ * reload. */
 static void build_two_func_module_arity_variant(jello_type_entry* types, jello_type_id* r0,
     jello_type_id* r1, jello_insn* e0, jello_insn* e1, jello_bc_function* funcs,
     jello_bc_module* m, uint32_t main_name_atom, uint32_t helper_name_atom, int32_t arg_const) {
@@ -452,6 +508,7 @@ static void test_reload_refuses_signature_conflict_by_default(void) {
   assert(report.fn_status[1] == JELLO_RELOAD_FN_SIGNATURE_CONFLICT);
   jello_jit_reload_report_free(&report);
 
+  /* jm must still be exactly as it was: old_m's own code, unpatched. */
   memset(&out, 0, sizeof(out));
   assert(jello_vm_exec_numeric_with_jit(vm, jm, &old_m, &out) == JELLO_EXEC_OK);
   assert(out.kind == JELLO_NUM_I32 && out.as.i32 == 100);
@@ -482,6 +539,8 @@ static void test_reload_allow_conflicts_overrides_refusal(void) {
   assert(report.n_signature_conflicts == 1);
   jello_jit_reload_report_free(&report);
 
+  /* new_m is internally self-consistent (main's own new call site matches
+   * helper's own new arity) -- jm now runs it correctly. */
   jello_numeric_result out;
   memset(&out, 0, sizeof(out));
   assert(jello_vm_exec_numeric_with_jit(vm, jm, &new_m, &out) == JELLO_EXEC_OK);
@@ -565,7 +624,6 @@ static void test_begin_end_patch_redirects_live_call(void) {
   jello_vm_destroy(vm);
   printf("test_begin_end_patch_redirects_live_call: PASS\n");
 }
-
 static void test_reload_changed_function_end_to_end(void) {
   jello_type_entry types_a[1], types_b[1];
   jello_type_id r0_a[1], r1_a[1], r0_b[1], r1_b[1];
@@ -598,6 +656,8 @@ static void test_reload_changed_function_end_to_end(void) {
   assert(report.fn_status[1] == JELLO_RELOAD_FN_CHANGED);
   jello_jit_reload_report_free(&report);
 
+  /* The new behaviour must be visible immediately through the *same*
+   * persistent handle -- no re-create, no re-prepare by the caller. */
   memset(&out, 0, sizeof(out));
   assert(jello_vm_exec_numeric_with_jit(vm, jm, &new_m, &out) == JELLO_EXEC_OK);
   assert(out.kind == JELLO_NUM_I32 && out.as.i32 == 200);
@@ -611,6 +671,22 @@ static int32_t fib_ref_reload(int32_t n) {
   return (n < 2) ? n : fib_ref_reload(n - 1) + fib_ref_reload(n - 2);
 }
 
+/* Reload interacting with survive. Reuses the `fib`-shaped, survive-armed
+ * recursive function (jit_calls_tests.c's `build_fib_survive_module` /
+ * `test_call_self_survive_fib_correct`, same instruction shape reproduced
+ * here since that builder is `static` in a different translation unit) inside
+ * a three-function module: "main" calls "fib"; "unrelated" is a third
+ * function that changes body between old_m and new_m while "fib" and "main"
+ * stay byte-identical. This proves empirically that nothing survive-specific
+ * is needed for reload: `jello_jit_module_prepare` unconditionally recompiles
+ * *every* function in new_m regardless of its own reload status -- "fib"
+ * being reported UNCHANGED does not mean its machine code is untouched, it
+ * means a *fresh* compile happened to produce byte-identical semantics. If
+ * anything about survive's own reentrancy discipline (the function-scoped
+ * push/pop r15) depended on surviving *across* a reload rather than being
+ * re-established by each fresh compile, fib(15) -- which recurses to depth 15
+ * with many R15 holds live on the native call stack at once -- would be the
+ * shape most likely to expose it. */
 static void build_fib_survive_reload_module(jello_type_entry* types, jello_type_id* r0,
     jello_type_id* r1, jello_type_id* r2, jello_insn* e0, jello_insn* e1, jello_insn* e2,
     jello_bc_function* funcs, jello_bc_module* m, int32_t unrelated_const) {

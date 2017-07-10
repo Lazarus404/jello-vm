@@ -47,10 +47,6 @@ check_pair "$ROOT/tests/bytecode/dyn/obj_set_get_atom_typed.jlo.txt" \
            "$IR_DIR/obj_set_get_atom_not_numeric_fast.jir.txt" \
            "obj_set_get_atom_not_numeric_fast"
 
-check_pair "$IR_DIR/assert_unimplemented_lowers_to_slow.jlo.txt" \
-           "$IR_DIR/assert_unimplemented_lowers_to_slow.jir.txt" \
-           "assert_unimplemented_lowers_to_slow"
-
 check_pair "$ROOT/tests/bytecode/packet/blit_mid_offset.jlo.txt" \
            "$IR_DIR/blit_mid_offset_bytes_read_write_blit.jir.txt" \
            "blit_mid_offset_bytes_read_write_blit"

@@ -259,7 +259,7 @@ def all_size_classes_churn() -> str:
     return "\n".join(header + body) + "\n"
 
 def struct_object_pointer_churn() -> str:
-    n_rounds = 12000
+    n_rounds = 100000
     return f"""\
 .jlo module version=1 features=[] entry=0
 types: [I32, BOOL, BYTES, STRUCT(0), OBJECT]

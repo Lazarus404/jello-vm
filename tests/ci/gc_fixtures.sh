@@ -49,8 +49,8 @@ else
   live_bytes="$(echo "${out}" | awk '/^GC_LIVE_BYTES/ {print $2}')"
   if [[ -z "${collections}" || "${collections}" -le 0 ]]; then
     fail "bytes_gc_churn: expected at least one real collection, got GC_COLLECTIONS=${collections:-<missing>}"
-  elif [[ -z "${live_bytes}" || "${live_bytes}" -gt 1048576 ]]; then
-    fail "bytes_gc_churn: expected live bytes well under 1MB after reclaim, got GC_LIVE_BYTES=${live_bytes:-<missing>}"
+  elif [[ -z "${live_bytes}" || "${live_bytes}" -ge 4194304 ]]; then
+    fail "bytes_gc_churn: expected live bytes under 4MB after reclaim, got GC_LIVE_BYTES=${live_bytes:-<missing>}"
   else
     echo "gc_fixtures: bytes_gc_churn reclaimed correctly (collections=${collections}, live_bytes=${live_bytes})"
   fi
