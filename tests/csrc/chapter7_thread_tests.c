@@ -27,13 +27,6 @@
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
-
-static void watchdog_handler(int sig) {
-  (void)sig;
-  fprintf(stderr, "WATCHDOG: test took too long, aborting\n");
-  fflush(stderr);
-  _exit(99);
-}
 #include <jello/internal/platform.h>
 #include "watchdog.h"
 
@@ -617,8 +610,7 @@ static void test_std_jdll_get_env_and_argv(jello_jdll_handle* std_h) {
 
 int main(void) {
   setvbuf(stdout, NULL, _IONBF, 0);
-  signal(SIGALRM, watchdog_handler);
-  alarm(45);
+  start_watchdog("thread_tests", 45);
   test_shared_heap_alloc_and_blocking_call();
   test_safepoint_at_loop_backedge();
 

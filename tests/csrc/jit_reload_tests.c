@@ -554,76 +554,6 @@ static void test_reload_allow_conflicts_overrides_refusal(void) {
 #endif
 
 #if defined(__x86_64__)
-
-static void build_three_leaf_module(jello_type_entry* types, jello_type_id* r0,
-    jello_type_id* r1, jello_type_id* r2, jello_insn* e0, jello_insn* e1, jello_insn* e2,
-    jello_bc_function* funcs, jello_bc_module* m) {
-  types[0].kind = JELLO_T_I32;
-  memset(&types[0].as, 0, sizeof(types[0].as));
-  r0[0] = 0; r1[0] = 0; r2[0] = 0;
-
-  e0[0].op = (uint8_t)JOP_CALL; e0[0].a = 0; e0[0].b = 0; e0[0].c = 0; e0[0].imm = 1; /* -> func[1] */
-  e0[1].op = (uint8_t)JOP_RET; e0[1].a = 0;
-  e1[0].op = (uint8_t)JOP_CONST_I32; e1[0].a = 0; e1[0].imm = 100;
-  e1[1].op = (uint8_t)JOP_RET; e1[1].a = 0;
-  e2[0].op = (uint8_t)JOP_CONST_I32; e2[0].a = 0; e2[0].imm = 200;
-  e2[1].op = (uint8_t)JOP_RET; e2[1].a = 0;
-
-  funcs[0].name_atom = funcs[1].name_atom = funcs[2].name_atom = JELLO_BC_NO_NAME;
-  funcs[0].nargs = 0; funcs[0].nregs = 1; funcs[0].cap_start = 1; funcs[0].reg_types = r0; funcs[0].ninsns = 2; funcs[0].insns = e0;
-  funcs[1].nargs = 0; funcs[1].nregs = 1; funcs[1].cap_start = 1; funcs[1].reg_types = r1; funcs[1].ninsns = 2; funcs[1].insns = e1;
-  funcs[2].nargs = 0; funcs[2].nregs = 1; funcs[2].cap_start = 1; funcs[2].reg_types = r2; funcs[2].ninsns = 2; funcs[2].insns = e2;
-
-  memset(m, 0, sizeof(*m));
-  m->ntypes = 1; m->types = types; m->nfuncs = 3; m->funcs = funcs; m->entry = 0;
-}
-
-static void test_begin_end_patch_redirects_live_call(void) {
-  jello_type_entry types[1];
-  jello_type_id r0[1], r1[1], r2[1];
-  jello_insn e0[2], e1[2], e2[2];
-  jello_bc_function funcs[3];
-  jello_bc_module m;
-  build_three_leaf_module(types, r0, r1, r2, e0, e1, e2, funcs, &m);
-
-  jello_jit_module* jm = jello_jit_module_create(&m);
-  assert(jm != NULL);
-
-  jello_vm* vm = jello_vm_create();
-  jello_numeric_result out;
-  memset(&out, 0, sizeof(out));
-  jello_exec_status st = jello_vm_exec_numeric_with_jit(vm, jm, &m, &out);
-  assert(st == JELLO_EXEC_OK && out.kind == JELLO_NUM_I32 && out.as.i32 == 100);
-
-  size_t f0_start = jm->funcs[0].blob_off;
-  size_t f0_end = f0_start + jm->funcs[0].size;
-  size_t f1_entry = jm->funcs[1].blob_off + jm->funcs[1].body_off;
-  size_t f2_entry = jm->funcs[2].blob_off + jm->funcs[2].body_off;
-  size_t call_site = (size_t)-1;
-  for(size_t i = f0_start; i + 5 <= f0_end; i++) {
-    if(jm->blob.mem[i] != 0xE8) continue;
-    int32_t rel;
-    memcpy(&rel, jm->blob.mem + i + 1, 4);
-    size_t target = (size_t)((int64_t)(i + 5) + (int64_t)rel);
-    if(target == f1_entry) { call_site = i; break; }
-  }
-  assert(call_site != (size_t)-1);
-
-  assert(jm->blob.finalized == 1);
-  assert(jit_exec_buf_begin_patch(&jm->blob) == 1);
-  int32_t new_rel = (int32_t)(f2_entry - (call_site + 5));
-  jello_jit_patch_call_rel32(&jm->blob, call_site, new_rel);
-  assert(jit_exec_buf_end_patch(&jm->blob) == 1);
-  assert(jm->blob.finalized == 1); /* untouched by either call, per Sec 4's own contract */
-
-  memset(&out, 0, sizeof(out));
-  st = jello_vm_exec_numeric_with_jit(vm, jm, &m, &out);
-  assert(st == JELLO_EXEC_OK && out.kind == JELLO_NUM_I32 && out.as.i32 == 200);
-
-  jello_jit_module_destroy(jm);
-  jello_vm_destroy(vm);
-  printf("test_begin_end_patch_redirects_live_call: PASS\n");
-}
 static void test_reload_changed_function_end_to_end(void) {
   jello_type_entry types_a[1], types_b[1];
   jello_type_id r0_a[1], r1_a[1], r0_b[1], r1_b[1];
@@ -699,6 +629,17 @@ static void build_fib_survive_reload_module(jello_type_entry* types, jello_type_
   r1[0] = 0; r1[1] = 1; r1[2] = 0; r1[3] = 0; r1[4] = 0; r1[5] = 0; r1[6] = 0;
   r2[0] = 0;
 
+  /* Zeroed first, unlike jit_calls_tests.c's own build_fib_survive_module --
+   * that builder only ever builds *one* copy of fib per test, so an
+   * uninitialized field an op never sets (e.g. LT_I32_IMM's own unused `.c`)
+   * never has anything to differ *from*. This fixture builds fib twice, into
+   * two separate stack arrays, and needs their raw insns bytes to compare
+   * bit-for-bit equal (reload's own body-hash comparison hashes the whole
+   * jello_insn, not just the fields a given op reads) -- without this, two
+   * semantically-identical bodies would hash unequal on whatever garbage
+   * happened to be sitting in each array's own unused bytes, and this fixture
+   * would spuriously report CHANGED for fib/main instead of proving what it
+   * claims to. */
   memset(e0, 0, 3 * sizeof(jello_insn));
   memset(e1, 0, 9 * sizeof(jello_insn));
   memset(e2, 0, 2 * sizeof(jello_insn));
@@ -707,6 +648,9 @@ static void build_fib_survive_reload_module(jello_type_entry* types, jello_type_
   e0[1].op = (uint8_t)JOP_CALL; e0[1].a = 1; e0[1].b = 0; e0[1].c = 1; e0[1].imm = 1; /* -> fib */
   e0[2].op = (uint8_t)JOP_RET; e0[2].a = 1;
 
+  /* Byte-identical to jit_calls_tests.c's own build_fib_survive_module,
+   * across both old_m and new_m -- this function's own reload status must
+   * come out UNCHANGED for the fixture to prove what it claims. */
   e1[0].op = (uint8_t)JOP_LT_I32_IMM; e1[0].a = 1; e1[0].b = 0; e1[0].imm = 2;
   e1[1].op = (uint8_t)JOP_JMP_IF; e1[1].a = 1; e1[1].imm = 6;
   e1[2].op = (uint8_t)JOP_SUB_I32_IMM; e1[2].a = 2; e1[2].b = 0; e1[2].imm = 1;
@@ -717,6 +661,7 @@ static void build_fib_survive_reload_module(jello_type_entry* types, jello_type_
   e1[7].op = (uint8_t)JOP_RET; e1[7].a = 6;
   e1[8].op = (uint8_t)JOP_RET; e1[8].a = 0;
 
+  /* The one function this fixture actually varies between old_m/new_m. */
   e2[0].op = (uint8_t)JOP_CONST_I32; e2[0].a = 0; e2[0].imm = (uint32_t)unrelated_const;
   e2[1].op = (uint8_t)JOP_RET; e2[1].a = 0;
 
@@ -786,6 +731,11 @@ static int32_t fib_ref(int32_t n) {
   return (n < 2) ? n : fib_ref(n - 1) + fib_ref(n - 2);
 }
 
+/* The persistent-handle path must not recompile the module on every call the
+ * way jello_vm_exec_numeric's own prepare-fresh-every-call path still does.
+ * jello_jit_module_prepare_count is the same reset-and-assert idiom
+ * jit_try_enter_count/jit_reg_discard_count already use elsewhere in this
+ * test suite. */
 static void test_persistent_handle_no_per_call_recompile(void) {
   jello_type_entry types[2];
   jello_type_id r0[2], r1[7];
@@ -811,6 +761,8 @@ static void test_persistent_handle_no_per_call_recompile(void) {
     assert(out.kind == JELLO_NUM_I32);
     assert(out.as.i32 == expected);
   }
+  /* The whole point: 20 calls through the persistent handle, exactly one
+   * jello_jit_module_prepare (the jello_jit_module_create above), not 20. */
   assert(jello_jit_module_prepare_count == 1);
 
   jello_jit_module_destroy(jm);
@@ -819,6 +771,8 @@ static void test_persistent_handle_no_per_call_recompile(void) {
       jello_jit_module_prepare_count);
 }
 
+/* The persistent-handle path's results must match the prepare-fresh-every-call
+ * path bit for bit, not merely "look plausible." */
 #if defined(__x86_64__)
 static void test_persistent_handle_matches_fresh_path(void) {
   jello_type_entry types[2];
@@ -853,6 +807,9 @@ static void test_persistent_handle_matches_fresh_path(void) {
 }
 #endif
 
+/* The NULL-handle fallback contract: jello_vm_exec_numeric_with_jit must
+ * still produce correct results with jm == NULL (falls back to the plain
+ * interpreter, per jello.h's own doc comment), not crash or trap. */
 static void test_persistent_handle_null_falls_back_correctly(void) {
   jello_type_entry types[2];
   jello_type_id r0[2], r1[7];
@@ -873,6 +830,9 @@ static void test_persistent_handle_null_falls_back_correctly(void) {
   printf("test_persistent_handle_null_falls_back_correctly: PASS\n");
 }
 
+/* W^X icache coherency -- repeated create/destroy cycles
+ * maximise VA reuse before exercising a persistent handle so stale
+ * instruction bytes cannot hide behind test order. */
 #if defined(__x86_64__) || defined(__aarch64__)
 static void test_wx_icache_repeated_create_destroy_then_persistent(void) {
   jello_vm* vm = jello_vm_create();
@@ -1019,12 +979,16 @@ static void test_reload_cycling_stress_with_conflicts(void) {
 }
 #endif
 
+/* Single-threaded baseline -- pause_all succeeds when idle, resume_all leaves
+ * the heap usable again. */
 static void test_pause_resume_all_idle_succeeds(void) {
   jello_vm* vm = jello_vm_create();
   assert(vm != NULL);
   assert(jello_jit_reload_pause_all(vm) == 1);
   jello_jit_reload_resume_all(vm);
 
+  /* The heap must still work normally afterward -- not just "did not
+   * crash," a real exec_numeric call through it. */
   jello_type_entry types[1];
   jello_type_id r[1] = {0};
   jello_insn insns[2];
@@ -1048,6 +1012,13 @@ static void test_pause_resume_all_idle_succeeds(void) {
   printf("test_pause_resume_all_idle_succeeds: PASS\n");
 }
 
+/* Threaded variant: thread A pauses the world for "reload" while thread B is
+ * idle at the exact moment of the scan, then thread B calls
+ * jello_vm_exec_numeric -- it must block in its own new vm_safepoint_check
+ * call (exec_loop.c) rather than proceeding, and only resume once thread A
+ * calls jello_jit_reload_resume_all. Proven by timing: thread A holds the
+ * pause for a measurable duration before resuming, and thread B's own call
+ * must take at least close to that long, not return near-instantly. */
 enum { PAUSE_HOLD_MS = 150 };
 
 typedef struct pause_thread_arg {
@@ -1130,6 +1101,10 @@ static void test_reload_pause_blocks_fresh_call_on_other_thread(void) {
       a_arg.ok, b_arg.ok, b_arg.elapsed_ms);
   assert(a_arg.ok && "thread A's own pause_all must have succeeded (heap was idle)");
   assert(b_arg.ok && "thread B's own call must still produce the correct result once resumed");
+  /* The actual proof: thread B's own call could not have returned near-
+   * instantly if it was really blocked in vm_safepoint_check for the whole
+   * hold duration -- a generous margin below PAUSE_HOLD_MS to absorb
+   * scheduler noise without making this fixture flaky. */
   assert(b_arg.elapsed_ms >= (double)PAUSE_HOLD_MS * 0.5 &&
       "thread B's own call returned too quickly -- it did not actually block on thread A's pause");
 
@@ -1160,12 +1135,10 @@ int main(void) {
 #endif
 #if defined(__x86_64__)
   test_persistent_handle_matches_fresh_path();
-  test_begin_end_patch_redirects_live_call();
   test_reload_changed_function_end_to_end();
   test_reload_chapter15_survive_interaction();
 #else
   printf("test_persistent_handle_matches_fresh_path: SKIPPED (host is not x86_64)\n");
-  printf("test_begin_end_patch_redirects_live_call: SKIPPED (host is not x86_64)\n");
   printf("test_reload_changed_function_end_to_end: SKIPPED (host is not x86_64)\n");
   printf("test_reload_chapter15_survive_interaction: SKIPPED (host is not x86_64)\n");
 #endif

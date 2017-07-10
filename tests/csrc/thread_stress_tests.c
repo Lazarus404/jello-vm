@@ -13,18 +13,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "watchdog.h"
 
 #define N_THREADS 8
 #define ALLOC_ROUNDS 2500
 #define JDLL_CYCLES 50
 #define NATIVE_CALLS 4000
-
-static void watchdog_handler(int sig) {
-  (void)sig;
-  fprintf(stderr, "WATCHDOG: thread_stress_tests took too long, aborting\n");
-  fflush(stderr);
-  _exit(99);
-}
 
 typedef struct alloc_arg {
   jello_vm* vm;
@@ -403,8 +397,7 @@ static void test_reload_under_contention(void) {
 
 int main(void) {
   setvbuf(stdout, NULL, _IONBF, 0);
-  signal(SIGALRM, watchdog_handler);
-  alarm(90);
+  start_watchdog("thread_stress_tests", 90);
   test_nway_concurrent_allocation();
   test_nway_mixed_blocking();
   test_jdll_load_unload_cycling();

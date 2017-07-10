@@ -64,7 +64,7 @@ static int validate_all(const jello_bc_module* m, const char** msg) {
   return 1;
 }
 
-#define BUILD_N 50000
+#define BUILD_N 300000
 
 static void run_build_and_sum(int jit) {
   if(jit) unsetenv("JELLO_JIT_DISABLE");
@@ -107,7 +107,7 @@ static void run_build_and_sum(int jit) {
   jello_exec_status st = jello_vm_exec_numeric(vm, &m, &out);
   assert(st == JELLO_EXEC_OK);
   assert(out.kind == JELLO_NUM_I32);
-  int32_t want = (int32_t)(((int64_t)BUILD_N * (BUILD_N + 1)) / 2);
+  int32_t want = (int32_t)(uint32_t)(((uint64_t)BUILD_N * (BUILD_N + 1u)) / 2u);
   assert(out.as.i32 == want);
 
   uint32_t live = 0, collections = 0;

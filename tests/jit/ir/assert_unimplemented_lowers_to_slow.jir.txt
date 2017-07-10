@@ -1,4 +1,0 @@
-jir fn[0] nregs=2 flags=[] nslow=1
-  bc_pc=0  SLOW imm=0
-  bc_pc=1  CONST_I32 a=r1 imm=42
-  bc_pc=2  RET a=r1
