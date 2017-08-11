@@ -437,6 +437,10 @@ op_result op_bits_write(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bits_read(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_blit(exec_ctx* ctx, const jello_insn* ins);
 
+/* -- Null and enum tests (ops_dyn.c, value/value.c) -- */
+op_result op_is_null(exec_ctx* ctx, const jello_insn* ins);
+op_result op_null_check(exec_ctx* ctx, const jello_insn* ins);
+
 /* -- the boxing boundary (value/value.c) -- */
 jello_value vm_box_from_typed(jello_vm* vm, const jello_bc_module* m, const jello_bc_function* f,
                                reg_frame* rf, uint32_t r);

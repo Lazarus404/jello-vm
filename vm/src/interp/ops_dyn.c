@@ -57,6 +57,26 @@ op_result op_const_null(exec_ctx* ctx, const jello_insn* ins) {
   return OP_CONTINUE;
 }
 
+static int reg_is_null(call_frame* fr, uint32_t r) {
+  if(vm_reg_kind_fast(&fr->rf, r) == JELLO_T_DYNAMIC) return jello_is_null(vm_load_val(&fr->rf, r));
+  return vm_load_ptr(&fr->rf, r) == NULL;
+}
+
+op_result op_is_null(exec_ctx* ctx, const jello_insn* ins) {
+  call_frame* fr = current_frame(ctx);
+  vm_store_u32(&fr->rf, ins->a, (uint32_t)reg_is_null(fr, ins->b));
+  return OP_CONTINUE;
+}
+
+op_result op_null_check(exec_ctx* ctx, const jello_insn* ins) {
+  call_frame* fr = current_frame(ctx);
+  if(reg_is_null(fr, ins->a)) {
+    ctx->vm->trap_code = JELLO_TRAP_NULL_DEREF;
+    return OP_TRAP;
+  }
+  return OP_CONTINUE;
+}
+
 op_result op_const_atom(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   vm_store_u32(&fr->rf, ins->a, ins->imm);

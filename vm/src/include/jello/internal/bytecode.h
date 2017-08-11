@@ -240,6 +240,10 @@ typedef struct jello_op_info {
      op_global_get)                                                                                \
   OP(JOP_GLOBAL_SET, "GLOBAL_SET", REG, POLY, UNUSED, 0, UNUSED, 0, IMM_POOL, JELLO_OPF_NONE,      \
      op_global_set)                                                                                \
+  OP(JOP_IS_NULL, "IS_NULL", REG, T_BOOL, REG, POLY, UNUSED, 0, IMM_NONE, JELLO_OPF_NONE,          \
+     op_is_null)                                                                                   \
+  OP(JOP_NULL_CHECK, "NULL_CHECK", REG, POLY, UNUSED, 0, UNUSED, 0, IMM_NONE, JELLO_OPF_CAN_TRAP,  \
+     op_null_check)                                                                                \
 
 #define OP(id, name, ar, ak, br, bk, cr, ck, ir, fl, h) id,
 typedef enum jello_op {
@@ -247,7 +251,7 @@ typedef enum jello_op {
 } jello_op;
 #undef OP
 
-#define JOP_COUNT (JOP_GLOBAL_SET + 1)
+#define JOP_COUNT (JOP_NULL_CHECK + 1)
 
 extern const jello_op_info jello_op_table[JOP_COUNT];
 
