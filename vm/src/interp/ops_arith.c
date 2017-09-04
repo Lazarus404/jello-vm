@@ -3,6 +3,7 @@
 
 #include <jello/internal.h>
 #include <limits.h>
+#include <math.h>
 #include <string.h>
 
 /* -- cold-path numeric opcode handlers -- */
@@ -260,6 +261,31 @@ op_result op_sext_i64(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   int32_t x = (int32_t)vm_load_u32(&fr->rf, ins->b);
   vm_store_i64(&fr->rf, ins->a, (int64_t)x);
+  return OP_CONTINUE;
+}
+
+op_result op_fma_f64(exec_ctx* ctx, const jello_insn* ins) {
+  call_frame* fr = current_frame(ctx);
+  double x = vm_load_f64(&fr->rf, ins->b);
+  double y = vm_load_f64(&fr->rf, ins->c);
+  double z = vm_load_f64(&fr->rf, (uint32_t)ins->imm);
+  vm_store_f64(&fr->rf, ins->a, fma(x, y, z));
+  return OP_CONTINUE;
+}
+
+op_result op_ldexp_f64(exec_ctx* ctx, const jello_insn* ins) {
+  call_frame* fr = current_frame(ctx);
+  double x = vm_load_f64(&fr->rf, ins->b);
+  int exp = (int)(int32_t)vm_load_u32(&fr->rf, ins->c);
+  vm_store_f64(&fr->rf, ins->a, ldexp(x, exp));
+  return OP_CONTINUE;
+}
+
+op_result op_copysign_f64(exec_ctx* ctx, const jello_insn* ins) {
+  call_frame* fr = current_frame(ctx);
+  double x = vm_load_f64(&fr->rf, ins->b);
+  double y = vm_load_f64(&fr->rf, ins->c);
+  vm_store_f64(&fr->rf, ins->a, copysign(x, y));
   return OP_CONTINUE;
 }
 

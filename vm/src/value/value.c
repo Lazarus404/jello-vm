@@ -21,6 +21,26 @@ static uint32_t vm_expected_obj_kind_for_ptr_kind(jello_type_kind k) {
   }
 }
 
+int vm_dynamic_fits_ptr(const jello_bc_module* m, jello_value v, jello_type_kind k,
+                        jello_type_id type) {
+  uint32_t want = vm_expected_obj_kind_for_ptr_kind(k);
+  if(want == 0u || !jello_is_ptr(v) || jello_as_ptr(v) == NULL) return 0;
+  const jello_obj_header* h = (const jello_obj_header*)jello_as_ptr(v);
+  if(h->kind != (uint8_t)want) return 0;
+  switch(k) {
+    case JELLO_T_STRUCT: return h->type_id == m->types[type].as.strct.struct_sig_id;
+    case JELLO_T_ARRAY:
+    case JELLO_T_LIST:
+    case JELLO_T_ENUM:
+    case JELLO_T_FUNCTION: return h->type_id == type;
+    default: return 1;
+  }
+}
+
+uint32_t vm_dynamic_is_enum(jello_value v, jello_type_id type) {
+  return !jello_is_null(v) && vm_dynamic_fits_ptr(NULL, v, JELLO_T_ENUM, type);
+}
+
 jello_value vm_box_from_typed(jello_vm* vm, const jello_bc_module* m, const jello_bc_function* f,
                                reg_frame* rf, uint32_t r) {
   jello_type_kind k = vm_reg_kind(m, f, r);

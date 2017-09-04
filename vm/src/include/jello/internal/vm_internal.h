@@ -32,6 +32,7 @@ struct jello_bc_module {
   const jello_fun_sig* sigs;
   uint32_t nstruct_sigs;
   const jello_struct_sig* struct_sigs;
+  const jello_enum_sig* enum_sigs;
   uint32_t natoms;
   const char* atoms_data;
   const char* const* atoms;
@@ -43,6 +44,7 @@ struct jello_bc_module {
   const uint32_t* const_bytes_len;
   const uint32_t* const_bytes_off;
   const uint8_t* const_bytes_data;
+  uint32_t nglobals;
   const jello_type_id* global_types;
   uint64_t* globals;
   uint32_t nfuncs;
@@ -100,6 +102,24 @@ static inline int vm_reg_is_wide(const reg_frame* rf, uint32_t r) {
   return rf->wide[r] != 0;
 }
 
+static inline int vm_kind_is_gc_pointer(jello_type_kind k) {
+  switch(k) {
+    case JELLO_T_BYTES:
+    case JELLO_T_LIST:
+    case JELLO_T_ARRAY:
+    case JELLO_T_STRUCT:
+    case JELLO_T_OBJECT:
+    case JELLO_T_FUNCTION:
+    case JELLO_T_ABSTRACT:
+    case JELLO_T_ENUM: return 1;
+    default: return 0;
+  }
+}
+
+static inline int vm_kind_needs_gc_scan(jello_type_kind k) {
+  return k == JELLO_T_DYNAMIC || vm_kind_is_gc_pointer(k);
+}
+
 typedef struct jello_handle {
   jello_obj_header h;
   const struct jello_jdll_handle_class* cls;
@@ -108,6 +128,7 @@ typedef struct jello_handle {
 } jello_handle;
 
 #define JELLO_TRY_STACK_MAX 16u
+#define JELLO_SPILL_SLOTS_MAX 65536u
 
 typedef struct try_scope {
   uint32_t catch_pc;
@@ -378,6 +399,9 @@ op_result op_eq_f32(exec_ctx* ctx, const jello_insn* ins);
 op_result op_lt_f32(exec_ctx* ctx, const jello_insn* ins);
 
 op_result op_sext_i64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_fma_f64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_ldexp_f64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_copysign_f64(exec_ctx* ctx, const jello_insn* ins);
 op_result op_sext_i16(exec_ctx* ctx, const jello_insn* ins);
 op_result op_trunc_i8(exec_ctx* ctx, const jello_insn* ins);
 op_result op_trunc_i16(exec_ctx* ctx, const jello_insn* ins);
@@ -439,6 +463,10 @@ op_result op_bytes_blit(exec_ctx* ctx, const jello_insn* ins);
 
 /* -- Null and enum tests (ops_dyn.c, value/value.c) -- */
 op_result op_is_null(exec_ctx* ctx, const jello_insn* ins);
+op_result op_is_enum(exec_ctx* ctx, const jello_insn* ins);
+int vm_dynamic_fits_ptr(const jello_bc_module* m, jello_value v, jello_type_kind k,
+                        jello_type_id type);
+uint32_t vm_dynamic_is_enum(jello_value v, jello_type_id type);
 op_result op_null_check(exec_ctx* ctx, const jello_insn* ins);
 
 /* -- the boxing boundary (value/value.c) -- */

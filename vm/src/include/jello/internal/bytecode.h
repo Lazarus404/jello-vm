@@ -25,6 +25,7 @@ typedef enum jello_bc_feature_flags {
   JELLO_BC_FEAT_STACK_MAP = 1u << 11,
   JELLO_BC_FEAT_PKG_DEPS = 1u << 12,
   JELLO_BC_FEAT_IMPORTS = 1u << 13,
+  JELLO_BC_FEAT_ENUM_SCHEMA = 1u << 14,
 } jello_bc_feature_flags;
 
 /* -- opcode table -- */
@@ -236,6 +237,11 @@ typedef struct jello_op_info {
   OP(JOP_BYTES_WRITE_F64_BE, "BYTES_WRITE_F64_BE", REG, T_F64, REG, T_BYTES, REG, T_I32, IMM_NONE, JELLO_OPF_CAN_TRAP, op_bytes_write_f64_be) \
   OP(JOP_BYTES_BLIT, "BYTES_BLIT", REG, T_BYTES, REG, T_BYTES, REG, T_I32, IMM_NONE,               \
      JELLO_OPF_CAN_TRAP, op_bytes_blit)                                                            \
+  OP(JOP_FMA_F64, "FMA_F64", REG, T_F64, REG, T_F64, REG, T_F64, REG, JELLO_OPF_NONE, op_fma_f64)  \
+  OP(JOP_LDEXP_F64, "LDEXP_F64", REG, T_F64, REG, T_F64, REG, T_I32, IMM_NONE, JELLO_OPF_NONE,     \
+     op_ldexp_f64)                                                                                 \
+  OP(JOP_COPYSIGN_F64, "COPYSIGN_F64", REG, T_F64, REG, T_F64, REG, T_F64, IMM_NONE,               \
+     JELLO_OPF_NONE, op_copysign_f64)                                                              \
   OP(JOP_GLOBAL_GET, "GLOBAL_GET", REG, POLY, UNUSED, 0, UNUSED, 0, IMM_POOL, JELLO_OPF_NONE,      \
      op_global_get)                                                                                \
   OP(JOP_GLOBAL_SET, "GLOBAL_SET", REG, POLY, UNUSED, 0, UNUSED, 0, IMM_POOL, JELLO_OPF_NONE,      \
@@ -244,6 +250,8 @@ typedef struct jello_op_info {
      op_is_null)                                                                                   \
   OP(JOP_NULL_CHECK, "NULL_CHECK", REG, POLY, UNUSED, 0, UNUSED, 0, IMM_NONE, JELLO_OPF_CAN_TRAP,  \
      op_null_check)                                                                                \
+  OP(JOP_IS_ENUM, "IS_ENUM", REG, T_BOOL, REG, T_DYNAMIC, UNUSED, 0, IMM_RAW,                      \
+     JELLO_OPF_TOUCHES_DYNAMIC, op_is_enum)                                                        \
 
 #define OP(id, name, ar, ak, br, bk, cr, ck, ir, fl, h) id,
 typedef enum jello_op {
@@ -251,7 +259,7 @@ typedef enum jello_op {
 } jello_op;
 #undef OP
 
-#define JOP_COUNT (JOP_NULL_CHECK + 1)
+#define JOP_COUNT (JOP_IS_ENUM + 1)
 
 extern const jello_op_info jello_op_table[JOP_COUNT];
 

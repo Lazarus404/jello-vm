@@ -54,12 +54,25 @@ typedef struct jello_struct_sig {
   const uint32_t* field_offset;
 } jello_struct_sig;
 
+typedef struct jello_enum_variant_sig {
+  uint16_t nfields;
+  const jello_type_id* field_type;
+} jello_enum_variant_sig;
+
+typedef struct jello_enum_sig {
+  uint16_t nvariants;
+  const jello_enum_variant_sig* variants;
+} jello_enum_sig;
+
 typedef struct jello_type_entry {
   jello_type_kind kind;
   union {
     struct { jello_type_id elem; } unary;          /* LIST, ARRAY */
     struct { uint32_t sig_id; } fun;               /* FUNCTION */
     struct { uint32_t struct_sig_id; } strct;      /* STRUCT */
+    struct {
+      uint32_t enum_sig_id;
+    } enm; /**< ENUM, with ENUM_SCHEMA: its variants. */
     struct { uint32_t abstract_id; } abs;          /* ABSTRACT */
   } as;
 } jello_type_entry;

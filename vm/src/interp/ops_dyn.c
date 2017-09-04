@@ -68,6 +68,12 @@ op_result op_is_null(exec_ctx* ctx, const jello_insn* ins) {
   return OP_CONTINUE;
 }
 
+op_result op_is_enum(exec_ctx* ctx, const jello_insn* ins) {
+  call_frame* fr = current_frame(ctx);
+  vm_store_u32(&fr->rf, ins->a, vm_dynamic_is_enum(vm_load_val(&fr->rf, ins->b), ins->imm));
+  return OP_CONTINUE;
+}
+
 op_result op_null_check(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   if(reg_is_null(fr, ins->a)) {
