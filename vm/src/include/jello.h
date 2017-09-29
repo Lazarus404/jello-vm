@@ -122,6 +122,9 @@ typedef enum jello_trap_code {
   JELLO_TRAP_FUEL = 6,
   JELLO_TRAP_LIMIT = 7,
   JELLO_TRAP_UNCAUGHT_THROW = 8,
+  JELLO_TRAP_STOPPED = 9,        /**< The process was asked to stop. */
+  JELLO_TRAP_DEADLOCK = 10,      /**< The process waited for what no process could ever do. */
+  JELLO_TRAP_SEALED = 12,        /**< A write would change a sealed method (jello_object_seal). */
 } jello_trap_code;
 
 jello_trap_code jello_vm_last_trap_code(const jello_vm* vm);
@@ -130,6 +133,7 @@ void jello_vm_set_fuel(jello_vm* vm, uint64_t fuel);
 void jello_vm_set_max_bytes_len(jello_vm* vm, uint32_t max_len);
 uint32_t jello_vm_last_trap_pc(const jello_vm* vm);
 uint32_t jello_vm_last_trap_func_index(const jello_vm* vm);
+#define JELLO_TRAP_CALLERS_MAX 16u
 
 /* -- the Dynamic boundary -- */
 typedef uintptr_t jello_value;
@@ -243,6 +247,7 @@ typedef enum jello_obj_kind {
   JELLO_OBJ_ARRAY = 8,
   JELLO_OBJ_FUNCTION = 9,
   JELLO_OBJ_LIST = 10,
+  JELLO_OBJ_ENUM = 11,
   JELLO_OBJ_HANDLE = 12, /**< A native library's object, reachable only through Dynamic. */
 } jello_obj_kind;
 
@@ -259,6 +264,7 @@ typedef struct jello_bytes {
 } jello_bytes;
 
 jello_bytes* jello_bytes_new(jello_vm* vm, uint32_t length);
+jello_bytes* jello_bytes_new_zeroed(jello_vm* vm, uint32_t length);
 
 /* -- numeric boxing -- */
 typedef struct jello_box_i64 { jello_obj_header h; int64_t value; } jello_box_i64;
@@ -329,6 +335,13 @@ typedef struct jello_list {
 } jello_list;
 
 jello_list* jello_list_cons(jello_vm* vm, uint32_t type_id, jello_value head, jello_list* tail);
+
+typedef struct jello_enum {
+  jello_obj_header h;
+  uint32_t tag;
+  uint32_t nfields;
+  jello_value fields[];
+} jello_enum;
 
 /* -- Function -- */
 typedef struct jello_function {

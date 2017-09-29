@@ -21,6 +21,13 @@ jello_type_kind vm_reg_kind(const jello_bc_module* m, const jello_bc_function* f
   return m->types[f->reg_types[r]].kind;
 }
 
+int vm_func_has_pointer(const jello_bc_module* m, const jello_bc_function* f) {
+  for(uint32_t r = 0; r < f->nregs; r++) {
+    if(vm_kind_needs_gc_scan(vm_reg_kind(m, f, r))) return 1;
+  }
+  return 0;
+}
+
 static frame_layout* find_layout(jello_vm* vm, const jello_bc_function* f) {
   for(uint32_t i = 0; i < vm->frame_layouts_len; i++) {
     if(vm->frame_layouts[i].f == f) return &vm->frame_layouts[i];
@@ -235,6 +242,20 @@ void vm_copy_captures_into_top(jello_vm* vm, const jello_function* fn) {
     if(vm_reg_is_wide(&fr->rf, cap_start + i)) vm_store_i64(&fr->rf, cap_start + i, (int64_t)fn->captures[i]);
     else vm_store_u32(&fr->rf, cap_start + i, (uint32_t)fn->captures[i]);
   }
+}
+
+const jello_function* vm_callee_function(jello_vm* vm, jello_value v) {
+  const jello_function* fn = jello_is_ptr(v) ? (const jello_function*)jello_as_ptr(v) : NULL;
+  if(!fn) {
+    vm->trap_code =
+        (jello_is_null(v) || jello_is_ptr(v)) ? JELLO_TRAP_NULL_DEREF : JELLO_TRAP_TYPE_MISMATCH;
+    return NULL;
+  }
+  if(fn->h.kind != (uint8_t)JELLO_OBJ_FUNCTION) {
+    vm->trap_code = JELLO_TRAP_TYPE_MISMATCH;
+    return NULL;
+  }
+  return fn;
 }
 
 void vm_pop_frame(jello_vm* vm) {

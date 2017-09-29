@@ -32,6 +32,7 @@ add_library(jello_vm STATIC
   src/value/value.c
   src/gc/gc.c
   src/gc/object.c
+  src/proc/process.c
   src/thread/thread.c
   src/jdll/loader.c
   src/jdll/marshal.c
@@ -69,6 +70,7 @@ if(JELLO_ENABLE_JIT)
   target_compile_definitions(jello_vm PRIVATE JELLO_ENABLE_JIT)
 endif()
 target_include_directories(jello_vm PUBLIC src/include)
+target_compile_definitions(jello_vm PRIVATE JELLO_JDLL_HOST)
 if(JELLO_USE_COMPUTED_GOTO)
   target_compile_definitions(jello_vm PRIVATE JELLO_USE_COMPUTED_GOTO)
 endif()

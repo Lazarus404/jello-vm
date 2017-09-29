@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * The layout of jdlo_ctx, shared by the native-call instruction and the jdl_* accessors. */
+
 #ifndef JELLO_JDLL_INTERNAL_H
 #define JELLO_JDLL_INTERNAL_H
 

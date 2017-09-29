@@ -375,6 +375,41 @@ jello_bytes* jello_bytes_new(jello_vm* vm, uint32_t length) {
   return b;
 }
 
+jello_bytes* jello_bytes_new_zeroed(jello_vm* vm, uint32_t length) {
+  jello_bytes* b = jello_bytes_new(vm, length);
+  if(length > 0) memset(b->data, 0, length);
+  return b;
+}
+
+jello_bytes* vm_buffer_new(jello_vm* vm, uint32_t length) {
+  jello_bytes* b = jello_bytes_new_zeroed(vm, length);
+  b->h.type_id = JELLO_BYTES_BUFFER;
+  return b;
+}
+
+jello_bytes* jello_bytes_join(jello_vm* vm, jello_bytes* const* parts, uint32_t n,
+                              const jello_bytes* separator) {
+  uint32_t gap = separator ? separator->length : 0;
+  uint64_t total = n ? (uint64_t)gap * (n - 1) : 0;
+  /* Stopping once it is too long keeps the sum from wrapping. */
+  for(uint32_t i = 0; i < n && total <= (uint64_t)UINT32_MAX; i++) total += parts[i]->length;
+  if(total > (uint64_t)UINT32_MAX) {
+    vm->trap_code = JELLO_TRAP_BOUNDS;
+    return NULL;
+  }
+  jello_bytes* dst = jello_bytes_new(vm, (uint32_t)total);
+  uint32_t at = 0;
+  for(uint32_t i = 0; i < n; i++) {
+    if(i && gap) {
+      memcpy(dst->data + at, separator->data, gap);
+      at += gap;
+    }
+    if(parts[i]->length) memcpy(dst->data + at, parts[i]->data, parts[i]->length);
+    at += parts[i]->length;
+  }
+  return dst;
+}
+
 /* -- numeric boxing -- */
 
 jello_box_i64* jello_box_i64_new(jello_vm* vm, int64_t v) {
@@ -432,7 +467,6 @@ void jello_array_resize(jello_vm* vm, const jello_bc_module* m, jello_array* a, 
     void* grown = realloc(a->data, (size_t)new_cap * (size_t)elem_size);
     if(!grown) abort();
     a->data = grown;
-    memset((uint8_t*)a->data + (size_t)a->cap * elem_size, 0, (size_t)(new_cap - a->cap) * elem_size);
     a->cap = new_cap;
   } else if(new_length > a->length) {
     memset((uint8_t*)a->data + (size_t)a->length * elem_size, 0, (size_t)(new_length - a->length) * elem_size);
@@ -449,6 +483,18 @@ jello_function* jello_function_new(jello_vm* vm, uint32_t func_index, uint32_t n
   fn->ncaps = ncaps;
   for(uint32_t i = 0; i < ncaps; i++) fn->captures[i] = 0;
   return fn;
+}
+
+void* vm_immortal_alloc(size_t size) {
+  if(size > SIZE_MAX - sizeof(jello_gc_hdr)) abort();
+  jello_gc_hdr* h = (jello_gc_hdr*)calloc(1, sizeof(jello_gc_hdr) + size);
+  if(!h) abort();
+  h->marked = GC_IMMORTAL;
+  return obj_of(h);
+}
+
+void vm_immortal_free(void* p) {
+  if(p) free(hdr_of(p));
 }
 
 /* -- Struct -- */

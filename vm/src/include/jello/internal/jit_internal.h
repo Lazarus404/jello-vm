@@ -18,12 +18,28 @@ typedef struct jello_jit_code {
   uint32_t nloop_anchors;
 } jello_jit_code;
 
+typedef enum jello_jit_decline {
+  JIT_DECLINE_NONE = 0,
+  JIT_DECLINE_IR_BUILD, /**< The bytecode has no JIR form. */
+  JIT_DECLINE_VERIFY,   /**< The JIR failed jello_jit_ir_verify. */
+  JIT_DECLINE_SHAPE,    /**< jit_ir_shape_ok refused it. */
+  JIT_DECLINE_SURVIVE,  /**< Call-survive planning failed. */
+  JIT_DECLINE_EMIT,     /**< Emission failed; an op the backend cannot emit, a full buffer, or
+                         * (x64) a call-patch list that could not grow. */
+  JIT_DECLINE_OOM,
+} jello_jit_decline;
+
 typedef struct jello_jit_func_code {
   size_t blob_off, entry_off, body_off, size;
   uint32_t* loop_anchor_pcs;
   size_t* loop_anchor_offs;
   uint32_t nloop_anchors;
+  uint8_t compiled;
   uint8_t tried;          /**< Compiled or declined; set once. */
+  uint8_t decline_reason; /**< A jello_jit_decline; NONE when compiled. */
+  uint16_t decline_op;    /**< Bytecode opcode at decline_pc. */
+  uint32_t decline_pc;    /**< UINT32_MAX when no single instruction is to blame. */
+  uint32_t calls;         /**< Calls counted towards JIT_COMPILE_AFTER_CALLS while not tried. */
 } jello_jit_func_code;
 
 typedef struct jello_jit_call_patch {
@@ -32,6 +48,8 @@ typedef struct jello_jit_call_patch {
   size_t site_off;
 } jello_jit_call_patch;
 
+#define JIT_COMPILE_AFTER_CALLS 1u
+
 typedef struct jello_jit_module {
   jit_exec_buf blob;
   jello_jit_func_code* funcs;
@@ -39,9 +57,14 @@ typedef struct jello_jit_module {
   int prepared;
   jello_jit_call_patch* patches;
   uint32_t npatch;
+  uint32_t ncompiled;
+  size_t bridge_off, enter_off, lazy_off;
+  const void** entries;
+  const jello_bc_module* m;
 } jello_jit_module;
 
-typedef jello_exec_status (*jello_jit_entry_fn)(jello_vm* vm, uint8_t* frame_base, jello_numeric_result* out);
+typedef jello_exec_status(JELLO_JIT_ABI* jello_jit_entry_fn)(jello_vm* vm, uint8_t* frame_base,
+                                                             jello_numeric_result* out);
 
 int jello_jit_compile_function(const jello_bc_module* m, uint32_t fi, jello_jit_code* out_code);
 void jello_jit_code_free(jello_jit_code* code);

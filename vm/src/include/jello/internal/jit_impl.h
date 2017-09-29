@@ -209,7 +209,9 @@ typedef struct jit_exec_buf {
   size_t len;    /* bytes written so far -- grows as the emitter writes, capped at `cap` */
   int finalized; /* 1 once jit_finalize_exec_buf has mprotect'd this region RX */
   int patch_open;
+  int overflowed; /**< Set when a write did not fit; the emitter declines the function. */
   size_t limit;   /**< Writes stop here; cap, or the end of an open append window. */
+  size_t append_from, append_end; /**< The open append window's start and its pages' end. */
 } jit_exec_buf;
 
 jit_exec_buf jit_alloc_exec_buf(size_t cap);
@@ -317,5 +319,14 @@ void jit_bits_write(jello_bytes* b, uint32_t width, uint32_t bit_off, uint32_t v
 uint32_t jit_bits_read(const jello_bytes* b, uint32_t width, uint32_t bit_off);
 void jit_frame_zero_and_null_init(uint8_t* mem, uint32_t total, const uint8_t* kind, uint32_t nregs);
 jello_bytes* jit_bytes_concat2(jello_vm* vm, jello_bytes* b, jello_bytes* c);
+
+#define JIT_TRAP_SITE_OFF                                                                          \
+  ((uint32_t)(offsetof(jello_vm, trap_trace) + offsetof(jello_trap_trace, site)))
+
+#ifdef JELLO_JIT_SYSV_THUNKS
+#define JIT_C(fn) jit_sysv_##fn
+#else
+#define JIT_C(fn) fn
+#endif
 
 #endif /* JELLO_JIT_IMPL_H */

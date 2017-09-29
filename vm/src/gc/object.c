@@ -42,6 +42,7 @@ jello_object* jello_object_new(jello_vm* vm, uint32_t type_id) {
   o->proto = NULL;
   o->len = 0;
   o->tombstones = 0;
+  o->sealed = 0;
   uint8_t* block = (uint8_t*)malloc(table_bytes(JELLO_OBJECT_INIT_CAP));
   if(!block) abort();
   bind_table(o, block, JELLO_OBJECT_INIT_CAP);
@@ -119,6 +120,15 @@ static void ensure_cap(jello_object* o) {
   }
 }
 
+int vm_object_find(const jello_object* o, uint32_t atom_id, int keep, jello_value* out) {
+  int found = 0;
+  uint32_t i = find_occupied_slot(o, atom_id, &found);
+  if(!found) return 0;
+  *out = o->vals[i];
+  if(keep && o->states[i] == JELLO_OBJ_SLOT_OWNED) o->states[i] = JELLO_OBJ_SLOT_OCCUPIED;
+  return 1;
+}
+
 int jello_object_has(const jello_object* o, uint32_t atom_id) {
   int found = 0;
   (void)find_occupied_slot(o, atom_id, &found);
@@ -130,6 +140,12 @@ jello_value jello_object_get(const jello_object* o, uint32_t atom_id) {
   uint32_t i = find_occupied_slot(o, atom_id, &found);
   if(!found) return jello_make_null();
   return o->vals[i];
+}
+
+uint8_t vm_object_state(const jello_object* o, uint32_t atom_id) {
+  int found = 0;
+  uint32_t i = find_occupied_slot(o, atom_id, &found);
+  return found ? o->states[i] : (uint8_t)JELLO_OBJ_SLOT_EMPTY;
 }
 
 static void object_put(jello_object* o, uint32_t atom_id, jello_value v, uint8_t state) {
@@ -147,19 +163,28 @@ static void object_put(jello_object* o, uint32_t atom_id, jello_value v, uint8_t
 }
 
 void jello_object_set(jello_object* o, uint32_t atom_id, jello_value v) {
-  ensure_cap(o);
-  int found = 0;
-  uint32_t i = find_slot(o, atom_id, &found);
-  if(!found) {
-    o->keys[i] = atom_id;
-    o->states[i] = JELLO_OBJ_SLOT_OCCUPIED;
-    o->len++;
-  }
-  o->vals[i] = v;
+  object_put(o, atom_id, v, JELLO_OBJ_SLOT_OCCUPIED);
 }
 
 void jello_object_seal(jello_object* o, uint32_t atom_id, jello_value v) {
   object_put(o, atom_id, v, JELLO_OBJ_SLOT_SEALED);
+}
+
+void vm_object_set_f64(jello_vm* vm, jello_object* o, uint32_t atom_id, double d) {
+  int found = 0;
+  uint32_t i = find_occupied_slot(o, atom_id, &found);
+  if(found && o->states[i] == JELLO_OBJ_SLOT_OWNED) {
+    ((jello_box_f64*)jello_as_ptr(o->vals[i]))->value = d;
+    return;
+  }
+  jello_value b = jello_from_ptr(jello_box_f64_new(vm, d));
+  if(!found) {
+    object_put(o, atom_id, b, JELLO_OBJ_SLOT_OWNED);
+    return;
+  }
+  o->sealed -= o->states[i] == JELLO_OBJ_SLOT_SEALED;
+  o->vals[i] = b;
+  o->states[i] = JELLO_OBJ_SLOT_OWNED;
 }
 
 int jello_object_remove(jello_object* o, uint32_t atom_id) {

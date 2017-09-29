@@ -3,6 +3,14 @@
 
 #include <jello/internal.h>
 
+void vm_try_pop(jello_vm* vm) {
+  call_frame* fr = &vm->call_frames[vm->call_frames_len - 1u];
+  if(fr->try_stack_len > 0) {
+    fr->try_stack_len--;
+    vm->live_try_scopes--;
+  }
+}
+
 /* -- exception-handling opcodes -- */
 
 op_result op_try(exec_ctx* ctx, const jello_insn* ins) {

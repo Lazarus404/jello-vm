@@ -102,6 +102,8 @@ jello_jdll_handle* jello_jdll_load(const char* library_name) {
   return h;
 }
 
+const char* jello_jdll_path(const jello_jdll_handle* h) { return h->path; }
+
 void jello_jdll_unload(jello_jdll_handle* h) {
   if(!h) return;
   dlclose(h->dl);
