@@ -2,6 +2,7 @@
 // Copyright (c) Jahred Love. All rights reserved.
 
 #include <jello/internal.h>
+#include <jello/internal/platform.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -183,7 +184,6 @@ static call_frame* push_frame_shell(jello_vm* vm, const jello_bc_module* m, uint
   fr->has_caller = has_caller;
   fr->has_pointer = (uint8_t)fl->has_pointer;
   fr->caller_dst = caller_dst;
-  fr->try_stack_len = 0;
   fr->spill_slots = NULL;
   fr->spill_cap = 0;
 

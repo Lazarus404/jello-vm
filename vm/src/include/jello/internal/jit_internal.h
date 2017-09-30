@@ -63,6 +63,8 @@ typedef struct jello_jit_module {
   const jello_bc_module* m;
 } jello_jit_module;
 
+extern size_t jit_append_window_bytes;
+
 typedef jello_exec_status(JELLO_JIT_ABI* jello_jit_entry_fn)(jello_vm* vm, uint8_t* frame_base,
                                                              jello_numeric_result* out);
 

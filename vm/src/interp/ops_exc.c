@@ -3,6 +3,8 @@
 
 #include <jello/internal.h>
 
+#include <stdlib.h>
+
 void vm_try_pop(jello_vm* vm) {
   call_frame* fr = &vm->call_frames[vm->call_frames_len - 1u];
   if(fr->try_stack_len > 0) {
@@ -28,9 +30,7 @@ op_result op_try(exec_ctx* ctx, const jello_insn* ins) {
 
 op_result op_endtry(exec_ctx* ctx, const jello_insn* ins) {
   (void)ins;
-  jello_vm* vm = ctx->vm;
-  call_frame* fr = &vm->call_frames[vm->call_frames_len - 1u];
-  if(fr->try_stack_len > 0) fr->try_stack_len--;
+  vm_try_pop(ctx->vm);
   return OP_CONTINUE;
 }
 

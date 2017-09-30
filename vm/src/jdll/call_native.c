@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * CALL_NATIVE: calls a `.jdll` export and stores its result, null for a Void one, or traps when
+ * the export failed or returned the wrong kind. An export whose result is Dynamic may return
+ * Bytes, which the Dynamic then holds, so that a blocking one, which cannot allocate, can return
+ * Bytes or null. */
+
 #include <jello/internal/jdll_internal.h>
 #include <jello/internal/proc_internal.h>
 
 #include <stdio.h>
-
 #include <stdlib.h>
 #include <string.h>
 
-/* -- JOP_CALL_NATIVE -- */
 op_result op_call_native(exec_ctx* ctx, const jello_insn* ins) {
   jello_vm* vm = ctx->vm;
   const jello_bc_module* m = ctx->m;
@@ -36,10 +40,9 @@ op_result op_call_native(exec_ctx* ctx, const jello_insn* ins) {
     return OP_TRAP;
   }
 
-  if(jctx.ret_kind_given == JELLO_T_VOID) return OP_CONTINUE;
-
   reg_frame* rf = &fr->rf;
   switch(jctx.ret_kind_given) {
+    case JELLO_T_VOID: vm_store_val(rf, ins->a, jello_make_null()); break;
     case JELLO_T_BOOL:
     case JELLO_T_I8:
     case JELLO_T_I16:

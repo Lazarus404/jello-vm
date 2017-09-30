@@ -17,11 +17,7 @@ op_result op_const_bytes(exec_ctx* ctx, const jello_insn* ins) {
     ctx->vm->trap_code = JELLO_TRAP_BOUNDS;
     return OP_TRAP;
   }
-  uint32_t len = m->const_bytes_len[idx];
-  uint32_t off = m->const_bytes_off[idx];
-  jello_bytes* b = jello_bytes_new(ctx->vm, len);
-  if(len > 0) memcpy(b->data, m->const_bytes_data + off, len);
-  vm_store_ptr(&fr->rf, ins->a, b);
+  vm_store_ptr(&fr->rf, ins->a, m->const_bytes_values[idx]);
   return OP_CONTINUE;
 }
 

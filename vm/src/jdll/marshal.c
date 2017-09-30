@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * The jdl_* accessors a native export calls. None checks kinds; at load time each import's
+ * signature was matched to the library's export, and each CALL_NATIVE's registers to the import. */
+
 #include <jello/internal/jdll_internal.h>
 
 #include <stdio.h>
-
 #include <stdlib.h>
 #include <string.h>
 
@@ -47,6 +50,12 @@ void jdl_release_ret(jdlo_ctx* c) {
   c->handle_bytes = 0;
 }
 
+static void set_ret(jdlo_ctx* c, jello_type_kind k) {
+  if(c->returned) jdl_release_ret(c);
+  c->ret_kind_given = k;
+  c->returned = 1;
+}
+
 void jdl_return_i8(jdlo_ctx* c, int32_t v) { c->ret.i32 = v; c->ret_kind_given = JELLO_T_I8; c->returned = 1; }
 void jdl_return_i16(jdlo_ctx* c, int32_t v) { c->ret.i32 = v; c->ret_kind_given = JELLO_T_I16; c->returned = 1; }
 void jdl_return_i32(jdlo_ctx* c, int32_t v) { c->ret.i32 = v; c->ret_kind_given = JELLO_T_I32; c->returned = 1; }
@@ -56,9 +65,8 @@ void jdl_return_f32(jdlo_ctx* c, float v) { c->ret.f32 = v; c->ret_kind_given = 
 void jdl_return_f64(jdlo_ctx* c, double v) { c->ret.f64 = v; c->ret_kind_given = JELLO_T_F64; c->returned = 1; }
 void jdl_return_bool(jdlo_ctx* c, int v) { c->ret.i32 = v ? 1 : 0; c->ret_kind_given = JELLO_T_BOOL; c->returned = 1; }
 void jdl_return_atom(jdlo_ctx* c, uint32_t atom_id) {
+  set_ret(c, JELLO_T_ATOM);
   c->ret.i32 = (int32_t)atom_id;
-  c->ret_kind_given = JELLO_T_ATOM;
-  c->returned = 1;
 }
 void jdl_return_bytes_copy(jdlo_ctx* c, const uint8_t* data, uint32_t len) {
   uint8_t* copy = NULL;
@@ -73,9 +81,8 @@ void jdl_return_bytes_copy(jdlo_ctx* c, const uint8_t* data, uint32_t len) {
   c->returned = 1;
 }
 void jdl_return_value(jdlo_ctx* c, jello_value v) {
+  set_ret(c, JELLO_T_DYNAMIC);
   c->ret.dyn = v;
-  c->ret_kind_given = JELLO_T_DYNAMIC;
-  c->returned = 1;
 }
 void jdl_return_void(jdlo_ctx* c) {
   c->ret_kind_given = JELLO_T_VOID;
@@ -84,7 +91,10 @@ void jdl_return_void(jdlo_ctx* c) {
 
 void jdl_fail(jdlo_ctx* c, const char* msg) {
   c->failed = 1;
-  c->fail_msg = msg;
+  c->fail_said = msg != NULL;
+  if(msg)
+    snprintf(c->vm->trap_detail, sizeof c->vm->trap_detail, "native %s failed: %s",
+             c->sig->resolved->name, msg);
 }
 
 #define HOST_MEMBER(f) .f = f,

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * Opening native libraries; finds and opens `<name>.jdll` and checks its jello_jdll_manifest. */
+
 #include <jello/internal/jdll_internal.h>
 
 #include <dlfcn.h>
@@ -12,8 +15,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
-
-/* -- .jdll loading -- */
 
 struct jello_jdll_handle {
   void* dl;
@@ -70,6 +71,9 @@ static void* resolve_and_open(const char* library_name) {
   free(copy);
   return NULL;
 }
+static _Thread_local char g_jdll_err[4608];
+
+const char* jello_jdll_last_error(void) { return g_jdll_err; }
 
 typedef struct search {
   char soname[256];

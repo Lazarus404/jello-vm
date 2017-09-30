@@ -41,6 +41,7 @@ typedef struct proc_pool {
   uint8_t** slabs;       /**< Every slab it has mapped, for proc_pool_free. */
   uint32_t nslabs;
 } proc_pool;
+void proc_slot_give(proc_pool* pool, uint8_t* slot);
 
 static inline uint8_t* proc_slot_mid(const proc_pool* pool, uint8_t* slot) {
   return slot + pool->native_bytes;
@@ -146,6 +147,7 @@ typedef struct jello_process {
   _Atomic uint8_t stopping; /**< Set under `mu` by proc_stop, to the first reason it was given. */
   uint8_t cleaning; /**< Its own: set while its cleanups run, when a stop waits, a park traps. */
   uint8_t pinned;   /**< Run only by scheduler 0: the main process, and those spawned on main. */
+  struct proc_socket* sockets; /**< The sockets it owns, closed as it finishes; see net.c. */
   proc_timer deadline;         /**< The deadline of its park, while it has one. */
   proc_timer* sends;           /**< Its armed sending timers. */
   jello_value* cleanups; /**< Its own: what onExit registered, run last first as it finishes. */

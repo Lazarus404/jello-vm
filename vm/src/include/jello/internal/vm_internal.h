@@ -660,6 +660,7 @@ typedef struct vm_parcel {
   jello_gc_hdr* objects; /**< The blocks copied for it, linked as a space's are. */
   jello_gc_hdr* tail;    /**< The last of them. */
   uint64_t bytes;        /**< What they count live, as alloc counts it. */
+  struct proc_socket_list* sockets;
 } vm_parcel;
 
 static inline vm_parcel vm_parcel_empty(void) { return (vm_parcel){.value = jello_make_null()}; }
@@ -667,6 +668,8 @@ static inline void vm_parcel_move(vm_parcel* to, vm_parcel* from) {
   *to = *from;
   *from = vm_parcel_empty();
 }
+void vm_parcel_join(vm_parcel* into, vm_parcel* from);
+void proc_sockets_join(struct proc_socket_list** into, struct proc_socket_list** from);
 
 #define JELLO_BYTES_BUFFER 1u
 #define VM_REDUCTIONS 2000u
@@ -692,6 +695,7 @@ void vm_heap_resume_the_world(jello_vm* vm);
 /* -- the JDLL ABI (jdll/loader.c, jdll/marshal.c, jdll/call_native.c) -- */
 typedef struct jello_jdll_handle jello_jdll_handle;
 jello_jdll_handle* jello_jdll_load(const char* library_name);
+const char* jello_jdll_last_error(void);
 const char* jello_jdll_path(const jello_jdll_handle* h);
 void jello_jdll_unload(jello_jdll_handle* h);
 const struct jello_jdll_export* jello_jdll_find_export(const jello_jdll_handle* h, const char* name);

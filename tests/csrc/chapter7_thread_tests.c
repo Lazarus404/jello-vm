@@ -321,6 +321,7 @@ typedef struct jit_loop_arg {
   jello_vm* vm;
   jello_jit_module* jm;
   const jello_bc_module* m;
+  jello_exec_status st;
 } jit_loop_arg;
 
 /* -- fixture 3: the std JDLL's file I/O, get_env, argv -- */

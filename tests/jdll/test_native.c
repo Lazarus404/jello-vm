@@ -29,11 +29,11 @@ static void tn_sleep_ms(jdlo_ctx* c) {
 }
 
 static const jello_jdll_export TEST_NATIVE_EXPORTS[] = {
-  {"echo_i32", tn_echo_i32, (uint8_t)JELLO_T_I32, 1, {(uint8_t)JELLO_T_I32}},
-  {"sum2_i32", tn_sum2_i32, (uint8_t)JELLO_T_I32, 2, {(uint8_t)JELLO_T_I32, (uint8_t)JELLO_T_I32}},
-  {"echo_bytes", tn_echo_bytes, (uint8_t)JELLO_T_BYTES, 1, {(uint8_t)JELLO_T_BYTES}},
-  {"echo_dyn", tn_echo_dyn, (uint8_t)JELLO_T_DYNAMIC, 1, {(uint8_t)JELLO_T_DYNAMIC}},
-  {"sleep_ms", tn_sleep_ms, (uint8_t)JELLO_T_BOOL, 1, {(uint8_t)JELLO_T_I32}},
+  {"echo_i32", tn_echo_i32, (uint8_t)JELLO_T_I32, 1, {(uint8_t)JELLO_T_I32}, 0},
+  {"sum2_i32", tn_sum2_i32, (uint8_t)JELLO_T_I32, 2, {(uint8_t)JELLO_T_I32, (uint8_t)JELLO_T_I32}, 0},
+  {"echo_bytes", tn_echo_bytes, (uint8_t)JELLO_T_BYTES, 1, {(uint8_t)JELLO_T_BYTES}, 0},
+  {"echo_dyn", tn_echo_dyn, (uint8_t)JELLO_T_DYNAMIC, 1, {(uint8_t)JELLO_T_DYNAMIC}, 0},
+  {"sleep_ms", tn_sleep_ms, (uint8_t)JELLO_T_BOOL, 1, {(uint8_t)JELLO_T_I32}, 0},
 };
 
 const jello_jdll_manifest jello_jdll_manifest_test_native = {

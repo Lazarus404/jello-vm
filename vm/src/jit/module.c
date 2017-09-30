@@ -2,6 +2,8 @@
 // Copyright (c) Jahred Love. All rights reserved.
 
 #include <jello/internal/jit_internal.h>
+#include <jello/internal/platform.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -70,6 +72,8 @@ int jello_jit_module_prepare(const jello_bc_module* m, jello_jit_module* out) {
   out->prepared = 1;
   return 1;
 }
+
+size_t jit_append_window_bytes;
 
 void jello_jit_module_free(jello_jit_module* jm) {
   if(!jm) return;

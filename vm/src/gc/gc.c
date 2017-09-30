@@ -111,6 +111,18 @@ void jello_vm_gc_stats(const jello_vm* vm, uint32_t* out_live_bytes, uint32_t* o
   if(out_pause_ms) *out_pause_ms = vm->heap->gc_pause_ms;
 }
 
+void vm_parcel_join(vm_parcel* into, vm_parcel* from) {
+  if(from->objects) {
+    from->tail->next = into->objects;
+    if(!into->objects) into->tail = from->tail;
+    into->objects = from->objects;
+    into->bytes += from->bytes;
+  }
+  if(from->sockets) proc_sockets_join(&into->sockets, &from->sockets);
+  free(from->protos);
+  *from = vm_parcel_empty();
+}
+
 void* jello_gc_alloc(jello_vm* vm, size_t size) {
   if(!vm) abort();
   vm_safepoint_check(vm);
