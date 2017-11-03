@@ -32,6 +32,7 @@ struct jello_bc_module {
   const jello_fun_sig* sigs;
   uint32_t nstruct_sigs;
   const jello_struct_sig* struct_sigs;
+  uint32_t nenum_sigs;
   const jello_enum_sig* enum_sigs;
   uint32_t natoms;
   const char* atoms_data;
@@ -52,12 +53,16 @@ struct jello_bc_module {
   uint32_t nptr_globals;
   uint32_t nfuncs;
   const jello_bc_function* funcs;
+  _Atomic(struct jello_function*)* const_funs;
   _Atomic(struct jello_enum*)* const_enums;
+  uint32_t nconst_enums;
   const uint32_t* const_enum_base; /**< By type; meaningful for an enum type only. */
   uint32_t entry;
   uint8_t proto_enabled;
   uint32_t nimports;
   const jello_import_sig* imports;
+  uint32_t nsource_files;
+  const char* const* source_files; /**< Line-table source paths (JELLO_BC_FEAT_LINE_TABLE). */
   void* jdll_handles;
   uint32_t njdll_handles;
 };
@@ -649,6 +654,7 @@ op_result op_obj_has(exec_ctx* ctx, const jello_insn* ins);
 op_result op_obj_remove(exec_ctx* ctx, const jello_insn* ins);
 op_result op_obj_clear(exec_ctx* ctx, const jello_insn* ins);
 op_result op_obj_copy(exec_ctx* ctx, const jello_insn* ins);
+op_result op_obj_keys(exec_ctx* ctx, const jello_insn* ins);
 
 typedef struct vm_protos {
   uint32_t len;
@@ -679,6 +685,7 @@ static inline int vm_bytes_is_buffer(const jello_bytes* b) {
 }
 jello_bytes* vm_buffer_new(jello_vm* vm, uint32_t length);
 void* vm_immortal_alloc(size_t size);
+size_t vm_bytes_immortal_size(uint32_t length);
 void vm_immortal_free(void* p);
 
 /* -- threads + the shared heap (thread/thread.c) -- */

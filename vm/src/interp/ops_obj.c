@@ -187,3 +187,18 @@ op_result op_obj_copy(exec_ctx* ctx, const jello_insn* ins) {
   vm_store_ptr(&fr->rf, ins->a, dst);
   return OP_CONTINUE;
 }
+
+op_result op_obj_keys(exec_ctx* ctx, const jello_insn* ins) {
+  call_frame* fr = current_frame(ctx);
+  jello_object* o = (jello_object*)vm_load_ptr(&fr->rf, ins->b);
+  if(!o) {
+    ctx->vm->trap_code = JELLO_TRAP_NULL_DEREF;
+    return OP_TRAP;
+  }
+  int skip_proto = ctx->m->proto_enabled && jello_object_has(o, JELLO_ATOM___PROTO__);
+  jello_array* arr =
+      jello_array_new(ctx->vm, ctx->m, fr->f->reg_types[ins->a], o->len - (uint32_t)skip_proto);
+  jello_object_keys(o, skip_proto, (uint32_t*)arr->data);
+  vm_store_ptr(&fr->rf, ins->a, arr);
+  return OP_CONTINUE;
+}

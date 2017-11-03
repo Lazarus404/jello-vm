@@ -505,6 +505,10 @@ void* vm_immortal_alloc(size_t size) {
   return obj_of(h);
 }
 
+size_t vm_bytes_immortal_size(uint32_t length) {
+  return (sizeof(jello_gc_hdr) + sizeof(jello_bytes) + (size_t)length + 7u) & ~(size_t)7u;
+}
+
 void vm_immortal_free(void* p) {
   if(p) free(hdr_of(p));
 }
