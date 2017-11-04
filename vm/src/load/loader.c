@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * The `.jlo` reader; parses a module into memory it owns, loads and checks its native imports,
+ * then runs check.c's validation over every function. */
+
 #include <jello/internal.h>
 #include <jello/jdll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-/* -- loader -- */
 
 #define JELLO_JLO_MAGIC 0x4A4C5942u
 #define JELLO_JLO_VERSION 1u
@@ -28,7 +30,7 @@ static jello_bc_result err(jello_bc_error e, const char* msg, size_t off) {
   return r;
 }
 
-static char g_validate_err[512];
+static _Thread_local char g_validate_err[512];
 
 static jello_bc_result validate_insn_ctx(
     const jello_bc_module* m,
@@ -157,6 +159,14 @@ void jello_bc_free(jello_bc_module* m) {
     }
     free((void*)m->struct_sigs);
   }
+  if(m->enum_sigs) {
+    for(uint32_t i = 0; i < m->nenum_sigs; i++) {
+      for(uint16_t j = 0; j < m->enum_sigs[i].nvariants; j++)
+        free((void*)m->enum_sigs[i].variants[j].field_type);
+      free((void*)m->enum_sigs[i].variants);
+    }
+    free((void*)m->enum_sigs);
+  }
   free((void*)m->atoms_data);
   free((void*)m->atoms);
   free((void*)m->const_i64);
@@ -168,8 +178,13 @@ void jello_bc_free(jello_bc_module* m) {
     for(uint32_t i = 0; i < m->nfuncs; i++) {
       free((void*)m->funcs[i].reg_types);
       free((void*)m->funcs[i].insns);
+      free((void*)m->funcs[i].locs);
     }
     free((void*)m->funcs);
+  }
+  if(m->source_files) {
+    for(uint32_t i = 0; i < m->nsource_files; i++) free((void*)m->source_files[i]);
+    free((void*)m->source_files);
   }
   free(m);
 }
@@ -209,10 +224,20 @@ jello_bc_result jello_bc_read(const uint8_t* data, size_t size, jello_bc_module*
     if((rr = rd_u32(&r, &m->nconst_f64)).err) { jello_bc_free(m); *out = NULL; return rr; }
   }
   if(m->features & (uint32_t)JELLO_BC_FEAT_CONSTBYTES) {
-    if((rr = rd_u32(&r, &m->nconst_bytes)).err) { jello_bc_free(m); *out = NULL; return rr; }
+    if((rr = rd_u32(&r, &m->nconst_bytes)).err) {
+      jello_bc_free(m);
+      *out = NULL;
+      return rr;
+    }
+  }
+  if(m->features & (uint32_t)JELLO_BC_FEAT_GLOBALS) {
+    if((rr = rd_u32(&r, &m->nglobals)).err) {
+      jello_bc_free(m);
+      *out = NULL;
+      return rr;
+    }
   }
 
-  // --- type table
   if(m->ntypes > 0) {
     jello_type_entry* types = (jello_type_entry*)calloc(m->ntypes, sizeof(jello_type_entry));
     if(!types) { jello_bc_free(m); *out = NULL; return err(JELLO_BC_OUT_OF_MEMORY, "oom types", r.off); }
@@ -254,7 +279,6 @@ jello_bc_result jello_bc_read(const uint8_t* data, size_t size, jello_bc_module*
     }
   }
 
-  // --- signature table
   if(m->nsigs > 0) {
     jello_fun_sig* sigs = (jello_fun_sig*)calloc(m->nsigs, sizeof(jello_fun_sig));
     if(!sigs) { jello_bc_free(m); *out = NULL; return err(JELLO_BC_OUT_OF_MEMORY, "oom sigs", r.off); }
@@ -281,7 +305,6 @@ jello_bc_result jello_bc_read(const uint8_t* data, size_t size, jello_bc_module*
     }
   }
 
-  // --- struct-layout table
   if(m->nstruct_sigs > 0) {
     jello_struct_sig* sigs = (jello_struct_sig*)calloc(m->nstruct_sigs, sizeof(jello_struct_sig));
     if(!sigs) { jello_bc_free(m); *out = NULL; return err(JELLO_BC_OUT_OF_MEMORY, "oom struct_sigs", r.off); }
@@ -366,7 +389,6 @@ jello_bc_result jello_bc_read(const uint8_t* data, size_t size, jello_bc_module*
     free(atom_offsets);
   }
 
-  // --- native imports
   if(m->nimports > 0) {
     jello_import_sig* imports = (jello_import_sig*)calloc(m->nimports, sizeof(jello_import_sig));
     jello_jdll_handle** handles = (jello_jdll_handle**)calloc(m->nimports, sizeof(jello_jdll_handle*));
@@ -428,7 +450,6 @@ jello_bc_result jello_bc_read(const uint8_t* data, size_t size, jello_bc_module*
   m->proto_enabled = (uint8_t)(m->natoms > JELLO_ATOM___PROTO__ &&
                                 strcmp(m->atoms[JELLO_ATOM___PROTO__], "__proto__") == 0);
 
-  // --- constant pools
   if(m->nconst_i64 > 0) {
     int64_t* pool = (int64_t*)calloc(m->nconst_i64, sizeof(int64_t));
     if(!pool) { jello_bc_free(m); *out = NULL; return err(JELLO_BC_OUT_OF_MEMORY, "oom const_i64", r.off); }
@@ -540,11 +561,19 @@ jello_bc_result jello_bc_read(const uint8_t* data, size_t size, jello_bc_module*
         const jello_bc_function* f = &funcs[i];
         for(uint32_t j = 0; j < f->ninsns; j++) {
           jello_bc_result vr = validate_insn_ctx(m, f, i, j);
-          if(vr.err) { jello_bc_free(m); *out = NULL; return vr; }
+          if(vr.err) {
+            jello_bc_free(m);
+            *out = NULL;
+            return vr;
+          }
+          if(f->insns[j].op == (uint8_t)JOP_SWITCH_KIND) j += f->insns[j].b;
         }
 
-        if(f->ninsns == 0 ||
-           (f->insns[f->ninsns - 1u].op != (uint8_t)JOP_RET && f->insns[f->ninsns - 1u].op != (uint8_t)JOP_JMP)) {
+        if(f->ninsns == 0 || (f->insns[f->ninsns - 1u].op != (uint8_t)JOP_RET &&
+                              f->insns[f->ninsns - 1u].op != (uint8_t)JOP_JMP &&
+                              f->insns[f->ninsns - 1u].op != (uint8_t)JOP_THROW &&
+                              f->insns[f->ninsns - 1u].op != (uint8_t)JOP_TAILCALL &&
+                              f->insns[f->ninsns - 1u].op != (uint8_t)JOP_TAILCALLR)) {
           jello_bc_free(m);
           *out = NULL;
           return err(JELLO_BC_BAD_FORMAT, "function does not end in a terminator (RET or JMP)", r.off);

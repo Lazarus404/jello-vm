@@ -362,8 +362,8 @@ static void test_reload_under_contention(void) {
   jello_type_entry types_a[1], types_b[1];
   jello_type_id r0_a[1], r1_a[1], r0_b[1], r1_b[1];
   jello_insn e0_a[2], e1_a[2], e0_b[2], e1_b[2];
-  jello_bc_function funcs_a[2], funcs_b[2];
-  jello_bc_module ma, mb;
+  jello_bc_function funcs_a[2] = {0}, funcs_b[2] = {0};
+  jello_bc_module ma = {0}, mb = {0};
   build_named_const_module(types_a, r0_a, r1_a, e0_a, e1_a, funcs_a, &ma, 100);
   ma.atoms = g_reload_atoms; ma.natoms = 2;
   build_named_const_module(types_b, r0_b, r1_b, e0_b, e1_b, funcs_b, &mb, 200);

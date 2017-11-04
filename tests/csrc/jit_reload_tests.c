@@ -56,8 +56,8 @@ static void test_module_create_destroy_roundtrip(void) {
   jello_type_entry types[2];
   jello_type_id r0[2], r1[7];
   jello_insn e0[3], e1[9];
-  jello_bc_function funcs[2];
-  jello_bc_module m;
+  jello_bc_function funcs[2] = {0};
+  jello_bc_module m = {0};
   build_fib_module(types, r0, r1, e0, e1, funcs, &m, 10);
 
   jello_jit_module* jm = jello_jit_module_create(&m);
@@ -98,8 +98,8 @@ static void test_reload_analyze_unchanged(void) {
   insns_a[1].op = insns_b[1].op = (uint8_t)JOP_RET;
   insns_a[1].a = insns_b[1].a = 1;
 
-  jello_bc_function fa, fb;
-  jello_bc_module ma, mb;
+  jello_bc_function fa = {0}, fb = {0};
+  jello_bc_module ma = {0}, mb = {0};
   build_one_func_module(types_a, r_a, insns_a, 2, 2, 1, &fa, &ma);
   build_one_func_module(types_b, r_b, insns_b, 2, 2, 1, &fb, &mb);
 
@@ -120,8 +120,8 @@ static void test_reload_analyze_changed(void) {
   insns_a[1].op = insns_b[1].op = (uint8_t)JOP_RET;
   insns_a[1].a = insns_b[1].a = 1;
 
-  jello_bc_function fa, fb;
-  jello_bc_module ma, mb;
+  jello_bc_function fa = {0}, fb = {0};
+  jello_bc_module ma = {0}, mb = {0};
   build_one_func_module(types_a, r_a, insns_a, 2, 2, 1, &fa, &ma);
   build_one_func_module(types_b, r_b, insns_b, 2, 2, 1, &fb, &mb);
 
@@ -140,8 +140,8 @@ static void test_reload_analyze_signature_conflict_arg_count(void) {
   insns_b[0].op = (uint8_t)JOP_ADD_I32; insns_b[0].a = 2; insns_b[0].b = 0; insns_b[0].c = 1;
   insns_b[1].op = (uint8_t)JOP_RET; insns_b[1].a = 2;
 
-  jello_bc_function fa, fb;
-  jello_bc_module ma, mb;
+  jello_bc_function fa = {0}, fb = {0};
+  jello_bc_module ma = {0}, mb = {0};
   build_one_func_module(types_a, r_a, insns_a, 2, 2, 1, &fa, &ma);
   build_one_func_module(types_b, r_b, insns_b, 2, 3, 2, &fb, &mb); /* nargs 1 -> 2 */
 
@@ -163,8 +163,8 @@ static void test_reload_analyze_signature_conflict_ret_kind(void) {
   types_b[0].kind = JELLO_T_I32; memset(&types_b[0].as, 0, sizeof(types_b[0].as));
   types_b[1].kind = JELLO_T_BOOL; memset(&types_b[1].as, 0, sizeof(types_b[1].as));
 
-  jello_bc_function fa, fb;
-  jello_bc_module ma, mb;
+  jello_bc_function fa = {0}, fb = {0};
+  jello_bc_module ma = {0}, mb = {0};
   fa.name_atom = fb.name_atom = JELLO_BC_NO_NAME;
   fa.nargs = fb.nargs = 0;
   fa.nregs = fb.nregs = 1;
@@ -180,8 +180,7 @@ static void test_reload_analyze_signature_conflict_ret_kind(void) {
 }
 
 static void test_module_create_rejects_empty_module(void) {
-  jello_bc_module m;
-  memset(&m, 0, sizeof(m));
+  jello_bc_module m = {0};
   m.nfuncs = 0;
   jello_jit_module* jm = jello_jit_module_create(&m);
   assert(jm == NULL);
@@ -295,8 +294,8 @@ static void test_reload_refuses_struct_type_conflict_by_default(void) {
   uint32_t field_type_b[2], field_offset_b[2];
   jello_type_id r_a[2], r_b[2];
   jello_insn insns_a[1], insns_b[1];
-  jello_bc_function f_a, f_b;
-  jello_bc_module old_m, new_m;
+  jello_bc_function f_a = {0}, f_b = {0};
+  jello_bc_module old_m = {0}, new_m = {0};
 
   build_struct_using_module(types_a, &sig_a, field_type_a, field_offset_a, 1, r_a, insns_a, &f_a, &old_m, 0);
   old_m.atoms = g_one_func_atom; old_m.natoms = 1;
@@ -359,8 +358,8 @@ static void test_reload_allow_conflicts_recompiles_even_if_body_unchanged(void) 
   jello_type_entry types_a[1], types_b[1];
   jello_type_id r_a[1], r_b[1];
   jello_insn insns_a[1], insns_b[1];
-  jello_bc_function f_a, f_b;
-  jello_bc_module old_m, new_m;
+  jello_bc_function f_a = {0}, f_b = {0};
+  jello_bc_module old_m = {0}, new_m = {0};
   build_one_named_func_module(types_a, r_a, insns_a, &f_a, &old_m, 0, 0); /* nargs 0 */
   old_m.atoms = g_one_func_atom; old_m.natoms = 1;
   build_one_named_func_module(types_b, r_b, insns_b, &f_b, &new_m, 1, 0); /* nargs 1 -- only difference */
@@ -395,15 +394,15 @@ static void test_reload_new_function_recompiles_even_if_nothing_changed(void) {
   jello_type_entry types_a[1], types_b[1];
   jello_type_id r_a[1];
   jello_insn insns_a[1];
-  jello_bc_function f_a;
-  jello_bc_module old_m;
+  jello_bc_function f_a = {0};
+  jello_bc_module old_m = {0};
   build_one_named_func_module(types_a, r_a, insns_a, &f_a, &old_m, 0, 0);
   old_m.atoms = g_one_func_atom; old_m.natoms = 1;
 
   jello_type_id r0_b[1], r1_b[1];
   jello_insn e0_b[1], e1_b[1];
-  jello_bc_function funcs_b[2];
-  jello_bc_module new_m;
+  jello_bc_function funcs_b[2] = {0};
+  jello_bc_module new_m = {0};
   types_b[0].kind = JELLO_T_I32;
   memset(&types_b[0].as, 0, sizeof(types_b[0].as));
   r0_b[0] = 0; r1_b[0] = 0;
@@ -484,8 +483,8 @@ static void test_reload_refuses_signature_conflict_by_default(void) {
   jello_type_entry types_a[1], types_b[1];
   jello_type_id r0_a[1], r1_a[1], r0_b[2], r1_b[1];
   jello_insn e0_a[2], e1_a[2], e0_b[3], e1_b[1];
-  jello_bc_function funcs_a[2], funcs_b[2];
-  jello_bc_module old_m, new_m;
+  jello_bc_function funcs_a[2] = {0}, funcs_b[2] = {0};
+  jello_bc_module old_m = {0}, new_m = {0};
   build_named_two_func_module(types_a, r0_a, r1_a, e0_a, e1_a, funcs_a, &old_m, 0, 1, 100);
   old_m.atoms = g_two_func_atoms; old_m.natoms = 2;
   build_two_func_module_arity_variant(types_b, r0_b, r1_b, e0_b, e1_b, funcs_b, &new_m, 0, 1, 777);
@@ -522,8 +521,8 @@ static void test_reload_allow_conflicts_overrides_refusal(void) {
   jello_type_entry types_a[1], types_b[1];
   jello_type_id r0_a[1], r1_a[1], r0_b[2], r1_b[1];
   jello_insn e0_a[2], e1_a[2], e0_b[3], e1_b[1];
-  jello_bc_function funcs_a[2], funcs_b[2];
-  jello_bc_module old_m, new_m;
+  jello_bc_function funcs_a[2] = {0}, funcs_b[2] = {0};
+  jello_bc_module old_m = {0}, new_m = {0};
   build_named_two_func_module(types_a, r0_a, r1_a, e0_a, e1_a, funcs_a, &old_m, 0, 1, 100);
   old_m.atoms = g_two_func_atoms; old_m.natoms = 2;
   build_two_func_module_arity_variant(types_b, r0_b, r1_b, e0_b, e1_b, funcs_b, &new_m, 0, 1, 777);
@@ -558,8 +557,8 @@ static void test_reload_changed_function_end_to_end(void) {
   jello_type_entry types_a[1], types_b[1];
   jello_type_id r0_a[1], r1_a[1], r0_b[1], r1_b[1];
   jello_insn e0_a[2], e1_a[2], e0_b[2], e1_b[2];
-  jello_bc_function funcs_a[2], funcs_b[2];
-  jello_bc_module old_m, new_m;
+  jello_bc_function funcs_a[2] = {0}, funcs_b[2] = {0};
+  jello_bc_module old_m = {0}, new_m = {0};
   build_named_two_func_module(types_a, r0_a, r1_a, e0_a, e1_a, funcs_a, &old_m, 0, 1, 100);
   old_m.atoms = g_two_func_atoms; old_m.natoms = 2;
   build_named_two_func_module(types_b, r0_b, r1_b, e0_b, e1_b, funcs_b, &new_m, 0, 1, 200);
@@ -740,8 +739,8 @@ static void test_persistent_handle_no_per_call_recompile(void) {
   jello_type_entry types[2];
   jello_type_id r0[2], r1[7];
   jello_insn e0[3], e1[9];
-  jello_bc_function funcs[2];
-  jello_bc_module m;
+  jello_bc_function funcs[2] = {0};
+  jello_bc_module m = {0};
   build_fib_module(types, r0, r1, e0, e1, funcs, &m, 15);
 
   jello_vm* vm = jello_vm_create();
@@ -778,8 +777,8 @@ static void test_persistent_handle_matches_fresh_path(void) {
   jello_type_entry types[2];
   jello_type_id r0[2], r1[7];
   jello_insn e0[3], e1[9];
-  jello_bc_function funcs[2];
-  jello_bc_module m;
+  jello_bc_function funcs[2] = {0};
+  jello_bc_module m = {0};
 
   for(uint32_t n = 0; n <= 12; n++) {
     build_fib_module(types, r0, r1, e0, e1, funcs, &m, n);
@@ -814,8 +813,8 @@ static void test_persistent_handle_null_falls_back_correctly(void) {
   jello_type_entry types[2];
   jello_type_id r0[2], r1[7];
   jello_insn e0[3], e1[9];
-  jello_bc_function funcs[2];
-  jello_bc_module m;
+  jello_bc_function funcs[2] = {0};
+  jello_bc_module m = {0};
   build_fib_module(types, r0, r1, e0, e1, funcs, &m, 8);
 
   jello_vm* vm = jello_vm_create();
@@ -841,8 +840,8 @@ static void test_wx_icache_repeated_create_destroy_then_persistent(void) {
     jello_type_entry types[2];
     jello_type_id r0[2], r1[7];
     jello_insn e0[3], e1[9];
-    jello_bc_function funcs[2];
-    jello_bc_module m;
+    jello_bc_function funcs[2] = {0};
+    jello_bc_module m = {0};
     build_fib_module(types, r0, r1, e0, e1, funcs, &m, 10);
 
     jello_jit_module* jm = jello_jit_module_create(&m);
@@ -860,8 +859,8 @@ static void test_wx_icache_repeated_create_destroy_then_persistent(void) {
   jello_type_entry types[2];
   jello_type_id r0[2], r1[7];
   jello_insn e0[3], e1[9];
-  jello_bc_function funcs[2];
-  jello_bc_module m;
+  jello_bc_function funcs[2] = {0};
+  jello_bc_module m = {0};
   build_fib_module(types, r0, r1, e0, e1, funcs, &m, 15);
 
   jello_jit_module* jm = jello_jit_module_create(&m);
@@ -886,8 +885,8 @@ static void test_reload_cycling_stress(void) {
   jello_type_entry types_a[1], types_b[1];
   jello_type_id r0_a[1], r1_a[1], r0_b[1], r1_b[1];
   jello_insn e0_a[2], e1_a[2], e0_b[2], e1_b[2];
-  jello_bc_function funcs_a[2], funcs_b[2];
-  jello_bc_module ma, mb;
+  jello_bc_function funcs_a[2] = {0}, funcs_b[2] = {0};
+  jello_bc_module ma = {0}, mb = {0};
   build_named_two_func_module(types_a, r0_a, r1_a, e0_a, e1_a, funcs_a, &ma, 0, 1, 100);
   ma.atoms = g_two_func_atoms; ma.natoms = 2;
   build_named_two_func_module(types_b, r0_b, r1_b, e0_b, e1_b, funcs_b, &mb, 0, 1, 200);
@@ -932,8 +931,8 @@ static void test_reload_cycling_stress_with_conflicts(void) {
   jello_type_entry types_ok_a[1], types_ok_b[1], types_bad[1];
   jello_type_id r0_a[1], r1_a[1], r0_b[1], r1_b[1], r0_bad[2], r1_bad[1];
   jello_insn e0_a[2], e1_a[2], e0_b[2], e1_b[2], e0_bad[3], e1_bad[1];
-  jello_bc_function funcs_a[2], funcs_b[2], funcs_bad[2];
-  jello_bc_module ma, mb, mbad;
+  jello_bc_function funcs_a[2] = {0}, funcs_b[2] = {0}, funcs_bad[2] = {0};
+  jello_bc_module ma = {0}, mb = {0}, mbad = {0};
   build_named_two_func_module(types_ok_a, r0_a, r1_a, e0_a, e1_a, funcs_a, &ma, 0, 1, 100);
   ma.atoms = g_two_func_atoms; ma.natoms = 2;
   build_named_two_func_module(types_ok_b, r0_b, r1_b, e0_b, e1_b, funcs_b, &mb, 0, 1, 200);
@@ -995,12 +994,11 @@ static void test_pause_resume_all_idle_succeeds(void) {
   memset(insns, 0, sizeof(insns));
   insns[0].op = (uint8_t)JOP_CONST_I32; insns[0].a = 0; insns[0].imm = 7;
   insns[1].op = (uint8_t)JOP_RET; insns[1].a = 0;
-  jello_bc_function f;
+  jello_bc_function f = {0};
   f.name_atom = JELLO_BC_NO_NAME; f.nargs = 0; f.nregs = 1; f.cap_start = 1;
   f.reg_types = r; f.ninsns = 2; f.insns = insns;
   types[0].kind = JELLO_T_I32; memset(&types[0].as, 0, sizeof(types[0].as));
-  jello_bc_module m;
-  memset(&m, 0, sizeof(m));
+  jello_bc_module m = {0};
   m.ntypes = 1; m.types = types; m.nfuncs = 1; m.funcs = &f; m.entry = 0;
 
   jello_numeric_result out;
@@ -1078,12 +1076,11 @@ static void test_reload_pause_blocks_fresh_call_on_other_thread(void) {
   memset(insns, 0, sizeof(insns));
   insns[0].op = (uint8_t)JOP_CONST_I32; insns[0].a = 0; insns[0].imm = 7;
   insns[1].op = (uint8_t)JOP_RET; insns[1].a = 0;
-  jello_bc_function f;
+  jello_bc_function f = {0};
   f.name_atom = JELLO_BC_NO_NAME; f.nargs = 0; f.nregs = 1; f.cap_start = 1;
   f.reg_types = r; f.ninsns = 2; f.insns = insns;
   types[0].kind = JELLO_T_I32; memset(&types[0].as, 0, sizeof(types[0].as));
-  jello_bc_module m;
-  memset(&m, 0, sizeof(m));
+  jello_bc_module m = {0};
   m.ntypes = 1; m.types = types; m.nfuncs = 1; m.funcs = &f; m.entry = 0;
 
   atomic_int paused_flag;

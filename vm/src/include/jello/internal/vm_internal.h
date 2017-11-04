@@ -100,6 +100,7 @@ jello_bc_result jello_bc_validate_insn(
     uint32_t pc,
     uint32_t ninsns,
     uint32_t nfuncs);
+jello_bc_result jello_bc_validate_try_regions(const jello_bc_module* m);
 
 /* -- interpreter core -- */
 #define REG_SLOT_BYTES 8u

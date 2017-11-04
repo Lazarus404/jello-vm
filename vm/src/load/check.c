@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * Bytecode validation; per-instruction operand and type checks against a function's typed
+ * registers, then result types across calls and try-region nesting, so the interpreter and JIT
+ * can trust a loaded module. */
+
 #include <jello/internal.h>
 
-/* -- check -- */
+#include <stdlib.h>
 
 static jello_bc_result ok(void) {
   jello_bc_result r = { JELLO_BC_OK, "ok", 0 };
@@ -57,16 +62,22 @@ static int is_narrow_int_kind(jello_type_kind k) {
   return k == JELLO_T_I8 || k == JELLO_T_I16 || k == JELLO_T_I32;
 }
 
+static int type_ids_compatible(const jello_bc_module* m, jello_type_id a, jello_type_id b) {
+  if(a == b) return 1;
+  jello_type_kind k = m->types[a].kind;
+  if(k != m->types[b].kind) return 0;
+  return k != JELLO_T_LIST && k != JELLO_T_ARRAY && k != JELLO_T_STRUCT && k != JELLO_T_FUNCTION &&
+         k != JELLO_T_ABSTRACT && k != JELLO_T_ENUM;
+}
+
 static int rk_is(const jello_bc_module* m, const jello_type_id* reg_types, uint32_t r, jello_type_kind want) {
   return !rk_ne(m, reg_types, r, want);
 }
 
 static int rk_is_narrow(const jello_bc_module* m, const jello_type_id* reg_types, uint32_t r) {
-  jello_type_kind k = reg_kind(m, reg_types, r);
-  return k == JELLO_T_DYNAMIC || is_narrow_int_kind(k);
+  return is_narrow_int_kind(reg_kind(m, reg_types, r));
 }
 
-/* -- arithmetic/comparison/conversion validation -- */
 static jello_bc_result validate_bin(const jello_bc_module* m, const jello_type_id* reg_types,
                                      const jello_insn* ins, uint32_t nregs,
                                      jello_type_kind operand_kind, int dest_may_narrow) {
@@ -132,7 +143,8 @@ static jello_bc_result validate_conv(const jello_bc_module* m, const jello_type_
 static jello_bc_result validate_const(const jello_bc_module* m, const jello_type_id* reg_types,
                                        const jello_insn* ins, uint32_t nregs, jello_type_kind kind) {
   if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "const reg out of range", 0);
-  if(reg_kind(m, reg_types, ins->a) != kind && reg_kind(m, reg_types, ins->a) != JELLO_T_DYNAMIC) return err(JELLO_BC_BAD_FORMAT, "const dest wrong kind", 0);
+  if(reg_kind(m, reg_types, ins->a) != kind)
+    return err(JELLO_BC_BAD_FORMAT, "const dest wrong kind", 0);
   return ok();
 }
 
@@ -142,32 +154,7 @@ static jello_bc_result validate_mov(const jello_bc_module* m, const jello_type_i
   jello_type_id tid_b = reg_types[ins->b];
   if(tid_a == tid_b) return ok();
 
-  jello_type_kind ka = m->types[tid_a].kind;
-  jello_type_kind kb = m->types[tid_b].kind;
-
-  if(ka == kb) {
-    if(ka == JELLO_T_STRUCT &&
-       m->types[tid_a].as.strct.struct_sig_id != m->types[tid_b].as.strct.struct_sig_id) {
-      return err(JELLO_BC_BAD_FORMAT, "mov struct layout mismatch", 0);
-    }
-    return ok();
-  }
-
-  if(ka == JELLO_T_STRUCT || kb == JELLO_T_STRUCT) {
-    return err(JELLO_BC_BAD_FORMAT, "mov struct type mismatch", 0);
-  }
-
-  if(ka == JELLO_T_DYNAMIC || kb == JELLO_T_DYNAMIC) {
-    size_t sa = jello_slot_size(ka);
-    size_t sb = jello_slot_size(kb);
-    if(sa == sb && sa > 0) return ok();
-  }
-
-  {
-    size_t sa = jello_slot_size(ka);
-    size_t sb = jello_slot_size(kb);
-    if(sa == sb && sa > 0) return ok();
-  }
+  if(type_ids_compatible(m, tid_a, tid_b)) return ok();
 
   return err(JELLO_BC_BAD_FORMAT, "mov type mismatch", 0);
 }
@@ -188,9 +175,7 @@ static jello_bc_result validate_direct_call(
     const jello_bc_function* callee = &m->funcs[ins->imm];
     if(ins->c > callee->nregs) return err(JELLO_BC_BAD_FORMAT, "call passes more args than callee has registers", 0);
     for(uint32_t i = 0; i < ins->c; i++) {
-      jello_type_kind ck = reg_kind(m, reg_types, ins->b + i);
-      jello_type_kind pk = vm_reg_kind(m, callee, i);
-      if(ck != pk && ck != JELLO_T_DYNAMIC && pk != JELLO_T_DYNAMIC) {
+      if(!type_ids_compatible(m, reg_types[ins->b + i], callee->reg_types[i])) {
         return err(JELLO_BC_BAD_FORMAT, "call arg type mismatch", 0);
       }
     }
@@ -211,6 +196,15 @@ static jello_bc_result validate_callr_window(
   }
   if((uint64_t)ins->imm + (uint64_t)ins->c > (uint64_t)nregs) {
     return err(JELLO_BC_BAD_FORMAT, "callr arg window out of range", 0);
+  }
+  {
+    const jello_fun_sig* sig = &m->sigs[m->types[reg_types[ins->b]].as.fun.sig_id];
+    if(ins->c != sig->nargs) return err(JELLO_BC_BAD_FORMAT, "callr arg count mismatch", 0);
+    for(uint32_t i = 0; i < ins->c; i++) {
+      if(!type_ids_compatible(m, reg_types[ins->imm + i], sig->args[i])) {
+        return err(JELLO_BC_BAD_FORMAT, "callr arg type mismatch", 0);
+      }
+    }
   }
   return ok();
 }
@@ -415,7 +409,6 @@ jello_bc_result jello_bc_validate_insn(
     case JOP_F16_FROM_I32: return validate_conv(m, reg_types, ins, nregs, JELLO_T_F16, JELLO_T_I32);
     case JOP_I32_FROM_F16: return validate_conv(m, reg_types, ins, nregs, JELLO_T_I32, JELLO_T_F16);
 
-    /* -- the Dynamic boundary -- */
     case JOP_TO_DYN:
       if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "to_dyn reg out of range", 0);
       if(reg_kind(m, reg_types, ins->a) != JELLO_T_DYNAMIC) return err(JELLO_BC_BAD_FORMAT, "to_dyn dst must be Dynamic", 0);
@@ -475,7 +468,6 @@ jello_bc_result jello_bc_validate_insn(
       if(rk_ne(m, reg_types, ins->a, JELLO_T_BOOL)) return err(JELLO_BC_BAD_FORMAT, "physeq dst must be Bool", 0);
       return ok();
 
-    /* -- Struct -- */
     case JOP_STRUCT_NEW:
       if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "struct_new reg out of range", 0);
       if(rk_ne(m, reg_types, ins->a, JELLO_T_STRUCT)) return err(JELLO_BC_BAD_FORMAT, "struct_new dst must be Struct", 0);
@@ -499,7 +491,6 @@ jello_bc_result jello_bc_validate_insn(
       return ok();
     }
 
-    /* -- Object -- */
     case JOP_OBJ_NEW:
       if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "obj_new reg out of range", 0);
       if(rk_ne(m, reg_types, ins->a, JELLO_T_OBJECT)) return err(JELLO_BC_BAD_FORMAT, "obj_new dst must be Object", 0);
@@ -577,6 +568,7 @@ jello_bc_result jello_bc_validate_insn(
         return err(JELLO_BC_BAD_FORMAT, "bytes_set_u8 types required", 0);
       }
       return ok();
+
     case JOP_BYTES_CONCAT2:
       if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) return err(JELLO_BC_BAD_FORMAT, "bytes_concat2 reg out of range", 0);
       if(rk_ne(m, reg_types, ins->a, JELLO_T_BYTES) || rk_ne(m, reg_types, ins->b, JELLO_T_BYTES) ||
@@ -680,7 +672,6 @@ jello_bc_result jello_bc_validate_insn(
       }
       return ok();
 
-    /* -- native calls -- */
     case JOP_CALL_NATIVE: {
       if(ins->imm >= m->nimports) return err(JELLO_BC_BAD_FORMAT, "import index out of range", 0);
       const jello_import_sig* sig = &m->imports[ins->imm];
@@ -690,7 +681,7 @@ jello_bc_result jello_bc_validate_insn(
       }
       for(uint32_t i = 0; i < ins->c; i++) {
         jello_type_kind ak = reg_kind(m, reg_types, ins->b + i);
-        if(ak != (jello_type_kind)sig->arg_kinds[i] && ak != JELLO_T_DYNAMIC) {
+        if(ak != (jello_type_kind)sig->arg_kinds[i]) {
           return err(JELLO_BC_BAD_FORMAT, "call_native arg type mismatch", 0);
         }
       }
@@ -815,4 +806,87 @@ jello_bc_result jello_bc_validate_insn(
     default:
       return ok();
   }
+}
+
+#define NO_RESULT ((jello_type_id)UINT32_MAX)
+
+static int region_visit(int32_t* depth, uint32_t* work, uint32_t* nwork, int64_t pc,
+                        uint32_t ninsns, int32_t d) {
+  if(pc < 0 || pc >= (int64_t)ninsns) return 0;
+  if(depth[pc] < 0) {
+    depth[pc] = d;
+    work[(*nwork)++] = (uint32_t)pc;
+    return 1;
+  }
+  return depth[pc] == d;
+}
+
+static jello_bc_result validate_regions(const jello_bc_function* f, int32_t* depth,
+                                        uint32_t* work) {
+  uint32_t n = f->ninsns, nwork = 0;
+  for(uint32_t pc = 0; pc < n; pc++) depth[pc] = -1;
+  depth[0] = 0;
+  work[nwork++] = 0;
+  while(nwork > 0) {
+    uint32_t pc = work[--nwork];
+    const jello_insn* ins = &f->insns[pc];
+    int32_t d = depth[pc];
+    int64_t next = (int64_t)pc + 1, jump = next + (int32_t)ins->imm;
+    int ok_edges = 1;
+    switch((jello_op)ins->op) {
+      case JOP_RET:
+      case JOP_THROW: break;
+      case JOP_TAILCALL:
+      case JOP_TAILCALLR:
+        if(d > 0) return err(JELLO_BC_BAD_FORMAT, "tailcall inside try region", 0);
+        break;
+      case JOP_JMP: ok_edges = region_visit(depth, work, &nwork, jump, n, d); break;
+      case JOP_JMP_IF:
+        ok_edges = region_visit(depth, work, &nwork, next, n, d) &&
+                   region_visit(depth, work, &nwork, jump, n, d);
+        break;
+      case JOP_TRY:
+        if(d + 1 > (int32_t)JELLO_TRY_STACK_MAX)
+          return err(JELLO_BC_BAD_FORMAT, "try regions nest too deep", 0);
+        ok_edges = region_visit(depth, work, &nwork, next, n, d + 1) &&
+                   region_visit(depth, work, &nwork, jump, n, d);
+        break;
+      case JOP_ENDTRY:
+        if(d == 0) return err(JELLO_BC_BAD_FORMAT, "endtry outside try region", 0);
+        ok_edges = region_visit(depth, work, &nwork, next, n, d - 1);
+        break;
+      case JOP_SWITCH_KIND: {
+        int64_t after = next + ins->b;
+        for(uint32_t i = 0; i < ins->b && ok_edges; i++) {
+          if(next + i >= n) return err(JELLO_BC_BAD_FORMAT, "switch_kind table out of range", 0);
+          ok_edges =
+              region_visit(depth, work, &nwork, after + (int32_t)f->insns[next + i].imm, n, d);
+        }
+        if(ok_edges) ok_edges = region_visit(depth, work, &nwork, after + (int32_t)ins->imm, n, d);
+        break;
+      }
+      default: ok_edges = region_visit(depth, work, &nwork, next, n, d); break;
+    }
+    if(!ok_edges) return err(JELLO_BC_BAD_FORMAT, "inconsistent try region depth", 0);
+  }
+  return ok();
+}
+
+jello_bc_result jello_bc_validate_try_regions(const jello_bc_module* m) {
+  jello_bc_result r = ok();
+  for(uint32_t i = 0; i < m->nfuncs && !r.err; i++) {
+    const jello_bc_function* f = &m->funcs[i];
+    int has_regions = 0;
+    for(uint32_t pc = 0; pc < f->ninsns && !has_regions; pc++) {
+      has_regions = f->insns[pc].op == (uint8_t)JOP_TRY || f->insns[pc].op == (uint8_t)JOP_ENDTRY;
+    }
+    if(!has_regions) continue;
+    int32_t* depth = (int32_t*)malloc(f->ninsns * sizeof(int32_t));
+    uint32_t* work = (uint32_t*)malloc(f->ninsns * sizeof(uint32_t));
+    r = (depth && work) ? validate_regions(f, depth, work)
+                        : err(JELLO_BC_OUT_OF_MEMORY, "oom try regions", 0);
+    free(depth);
+    free(work);
+  }
+  return r;
 }
