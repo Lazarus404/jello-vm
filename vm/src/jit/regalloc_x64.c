@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * x64 register-allocation backend; the register pools and the encoders that load and store a
+ * register's home slot. */
+
 #include <jello/internal/jit_impl.h>
 #include <string.h>
 
-/* -- x64's own half of the regalloc seam -- */
 const uint8_t jit_gpr_pool[] = {6, 7, 8, 9, 10, 11, 14};
 const uint32_t jit_gpr_pool_len = 7;
 const uint32_t jit_xmm_pool_len = 6;

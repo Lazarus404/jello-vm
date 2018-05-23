@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.2.2)
-project(jello_vm LANGUAGES C)
+project(jello_vm LANGUAGES C ASM)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -70,6 +70,10 @@ if(JELLO_ENABLE_JIT)
     message(FATAL_ERROR "JELLO_ENABLE_JIT: unsupported CMAKE target arch '${JELLO_JIT_TARGET_ARCH}'")
   endif()
   target_compile_definitions(jello_vm PRIVATE JELLO_ENABLE_JIT)
+endif()
+if(CMAKE_C_COMPILER_TARGET)
+  set_property(SOURCE tools/jelloc_image.S APPEND_STRING PROPERTY
+    COMPILE_FLAGS " --target=${CMAKE_C_COMPILER_TARGET}")
 endif()
 target_include_directories(jello_vm PUBLIC src/include)
 target_compile_definitions(jello_vm PRIVATE JELLO_JDLL_HOST)
