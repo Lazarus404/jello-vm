@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * jlo_tool, the `.jlo` workbench; `asm` writes a module from its text form, `disasm` prints a
+ * loaded module in that form, `run` runs one (also as a benchmark), `dumpir` prints the JIT's IR,
+ * and `init` and `get-deps` manage a project (deps.c). It reads modules only through
+ * jello_bc_read and uses the VM's internal headers. */
+
 #include <jello/internal.h>
+#include "host.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,10 +17,7 @@
 #include <errno.h>
 #include <time.h>
 
-/* -- jlo_tool -- */
-
 #define JLO_MAGIC 0x4A4C5942u
-#define JLO_VERSION 1u
 
 /* -- name tables -- */
 typedef struct kind_name_entry {
@@ -22,22 +26,12 @@ typedef struct kind_name_entry {
 } kind_name_entry;
 
 static const kind_name_entry KIND_NAMES[] = {
-  {"VOID", JELLO_T_VOID},
-  {"BOOL", JELLO_T_BOOL},
-  {"ATOM", JELLO_T_ATOM},
-  {"I8", JELLO_T_I8},
-  {"I16", JELLO_T_I16},
-  {"I32", JELLO_T_I32},
-  {"I64", JELLO_T_I64},
-  {"F16", JELLO_T_F16},
-  {"F32", JELLO_T_F32},
-  {"F64", JELLO_T_F64},
-  {"BYTES", JELLO_T_BYTES},
-  {"ARRAY", JELLO_T_ARRAY},
-  {"STRUCT", JELLO_T_STRUCT},
-  {"OBJECT", JELLO_T_OBJECT},
-  {"DYNAMIC", JELLO_T_DYNAMIC},
-  {"FUNCTION", JELLO_T_FUNCTION},
+    {"VOID", JELLO_T_VOID},       {"BOOL", JELLO_T_BOOL},         {"ATOM", JELLO_T_ATOM},
+    {"I8", JELLO_T_I8},           {"I16", JELLO_T_I16},           {"I32", JELLO_T_I32},
+    {"I64", JELLO_T_I64},         {"F16", JELLO_T_F16},           {"F32", JELLO_T_F32},
+    {"F64", JELLO_T_F64},         {"BYTES", JELLO_T_BYTES},       {"LIST", JELLO_T_LIST},
+    {"ARRAY", JELLO_T_ARRAY},     {"STRUCT", JELLO_T_STRUCT},     {"OBJECT", JELLO_T_OBJECT},
+    {"DYNAMIC", JELLO_T_DYNAMIC}, {"FUNCTION", JELLO_T_FUNCTION}, {"ABSTRACT", JELLO_T_ABSTRACT},
   {"ENUM", JELLO_T_ENUM},
 };
 #define NKIND_NAMES (sizeof(KIND_NAMES) / sizeof(KIND_NAMES[0]))
@@ -52,7 +46,7 @@ static const flag_name_entry FLAG_NAMES[] = {
   {"CONST64", JELLO_BC_FEAT_CONST64, 1},
   {"CONSTBYTES", JELLO_BC_FEAT_CONSTBYTES, 1},
   {"CAP_START", JELLO_BC_FEAT_CAP_START, 1},
-  {"LINE_TABLE", JELLO_BC_FEAT_LINE_TABLE, 0},
+    {"LINE_TABLE", JELLO_BC_FEAT_LINE_TABLE, 1},
   {"LINE_COL", JELLO_BC_FEAT_LINE_COL, 0},
   {"LINE_DELTA", JELLO_BC_FEAT_LINE_DELTA, 0},
   {"COMPRESSED_INSN", JELLO_BC_FEAT_COMPRESSED_INSN, 1},
@@ -63,12 +57,26 @@ static const flag_name_entry FLAG_NAMES[] = {
   {"STACK_MAP", JELLO_BC_FEAT_STACK_MAP, 0},
   {"PKG_DEPS", JELLO_BC_FEAT_PKG_DEPS, 0},
   {"IMPORTS", JELLO_BC_FEAT_IMPORTS, 1},
+    {"ENUM_SCHEMA", JELLO_BC_FEAT_ENUM_SCHEMA, 1},
+    {"GLOBALS", JELLO_BC_FEAT_GLOBALS, 1},
 };
 #define NFLAG_NAMES (sizeof(FLAG_NAMES) / sizeof(FLAG_NAMES[0]))
 
 static const char* kind_name_of(jello_type_kind k) {
-  for(size_t i = 0; i < NKIND_NAMES; i++) if(KIND_NAMES[i].kind == k) return KIND_NAMES[i].name;
-  return NULL;
+  for(size_t i = 0; i < NKIND_NAMES; i++)
+    if(KIND_NAMES[i].kind == k) return KIND_NAMES[i].name;
+  return "?";
+}
+
+static void print_type_ref(FILE* out, const jello_bc_module* m, jello_type_id tid) {
+  jello_type_kind kind = m->types[tid].kind;
+  fprintf(out, "%s", kind_name_of(kind));
+  for(uint32_t i = 0; i < tid; i++) {
+    if(m->types[i].kind == kind) {
+      fprintf(out, "#%u", tid);
+      return;
+    }
+  }
 }
 static int kind_from_name(const char* name, jello_type_kind* out) {
   for(size_t i = 0; i < NKIND_NAMES; i++) {
@@ -76,6 +84,7 @@ static int kind_from_name(const char* name, jello_type_kind* out) {
   }
   return 0;
 }
+// Opcode names come from the VM's jello_op_table in both directions.
 static const char* op_name_of(jello_op op) {
   if((uint32_t)op >= (uint32_t)JOP_COUNT) return NULL;
   return jello_op_table[op].name;
@@ -90,8 +99,6 @@ static const flag_name_entry* flag_entry_from_name(const char* name) {
   for(size_t i = 0; i < NFLAG_NAMES; i++) if(strcmp(FLAG_NAMES[i].name, name) == 0) return &FLAG_NAMES[i];
   return NULL;
 }
-/* -- in-memory module (this chapter's own scope for the `asm` writer only -- */
-
 typedef struct asm_type_entry {
   jello_type_kind kind;
   uint32_t p0; /* STRUCT: struct_sigs index. FUNCTION: sigs index. */
@@ -110,6 +117,16 @@ typedef struct asm_struct_sig {
   uint32_t* field_type;       /* type-table indices */
   uint32_t* field_name_atom;  /* atom indices, only when named */
 } asm_struct_sig;
+
+typedef struct asm_enum_variant_sig {
+  uint16_t nfields;
+  uint32_t* field_type;
+} asm_enum_variant_sig;
+
+typedef struct asm_enum_sig {
+  uint16_t nvariants;
+  asm_enum_variant_sig* variants;
+} asm_enum_sig;
 
 typedef struct asm_import_sig {
   uint32_t library_atom;
@@ -141,12 +158,21 @@ typedef struct module_t {
   char** atoms;
   uint32_t nstruct_sigs;
   asm_struct_sig* struct_sigs;
+  uint32_t nenum_sigs;
+  asm_enum_sig* enum_sigs;
+  // The CONST_I64 and CONST_F64 pools, in the text and the binary only with CONST64.
   uint32_t nconst_i64;
   int64_t* const_i64;
   uint32_t nconst_f64;
   double* const_f64;
   uint32_t nimports;
   asm_import_sig* imports;
+  uint32_t nglobals;
+  uint32_t* global_types;
+  uint32_t nsource_files;
+  char** source_files;
+  uint32_t nline_runs;
+  uint32_t* line_runs;
   uint32_t nfuncs;
   func_t* funcs;
 } module_t;
@@ -163,9 +189,19 @@ static void module_free(module_t* m) {
     free(m->struct_sigs[i].field_name_atom);
   }
   free(m->struct_sigs);
+  for(uint32_t i = 0; i < m->nenum_sigs; i++) {
+    for(uint16_t j = 0; j < m->enum_sigs[i].nvariants; j++)
+      free(m->enum_sigs[i].variants[j].field_type);
+    free(m->enum_sigs[i].variants);
+  }
+  free(m->enum_sigs);
   free(m->const_i64);
   free(m->const_f64);
   free(m->imports);
+  free(m->global_types);
+  for(uint32_t i = 0; i < m->nsource_files; i++) free(m->source_files[i]);
+  free(m->source_files);
+  free(m->line_runs);
   for(uint32_t i = 0; i < m->nfuncs; i++) {
     free(m->funcs[i].reg_type_idx);
     free(m->funcs[i].insns);
@@ -174,7 +210,6 @@ static void module_free(module_t* m) {
   memset(m, 0, sizeof(*m));
 }
 
-/* -- text grammar: tokenizer + parser -- */
 
 typedef struct cursor {
   const char* buf;
@@ -186,7 +221,14 @@ typedef struct cursor {
 static void skip_ws(cursor* c) {
   while(c->pos < c->len) {
     char ch = c->buf[c->pos];
-    if(ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n') { c->pos++; continue; }
+    if(ch == '#' && (c->pos == 0 || c->buf[c->pos - 1] == '\n')) {
+      while(c->pos < c->len && c->buf[c->pos] != '\n') c->pos++;
+      continue;
+    }
+    if(ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n') {
+      c->pos++;
+      continue;
+    }
     break;
   }
 }
@@ -264,11 +306,13 @@ static int read_int(cursor* c, int32_t* out) {
   if(c->pos < c->len && c->buf[c->pos] == '-') { neg = 1; c->pos++; }
   uint32_t mag = 0;
   if(!read_uint(c, &mag)) return 0;
+  // Negating unsigned keeps -2147483648, whose magnitude exceeds INT32_MAX, defined.
   uint32_t bits = neg ? (0u - mag) : mag;
   memcpy(out, &bits, sizeof bits);
   return 1;
 }
 
+// Literals for `const_i64:` and `const_f64:`, the only ones wider than `imm`.
 static int read_int64(cursor* c, int64_t* out) {
   skip_ws(c);
   size_t start = c->pos;
@@ -313,8 +357,6 @@ static int read_double(cursor* c, double* out) {
   return 1;
 }
 
-/* -- module-level parse -- */
-
 static int parse_features(cursor* c, uint32_t* out_features) {
   uint32_t features = 0;
   if(!expect_ch(c, '[')) return 0;
@@ -339,20 +381,44 @@ static int parse_features(cursor* c, uint32_t* out_features) {
   return 1;
 }
 
-static int parse_type_entry(cursor* c, asm_type_entry* out) {
+static int parse_type_entry(cursor* c, const asm_type_entry* types, uint32_t ntypes,
+                            asm_type_entry* out) {
   char name[32];
   if(!read_ident(c, name, sizeof(name))) return 0;
   jello_type_kind kind;
   if(!kind_from_name(name, &kind)) {
-    fprintf(stderr, "%s: unknown or not-yet-supported type kind '%s' "
-                    "(LIST/ARRAY/FUNCTION/ABSTRACT are still deferred)\n",
-            c->filename, name);
+    fprintf(stderr, "%s: unknown or unsupported type kind '%s'\n", c->filename, name);
     return 0;
   }
   out->kind = kind;
   out->p0 = 0;
-  if(kind == JELLO_T_STRUCT || kind == JELLO_T_FUNCTION) {
-    if(!expect_ch(c, '(')) return 0;
+  if(kind == JELLO_T_LIST || kind == JELLO_T_ARRAY) {
+    char elem[32];
+    jello_type_kind elem_kind;
+    if(!match_ch(c, '(')) return 1;
+    if(!read_ident(c, elem, sizeof(elem))) return 0;
+    if(!kind_from_name(elem, &elem_kind)) return perr(c, "unknown element type");
+    if(match_ch(c, '#')) {
+      uint32_t n;
+      if(!read_uint(c, &n)) return 0;
+      if(n >= ntypes || types[n].kind != elem_kind)
+        return perr(c, "element type must be declared first");
+      out->p0 = n;
+      return expect_ch(c, ')');
+    }
+    if(!expect_ch(c, ')')) return 0;
+    for(uint32_t i = 0; i < ntypes; i++) {
+      if(types[i].kind == elem_kind) {
+        out->p0 = i;
+        return 1;
+      }
+    }
+    return perr(c, "element type must be declared first");
+  }
+  if(kind == JELLO_T_STRUCT || kind == JELLO_T_FUNCTION || kind == JELLO_T_ABSTRACT ||
+     kind == JELLO_T_ENUM) {
+    if(kind == JELLO_T_ENUM && !match_ch(c, '(')) return 1;
+    if(kind != JELLO_T_ENUM && !expect_ch(c, '(')) return 0;
     if(!read_uint(c, &out->p0)) return 0;
     if(!expect_ch(c, ')')) return 0;
   }
@@ -369,7 +435,10 @@ static int parse_types(cursor* c, asm_type_entry** out_types, uint32_t* out_n) {
   if(!match_ch(c, ']')) {
     for(;;) {
       asm_type_entry ent;
-      if(!parse_type_entry(c, &ent)) { free(types); return 0; }
+      if(!parse_type_entry(c, types, n, &ent)) {
+        free(types);
+        return 0;
+      }
       if(n == cap) {
         cap = cap ? cap * 2 : 4;
         types = (asm_type_entry*)realloc(types, cap * sizeof(asm_type_entry));
@@ -427,9 +496,15 @@ static int parse_const_i64(cursor* c, int64_t** out_vals, uint32_t* out_n) {
   skip_ws(c);
   if(!match_ch(c, ']')) {
     for(;;) {
-      int64_t v;
-      if(!read_int64(c, &v)) { free(vals); return 0; }
-      if(n == cap) { cap = cap ? cap * 2 : 4; vals = (int64_t*)realloc(vals, cap * sizeof(int64_t)); }
+      int64_t v = 0;
+      if(!read_int64(c, &v)) {
+        free(vals);
+        return 0;
+      }
+      if(n == cap) {
+        cap = cap ? cap * 2 : 4;
+        vals = (int64_t*)realloc(vals, cap * sizeof(int64_t));
+      }
       vals[n++] = v;
       if(match_ch(c, ',')) continue;
       break;
@@ -470,6 +545,15 @@ static int find_type_index_by_kind_name(cursor* c, const asm_type_entry* types, 
   if(!kind_from_name(name, &want)) {
     fprintf(stderr, "%s: unknown type kind '%s'\n", c->filename, name);
     return 0;
+  }
+  if(c->pos < c->len && c->buf[c->pos] == '#') {
+    uint32_t n;
+    c->pos++;
+    if(!read_uint(c, &n)) return 0;
+    if(n >= ntypes || types[n].kind != want)
+      return perr(c, "KIND#N names a type of another kind or past the declared ones");
+    *out_idx = n;
+    return 1;
   }
   for(uint32_t i = 0; i < ntypes; i++) {
     if(types[i].kind == want) { *out_idx = i; return 1; }
@@ -681,6 +765,74 @@ static int parse_struct_sigs(cursor* c, const asm_type_entry* types, uint32_t nt
   return 1;
 }
 
+static int parse_enum_sigs(cursor* c, const asm_type_entry* types, uint32_t ntypes,
+                           asm_enum_sig** out_sigs, uint32_t* out_n) {
+  if(!expect_ident(c, "enum_sigs") || !expect_ch(c, ':') || !expect_ch(c, '[')) return 0;
+  asm_enum_sig* sigs = NULL;
+  uint32_t n = 0;
+  skip_ws(c);
+  if(!match_ch(c, ']')) {
+    for(;;) {
+      if(!expect_ch(c, '[')) goto fail;
+      asm_enum_sig sig = {0};
+      skip_ws(c);
+      if(!match_ch(c, ']')) {
+        for(;;) {
+          if(!expect_ch(c, '[')) goto fail_entry;
+          asm_enum_variant_sig variant = {0};
+          uint32_t count = 0;
+          skip_ws(c);
+          if(!match_ch(c, ']')) {
+            for(;;) {
+              char name[32];
+              uint32_t tid;
+              if(!read_ident(c, name, sizeof(name)) ||
+                 !find_type_index_by_kind_name(c, types, ntypes, name, &tid))
+                goto fail_variant;
+              variant.field_type =
+                  (uint32_t*)realloc(variant.field_type, (count + 1u) * sizeof(uint32_t));
+              variant.field_type[count++] = tid;
+              if(match_ch(c, ',')) continue;
+              if(!expect_ch(c, ']')) goto fail_variant;
+              break;
+            }
+          }
+          if(count > UINT16_MAX) goto fail_variant;
+          variant.nfields = (uint16_t)count;
+          sig.variants = (asm_enum_variant_sig*)realloc(sig.variants, ((size_t)sig.nvariants + 1u) *
+                                                                          sizeof(*sig.variants));
+          sig.variants[sig.nvariants++] = variant;
+          if(match_ch(c, ',')) continue;
+          if(!expect_ch(c, ']')) goto fail_entry;
+          break;
+        fail_variant:
+          free(variant.field_type);
+          goto fail_entry;
+        }
+      }
+      sigs = (asm_enum_sig*)realloc(sigs, (n + 1u) * sizeof(*sigs));
+      sigs[n++] = sig;
+      if(match_ch(c, ',')) continue;
+      if(!expect_ch(c, ']')) goto fail;
+      break;
+    fail_entry:
+      for(uint16_t j = 0; j < sig.nvariants; j++) free(sig.variants[j].field_type);
+      free(sig.variants);
+      goto fail;
+    }
+  }
+  *out_sigs = sigs;
+  *out_n = n;
+  return 1;
+fail:
+  for(uint32_t i = 0; i < n; i++) {
+    for(uint16_t j = 0; j < sigs[i].nvariants; j++) free(sigs[i].variants[j].field_type);
+    free(sigs[i].variants);
+  }
+  free(sigs);
+  return 0;
+}
+
 static int parse_import_entry(cursor* c, char* const* atoms, uint32_t natoms, asm_import_sig* out) {
   memset(out, 0, sizeof(*out));
   if(!expect_ch(c, '{')) return 0;
@@ -758,10 +910,53 @@ static int parse_imports(cursor* c, char* const* atoms, uint32_t natoms,
   return 1;
 }
 
-static int parse_reg_types(cursor* c, const asm_type_entry* types, uint32_t ntypes,
-                            uint32_t** out_idx, uint32_t* out_n) {
-  if(!expect_ident(c, "reg_types")) return 0;
-  if(!expect_ch(c, '=')) return 0;
+static int parse_line_table(cursor* c, module_t* m) {
+  if(!expect_ident(c, "source_files") || !expect_ch(c, ':') || !expect_ch(c, '[')) return 0;
+  uint32_t cap = 0;
+  if(!match_ch(c, ']')) {
+    for(;;) {
+      skip_ws(c);
+      size_t start = c->pos;
+      while(c->pos < c->len && c->buf[c->pos] != ',' && c->buf[c->pos] != ']' &&
+            c->buf[c->pos] != ' ' && c->buf[c->pos] != '\n')
+        c->pos++;
+      if(c->pos == start) return perr(c, "expected a source path");
+      if(m->nsource_files == cap) {
+        cap = cap ? cap * 2 : 4;
+        m->source_files = (char**)realloc(m->source_files, cap * sizeof(char*));
+      }
+      char* path = (char*)malloc(c->pos - start + 1);
+      memcpy(path, c->buf + start, c->pos - start);
+      path[c->pos - start] = '\0';
+      m->source_files[m->nsource_files++] = path;
+      if(match_ch(c, ',')) continue;
+      if(!expect_ch(c, ']')) return 0;
+      break;
+    }
+  }
+  if(!expect_ident(c, "lines") || !expect_ch(c, ':') || !expect_ch(c, '[')) return 0;
+  cap = 0;
+  if(!match_ch(c, ']')) {
+    for(;;) {
+      if(m->nline_runs == cap) {
+        cap = cap ? cap * 2 : 4;
+        m->line_runs = (uint32_t*)realloc(m->line_runs, cap * 5 * sizeof(uint32_t));
+      }
+      for(int k = 0; k < 5; k++)
+        if(!read_uint(c, &m->line_runs[m->nline_runs * 5 + (uint32_t)k])) return 0;
+      m->nline_runs++;
+      if(match_ch(c, ',')) continue;
+      if(!expect_ch(c, ']')) return 0;
+      break;
+    }
+  }
+  return 1;
+}
+
+static int parse_type_list(cursor* c, const asm_type_entry* types, uint32_t ntypes,
+                           const char* label, char sep, uint32_t** out_idx, uint32_t* out_n) {
+  if(!expect_ident(c, label)) return 0;
+  if(!expect_ch(c, sep)) return 0;
   if(!expect_ch(c, '[')) return 0;
   uint32_t* idx = NULL;
   uint32_t n = 0, cap = 0;
@@ -769,15 +964,27 @@ static int parse_reg_types(cursor* c, const asm_type_entry* types, uint32_t ntyp
   if(!match_ch(c, ']')) {
     for(;;) {
       char name[32];
-      if(!read_ident(c, name, sizeof(name))) { free(idx); return 0; }
+      if(!read_ident(c, name, sizeof(name))) {
+        free(idx);
+        return 0;
+      }
       uint32_t ti;
-      if(!find_type_index_by_kind_name(c, types, ntypes, name, &ti)) { free(idx); return 0; }
-      if(n == cap) { cap = cap ? cap * 2 : 4; idx = (uint32_t*)realloc(idx, cap * sizeof(uint32_t)); }
+      if(!find_type_index_by_kind_name(c, types, ntypes, name, &ti)) {
+        free(idx);
+        return 0;
+      }
+      if(n == cap) {
+        cap = cap ? cap * 2 : 4;
+        idx = (uint32_t*)realloc(idx, cap * sizeof(uint32_t));
+      }
       idx[n++] = ti;
       if(match_ch(c, ',')) continue;
       break;
     }
-    if(!expect_ch(c, ']')) { free(idx); return 0; }
+    if(!expect_ch(c, ']')) {
+      free(idx);
+      return 0;
+    }
   }
   *out_idx = idx;
   *out_n = n;
@@ -836,6 +1043,8 @@ static int parse_func(cursor* c, const asm_type_entry* types, uint32_t ntypes,
   uint32_t idx;
   if(!read_uint(c, &idx)) return 0;
   if(!expect_ch(c, ']')) return 0;
+
+  // Optional, like cap_start and nargs; name=ATOM, an atom spelt by name.
   uint32_t name_atom = JELLO_BC_NO_NAME;
   size_t name_save = c->pos;
   if(match_ident(c, "name")) {
@@ -846,6 +1055,7 @@ static int parse_func(cursor* c, const asm_type_entry* types, uint32_t ntypes,
   } else {
     c->pos = name_save;
   }
+
   if(!expect_ident(c, "nregs")) return 0;
   if(!expect_ch(c, '=')) return 0;
   uint32_t nregs;
@@ -873,7 +1083,7 @@ static int parse_func(cursor* c, const asm_type_entry* types, uint32_t ntypes,
 
   uint32_t* reg_type_idx = NULL;
   uint32_t nrt = 0;
-  if(!parse_reg_types(c, types, ntypes, &reg_type_idx, &nrt)) return 0;
+  if(!parse_type_list(c, types, ntypes, "reg_types", '=', &reg_type_idx, &nrt)) return 0;
   if(nrt != nregs) {
     fprintf(stderr, "%s: reg_types has %u entries but nregs=%u\n", c->filename, nrt, nregs);
     free(reg_type_idx);
@@ -886,6 +1096,7 @@ static int parse_func(cursor* c, const asm_type_entry* types, uint32_t ntypes,
     size_t before = c->pos;
     skip_ws(c);
     if(c->pos >= c->len) break;
+    // An instruction starts with a decimal PC label and ':'; the next func[ does not.
     size_t probe = c->pos;
     while(probe < c->len && c->buf[probe] >= '0' && c->buf[probe] <= '9') probe++;
     if(probe == c->pos || probe >= c->len || c->buf[probe] != ':') { c->pos = before; break; }
@@ -929,19 +1140,48 @@ static int parse_module(cursor* c, module_t* out) {
   }
 
   if(!parse_types(c, &out->types, &out->ntypes)) return 0;
-  if(!parse_sigs(c, out->types, out->ntypes, &out->sigs, &out->nsigs)) { module_free(out); return 0; }
-  if(!parse_atoms(c, &out->atoms, &out->natoms)) { module_free(out); return 0; }
-  if(!parse_struct_sigs(c, out->types, out->ntypes, out->atoms, out->natoms,
-                         &out->struct_sigs, &out->nstruct_sigs)) {
+  if(!parse_sigs(c, out->types, out->ntypes, &out->sigs, &out->nsigs)) {
     module_free(out);
     return 0;
   }
+  if(!parse_atoms(c, &out->atoms, &out->natoms)) {
+    module_free(out);
+    return 0;
+  }
+  if(!parse_struct_sigs(c, out->types, out->ntypes, out->atoms, out->natoms, &out->struct_sigs,
+                        &out->nstruct_sigs)) {
+    module_free(out);
+    return 0;
+  }
+  if(out->features & (uint32_t)JELLO_BC_FEAT_ENUM_SCHEMA) {
+    if(!parse_enum_sigs(c, out->types, out->ntypes, &out->enum_sigs, &out->nenum_sigs)) {
+      module_free(out);
+      return 0;
+    }
+  }
+  // Each optional section is present exactly when its feature flag is.
   if(out->features & (uint32_t)JELLO_BC_FEAT_CONST64) {
     if(!parse_const_i64(c, &out->const_i64, &out->nconst_i64)) { module_free(out); return 0; }
     if(!parse_const_f64(c, &out->const_f64, &out->nconst_f64)) { module_free(out); return 0; }
   }
   if(out->features & (uint32_t)JELLO_BC_FEAT_IMPORTS) {
-    if(!parse_imports(c, out->atoms, out->natoms, &out->imports, &out->nimports)) { module_free(out); return 0; }
+    if(!parse_imports(c, out->atoms, out->natoms, &out->imports, &out->nimports)) {
+      module_free(out);
+      return 0;
+    }
+  }
+  if(out->features & (uint32_t)JELLO_BC_FEAT_GLOBALS) {
+    if(!parse_type_list(c, out->types, out->ntypes, "globals", ':', &out->global_types,
+                        &out->nglobals)) {
+      module_free(out);
+      return 0;
+    }
+  }
+  if(out->features & (uint32_t)JELLO_BC_FEAT_LINE_TABLE) {
+    if(!parse_line_table(c, out)) {
+      module_free(out);
+      return 0;
+    }
   }
 
   func_t* funcs = NULL;
@@ -949,7 +1189,7 @@ static int parse_module(cursor* c, module_t* out) {
   for(;;) {
     skip_ws(c);
     if(c->pos >= c->len) break;
-    uint32_t idx;
+    uint32_t idx = 0;
     func_t fn;
     if(!parse_func(c, out->types, out->ntypes, out->atoms, out->natoms, &idx, &fn)) {
       module_free(out); free(funcs); return 0;
@@ -1003,6 +1243,26 @@ static void bb_u32(byte_buf* bb, uint32_t v) {
   bb_push(bb, le, 4);
 }
 
+// LEB128, signed and unsigned, as the line table stores its runs.
+static void bb_sleb(byte_buf* bb, int64_t v) {
+  for(;;) {
+    uint8_t b = (uint8_t)(v & 0x7f);
+    v >>= 7;
+    if((v == 0 && !(b & 0x40u)) || (v == -1 && (b & 0x40u))) {
+      bb_u8(bb, b);
+      return;
+    }
+    bb_u8(bb, (uint8_t)(b | 0x80u));
+  }
+}
+static void bb_uleb(byte_buf* bb, uint32_t v) {
+  while(v >= 0x80u) {
+    bb_u8(bb, (uint8_t)(v | 0x80u));
+    v >>= 7;
+  }
+  bb_u8(bb, (uint8_t)v);
+}
+
 static void write_insn_canonical(byte_buf* bb, const jello_insn* in) {
   bb_u8(bb, in->op);
   bb_u8(bb, in->a);
@@ -1040,7 +1300,8 @@ static int write_module(const module_t* m, byte_buf* bb) {
   bb_u32(bb, m->natoms);
   bb_u32(bb, m->nfuncs);
   bb_u32(bb, m->entry);
-  bb_u32(bb, m->nimports);
+  bb_u32(bb, m->nimports); // Present with or without IMPORTS.
+  if(m->features & (uint32_t)JELLO_BC_FEAT_ENUM_SCHEMA) bb_u32(bb, m->nenum_sigs);
 
   if(m->features & (uint32_t)JELLO_BC_FEAT_CONST64) {
     bb_u32(bb, m->nconst_i64);
@@ -1049,6 +1310,7 @@ static int write_module(const module_t* m, byte_buf* bb) {
   if(m->features & (uint32_t)JELLO_BC_FEAT_CONSTBYTES) {
     bb_u32(bb, 0); /* nconst_bytes */
   }
+  if(m->features & (uint32_t)JELLO_BC_FEAT_GLOBALS) bb_u32(bb, m->nglobals);
 
   for(uint32_t i = 0; i < m->ntypes; i++) {
     bb_u8(bb, (uint8_t)m->types[i].kind);
@@ -1076,13 +1338,24 @@ static int write_module(const module_t* m, byte_buf* bb) {
     }
   }
 
-  /* Atoms: length-prefixed UTF-8, per the frozen container spec. */
+  for(uint32_t i = 0; i < m->nenum_sigs; i++) {
+    const asm_enum_sig* sig = &m->enum_sigs[i];
+    bb_u16(bb, sig->nvariants);
+    for(uint16_t j = 0; j < sig->nvariants; j++) {
+      bb_u16(bb, sig->variants[j].nfields);
+      for(uint16_t k = 0; k < sig->variants[j].nfields; k++)
+        bb_u32(bb, sig->variants[j].field_type[k]);
+    }
+  }
+
+  // Atoms; a u32 length, then the UTF-8 bytes.
   for(uint32_t i = 0; i < m->natoms; i++) {
     uint32_t len = (uint32_t)strlen(m->atoms[i]);
     bb_u32(bb, len);
     bb_push(bb, m->atoms[i], len);
   }
 
+  // Imports follow the atoms, since the loader resolves their names as it reads them.
   for(uint32_t i = 0; i < m->nimports; i++) {
     const asm_import_sig* imp = &m->imports[i];
     bb_u32(bb, imp->library_atom);
@@ -1092,6 +1365,7 @@ static int write_module(const module_t* m, byte_buf* bb) {
     for(int j = 0; j < 8; j++) bb_u8(bb, (uint8_t)imp->arg_kinds[j]);
   }
 
+  // Each 64-bit constant as two u32 halves, low first.
   if(m->features & (uint32_t)JELLO_BC_FEAT_CONST64) {
     for(uint32_t i = 0; i < m->nconst_i64; i++) {
       uint64_t bits = (uint64_t)m->const_i64[i];
@@ -1106,6 +1380,8 @@ static int write_module(const module_t* m, byte_buf* bb) {
     }
   }
 
+  for(uint32_t i = 0; i < m->nglobals; i++) bb_u32(bb, m->global_types[i]);
+
   for(uint32_t f = 0; f < m->nfuncs; f++) {
     const func_t* fn = &m->funcs[f];
     bb_u32(bb, fn->name_atom);
@@ -1119,10 +1395,32 @@ static int write_module(const module_t* m, byte_buf* bb) {
       else write_insn_canonical(bb, &fn->insns[k]);
     }
   }
+  if(m->features & (uint32_t)JELLO_BC_FEAT_LINE_TABLE) {
+    bb_u32(bb, m->nsource_files);
+    for(uint32_t i = 0; i < m->nsource_files; i++) {
+      bb_u32(bb, (uint32_t)strlen(m->source_files[i]));
+      bb_push(bb, m->source_files[i], strlen(m->source_files[i]));
+    }
+    for(uint32_t f = 0; f < m->nfuncs; f++) {
+      uint32_t n = 0;
+      for(uint32_t i = 0; i < m->nline_runs; i++) n += m->line_runs[i * 5] == f;
+      bb_uleb(bb, n);
+      uint32_t pc = 0, line = 0;
+      for(uint32_t i = 0; i < m->nline_runs; i++) {
+        const uint32_t* run = &m->line_runs[i * 5];
+        if(run[0] != f) continue;
+        // A pc below the last one wraps to a delta the loader rejects.
+        bb_uleb(bb, run[1] - pc);
+        bb_uleb(bb, run[2]);
+        bb_sleb(bb, (int64_t)run[3] - (int64_t)line);
+        bb_uleb(bb, run[4]);
+        pc = run[1];
+        line = run[3];
+      }
+    }
+  }
   return 1;
 }
-
-/* -- text printer (disassembler) -- */
 
 static void print_real_module(const jello_bc_module* m, FILE* out) {
   fprintf(out, ".jlo module version=%u features=[", m->version);
@@ -1141,6 +1439,11 @@ static void print_real_module(const jello_bc_module* m, FILE* out) {
     if(i) fprintf(out, ", ");
     jello_type_kind kind = m->types[i].kind;
     fprintf(out, "%s", kind_name_of(kind));
+    if(kind == JELLO_T_LIST || kind == JELLO_T_ARRAY) {
+      fprintf(out, "(");
+      print_type_ref(out, m, m->types[i].as.unary.elem);
+      fprintf(out, ")");
+    }
     if(kind == JELLO_T_STRUCT) fprintf(out, "(%u)", m->types[i].as.strct.struct_sig_id);
     if(kind == JELLO_T_FUNCTION) fprintf(out, "(%u)", m->types[i].as.fun.sig_id);
   }
@@ -1149,11 +1452,12 @@ static void print_real_module(const jello_bc_module* m, FILE* out) {
   for(uint32_t i = 0; i < m->nsigs; i++) {
     if(i) fprintf(out, ", ");
     const jello_fun_sig* sig = &m->sigs[i];
-    fprintf(out, "{ ret=%s, nargs=%u, args=[",
-            kind_name_of(m->types[sig->ret].kind), (unsigned)sig->nargs);
+    fprintf(out, "{ ret=");
+    print_type_ref(out, m, sig->ret);
+    fprintf(out, ", nargs=%u, args=[", (unsigned)sig->nargs);
     for(uint16_t j = 0; j < sig->nargs; j++) {
       if(j) fprintf(out, ", ");
-      fprintf(out, "%s", kind_name_of(m->types[sig->args[j]].kind));
+      print_type_ref(out, m, sig->args[j]);
     }
     fprintf(out, "] }");
   }
@@ -1173,7 +1477,7 @@ static void print_real_module(const jello_bc_module* m, FILE* out) {
     fprintf(out, "{ nfields=%u named=%u mutable=%u fields=[", sig->nfields, sig->named, sig->is_mutable);
     for(uint32_t j = 0; j < sig->nfields; j++) {
       if(j) fprintf(out, ", ");
-      fprintf(out, "%s", kind_name_of(m->types[sig->field_type[j]].kind));
+      print_type_ref(out, m, sig->field_type[j]);
     }
     fprintf(out, "]");
     if(sig->named) {
@@ -1187,6 +1491,25 @@ static void print_real_module(const jello_bc_module* m, FILE* out) {
     fprintf(out, " }");
   }
   fprintf(out, "]\n");
+
+  if(m->features & (uint32_t)JELLO_BC_FEAT_ENUM_SCHEMA) {
+    fprintf(out, "enum_sigs: [");
+    for(uint32_t i = 0; i < m->nenum_sigs; i++) {
+      if(i) fprintf(out, ", ");
+      fprintf(out, "[");
+      for(uint16_t j = 0; j < m->enum_sigs[i].nvariants; j++) {
+        if(j) fprintf(out, ", ");
+        fprintf(out, "[");
+        for(uint16_t k = 0; k < m->enum_sigs[i].variants[j].nfields; k++) {
+          if(k) fprintf(out, ", ");
+          print_type_ref(out, m, m->enum_sigs[i].variants[j].field_type[k]);
+        }
+        fprintf(out, "]");
+      }
+      fprintf(out, "]");
+    }
+    fprintf(out, "]\n");
+  }
 
   if(m->features & (uint32_t)JELLO_BC_FEAT_CONST64) {
     fprintf(out, "const_i64: [");
@@ -1213,8 +1536,7 @@ static void print_real_module(const jello_bc_module* m, FILE* out) {
     fprintf(out, " reg_types=[");
     for(uint32_t r = 0; r < fn->nregs; r++) {
       if(r) fprintf(out, ", ");
-      jello_type_kind kind = m->types[fn->reg_types[r]].kind;
-      fprintf(out, "%s", kind_name_of(kind));
+      print_type_ref(out, m, fn->reg_types[r]);
     }
     fprintf(out, "]\n");
     for(uint32_t k = 0; k < fn->ninsns; k++) {
@@ -1376,7 +1698,6 @@ static int cmd_run(const char* in_path, int repeat, int gc_stats, uint64_t fuel,
   return 0;
 }
 
-/* -- dumpir -- */
 
 static const char* jir_op_name(jello_jit_ir_op op) {
   switch(op) {
@@ -1545,6 +1866,7 @@ static void print_jir_imm(FILE* out, jir_imm_kind imm_kind, uint32_t imm) {
     case JIRSHAPE_CONV: fprintf(out, "imm=%s", jir_conv_name(imm)); break;
     case JIRSHAPE_BRW: fprintf(out, "imm=%s", jir_brw_name(imm)); break;
     case JIRSHAPE_KIND: fprintf(out, "imm=%s", kind_name_of((jello_type_kind)imm)); break;
+    // Signed, as disasm prints it, so a backward jump's delta reads as negative.
     default: fprintf(out, "imm=%d", (int32_t)imm); break;
   }
 }
@@ -1604,8 +1926,6 @@ static int cmd_dumpir(const char* in_path, int func_filter, int has_func_filter)
   return 0;
 }
 
-/* -- file I/O helpers -- */
-
 static char* read_whole_file(const char* path, size_t* out_len) {
   FILE* f = fopen(path, "rb");
   if(!f) { fprintf(stderr, "%s: cannot open: %s\n", path, strerror(errno)); return NULL; }
@@ -1622,13 +1942,16 @@ static char* read_whole_file(const char* path, size_t* out_len) {
   return buf;
 }
 
-/* -- CLI -- */
-
 static void usage(const char* prog) {
   fprintf(stderr, "usage: %s asm <in.jlo.txt> -o <out.jlo>\n", prog);
   fprintf(stderr, "       %s disasm <in.jlo> [-o <out.jlo.txt>]\n", prog);
-  fprintf(stderr, "       %s run [--print] <in.jlo> [--print] [--repeat N] [--gc-stats] [--fuel N] [--max-bytes-len N] [--trap-pc]\n", prog);
+  fprintf(stderr,
+          "       %s run [--print] <in.jlo> [--print] [--repeat N] [--gc-stats] [--fuel N] "
+          "[--max-bytes-len N] [--trap-pc]\n",
+          prog);
   fprintf(stderr, "       %s dumpir <in.jlo> [--func N]\n", prog);
+  fprintf(stderr, "       %s init [DIR] [--name NAME]\n", prog);
+  fprintf(stderr, "       %s get-deps [DIR]\n", prog);
 }
 
 static int cmd_asm(const char* in_path, const char* out_path) {
@@ -1712,15 +2035,12 @@ int main(int argc, char** argv) {
     if(!out_path) { usage(argv[0]); return 1; }
     return cmd_asm(in_path, out_path);
   }
-  if(strcmp(subcmd, "disasm") == 0) {
-    return cmd_disasm(in_path, out_path);
-  }
+  if(strcmp(subcmd, "disasm") == 0) { return cmd_disasm(in_path, out_path); }
   if(strcmp(subcmd, "run") == 0) {
-    return cmd_run(in_path, repeat > 0 ? repeat : 1, gc_stats, fuel, max_bytes_len, trap_pc, host_print);
+    return cmd_run(in_path, repeat > 0 ? repeat : 1, gc_stats, fuel, max_bytes_len, trap_pc,
+                   host_print);
   }
-  if(strcmp(subcmd, "dumpir") == 0) {
-    return cmd_dumpir(in_path, func_filter, has_func_filter);
-  }
+  if(strcmp(subcmd, "dumpir") == 0) { return cmd_dumpir(in_path, func_filter, has_func_filter); }
   usage(argv[0]);
   return 1;
 }
