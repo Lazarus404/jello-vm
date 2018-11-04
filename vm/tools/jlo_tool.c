@@ -8,6 +8,7 @@
  * jello_bc_read and uses the VM's internal headers. */
 
 #include <jello/internal.h>
+#include "deps.h"
 #include "host.h"
 
 #include <stdio.h>
