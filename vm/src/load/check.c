@@ -330,8 +330,9 @@ jello_bc_result jello_bc_validate_insn(
     case JOP_BITXOR_I32:
       return validate_bin(m, reg_types, ins, nregs, JELLO_T_I32, 1);
     case JOP_DIV_I32:
-    case JOP_MOD_I32:
-      return validate_bin(m, reg_types, ins, nregs, JELLO_T_I32, 1);
+    case JOP_MOD_I32: return validate_bin(m, reg_types, ins, nregs, JELLO_T_I32, 1);
+    case JOP_DIV_U32:
+    case JOP_MOD_U32: return validate_bin(m, reg_types, ins, nregs, JELLO_T_I32, 1);
     case JOP_ADD_I32_IMM:
     case JOP_SUB_I32_IMM:
     case JOP_MUL_I32_IMM:
@@ -344,6 +345,8 @@ jello_bc_result jello_bc_validate_insn(
     case JOP_MUL_I64:
     case JOP_DIV_I64:
     case JOP_MOD_I64:
+    case JOP_DIV_U64:
+    case JOP_MOD_U64:
     case JOP_SHL_I64:
     case JOP_SHR_I64:
     case JOP_BITAND_I64:
@@ -376,13 +379,13 @@ jello_bc_result jello_bc_validate_insn(
 
     case JOP_EQ_I32:
     case JOP_LT_I32:
-      return validate_cmp(m, reg_types, ins, nregs, JELLO_T_I32);
+    case JOP_LT_U32: return validate_cmp(m, reg_types, ins, nregs, JELLO_T_I32);
     case JOP_EQ_I32_IMM:
     case JOP_LT_I32_IMM:
       return validate_cmp_imm(m, reg_types, ins, nregs, JELLO_T_I32);
     case JOP_EQ_I64:
     case JOP_LT_I64:
-      return validate_cmp(m, reg_types, ins, nregs, JELLO_T_I64);
+    case JOP_LT_U64: return validate_cmp(m, reg_types, ins, nregs, JELLO_T_I64);
     case JOP_EQ_F32:
     case JOP_LT_F32:
       return validate_cmp(m, reg_types, ins, nregs, JELLO_T_F32);
@@ -390,6 +393,7 @@ jello_bc_result jello_bc_validate_insn(
     case JOP_LT_F64:
       return validate_cmp(m, reg_types, ins, nregs, JELLO_T_F64);
     case JOP_SEXT_I64: return validate_conv(m, reg_types, ins, nregs, JELLO_T_I64, JELLO_T_I32);
+    case JOP_ZEXT_I64: return validate_conv(m, reg_types, ins, nregs, JELLO_T_I64, JELLO_T_I32);
     case JOP_SEXT_I16: return validate_conv(m, reg_types, ins, nregs, JELLO_T_I32, JELLO_T_I16);
     case JOP_TRUNC_I8: return validate_conv(m, reg_types, ins, nregs, JELLO_T_I8, JELLO_T_I32);
     case JOP_TRUNC_I16: return validate_conv(m, reg_types, ins, nregs, JELLO_T_I16, JELLO_T_I32);

@@ -467,6 +467,8 @@ jello_exec_status vm_exec_loop(exec_ctx* ctx);
 /* -- cold-path opcode handlers (ops_arith.c) -- */
 op_result op_div_i32(exec_ctx* ctx, const jello_insn* ins);
 op_result op_mod_i32(exec_ctx* ctx, const jello_insn* ins);
+op_result op_div_u32(exec_ctx* ctx, const jello_insn* ins);
+op_result op_mod_u32(exec_ctx* ctx, const jello_insn* ins);
 op_result op_shl_i32(exec_ctx* ctx, const jello_insn* ins);
 op_result op_shr_i32(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bitand_i32(exec_ctx* ctx, const jello_insn* ins);
@@ -479,6 +481,8 @@ op_result op_sub_i64(exec_ctx* ctx, const jello_insn* ins);
 op_result op_mul_i64(exec_ctx* ctx, const jello_insn* ins);
 op_result op_div_i64(exec_ctx* ctx, const jello_insn* ins);
 op_result op_mod_i64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_div_u64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_mod_u64(exec_ctx* ctx, const jello_insn* ins);
 op_result op_neg_i64(exec_ctx* ctx, const jello_insn* ins);
 op_result op_shl_i64(exec_ctx* ctx, const jello_insn* ins);
 op_result op_shr_i64(exec_ctx* ctx, const jello_insn* ins);
@@ -487,6 +491,8 @@ op_result op_bitor_i64(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bitxor_i64(exec_ctx* ctx, const jello_insn* ins);
 op_result op_eq_i64(exec_ctx* ctx, const jello_insn* ins);
 op_result op_lt_i64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_lt_u32(exec_ctx* ctx, const jello_insn* ins);
+op_result op_lt_u64(exec_ctx* ctx, const jello_insn* ins);
 
 op_result op_add_f16(exec_ctx* ctx, const jello_insn* ins);
 op_result op_sub_f16(exec_ctx* ctx, const jello_insn* ins);
@@ -501,6 +507,7 @@ op_result op_eq_f32(exec_ctx* ctx, const jello_insn* ins);
 op_result op_lt_f32(exec_ctx* ctx, const jello_insn* ins);
 
 op_result op_sext_i64(exec_ctx* ctx, const jello_insn* ins);
+op_result op_zext_i64(exec_ctx* ctx, const jello_insn* ins);
 op_result op_fma_f64(exec_ctx* ctx, const jello_insn* ins);
 op_result op_ldexp_f64(exec_ctx* ctx, const jello_insn* ins);
 op_result op_copysign_f64(exec_ctx* ctx, const jello_insn* ins);

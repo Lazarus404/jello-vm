@@ -102,6 +102,32 @@ op_result op_mod_i32(exec_ctx* ctx, const jello_insn* ins) {
   return OP_CONTINUE;
 }
 
+op_result op_div_u32(exec_ctx* ctx, const jello_insn* ins) {
+  call_frame* fr = current_frame(ctx);
+  uint32_t b = vm_load_u32(&fr->rf, ins->c);
+  if(b == 0u) {
+    ctx->vm->trap_code = JELLO_TRAP_ARITHMETIC;
+    return OP_TRAP;
+  }
+  uint32_t a = vm_load_u32(&fr->rf, ins->b);
+  jello_type_kind k = vm_reg_kind(ctx->m, fr->f, ins->a);
+  vm_store_u32_masked(&fr->rf, ins->a, a / b, k);
+  return OP_CONTINUE;
+}
+
+op_result op_mod_u32(exec_ctx* ctx, const jello_insn* ins) {
+  call_frame* fr = current_frame(ctx);
+  uint32_t b = vm_load_u32(&fr->rf, ins->c);
+  if(b == 0u) {
+    ctx->vm->trap_code = JELLO_TRAP_ARITHMETIC;
+    return OP_TRAP;
+  }
+  uint32_t a = vm_load_u32(&fr->rf, ins->b);
+  jello_type_kind k = vm_reg_kind(ctx->m, fr->f, ins->a);
+  vm_store_u32_masked(&fr->rf, ins->a, a % b, k);
+  return OP_CONTINUE;
+}
+
 #define DEF_BIN_I32_MASKED(NAME, EXPR)                                            \
   op_result NAME(exec_ctx* ctx, const jello_insn* ins) {                          \
     call_frame* fr = current_frame(ctx);                                          \
@@ -178,6 +204,30 @@ op_result op_mod_i64(exec_ctx* ctx, const jello_insn* ins) {
   return OP_CONTINUE;
 }
 
+op_result op_div_u64(exec_ctx* ctx, const jello_insn* ins) {
+  call_frame* fr = current_frame(ctx);
+  uint64_t b = (uint64_t)vm_load_i64(&fr->rf, ins->c);
+  if(b == 0ull) {
+    ctx->vm->trap_code = JELLO_TRAP_ARITHMETIC;
+    return OP_TRAP;
+  }
+  uint64_t a = (uint64_t)vm_load_i64(&fr->rf, ins->b);
+  vm_store_i64(&fr->rf, ins->a, (int64_t)(a / b));
+  return OP_CONTINUE;
+}
+
+op_result op_mod_u64(exec_ctx* ctx, const jello_insn* ins) {
+  call_frame* fr = current_frame(ctx);
+  uint64_t b = (uint64_t)vm_load_i64(&fr->rf, ins->c);
+  if(b == 0ull) {
+    ctx->vm->trap_code = JELLO_TRAP_ARITHMETIC;
+    return OP_TRAP;
+  }
+  uint64_t a = (uint64_t)vm_load_i64(&fr->rf, ins->b);
+  vm_store_i64(&fr->rf, ins->a, (int64_t)(a % b));
+  return OP_CONTINUE;
+}
+
 op_result op_neg_i64(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   int64_t x = vm_load_i64(&fr->rf, ins->b);
@@ -197,6 +247,22 @@ op_result op_lt_i64(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   int64_t a = vm_load_i64(&fr->rf, ins->b);
   int64_t b = vm_load_i64(&fr->rf, ins->c);
+  vm_store_bool(&fr->rf, ins->a, a < b);
+  return OP_CONTINUE;
+}
+
+op_result op_lt_u32(exec_ctx* ctx, const jello_insn* ins) {
+  call_frame* fr = current_frame(ctx);
+  uint32_t a = vm_load_u32(&fr->rf, ins->b);
+  uint32_t b = vm_load_u32(&fr->rf, ins->c);
+  vm_store_bool(&fr->rf, ins->a, a < b);
+  return OP_CONTINUE;
+}
+
+op_result op_lt_u64(exec_ctx* ctx, const jello_insn* ins) {
+  call_frame* fr = current_frame(ctx);
+  uint64_t a = (uint64_t)vm_load_i64(&fr->rf, ins->b);
+  uint64_t b = (uint64_t)vm_load_i64(&fr->rf, ins->c);
   vm_store_bool(&fr->rf, ins->a, a < b);
   return OP_CONTINUE;
 }
@@ -260,6 +326,13 @@ op_result op_lt_f32(exec_ctx* ctx, const jello_insn* ins) {
 op_result op_sext_i64(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   int32_t x = (int32_t)vm_load_u32(&fr->rf, ins->b);
+  vm_store_i64(&fr->rf, ins->a, (int64_t)x);
+  return OP_CONTINUE;
+}
+
+op_result op_zext_i64(exec_ctx* ctx, const jello_insn* ins) {
+  call_frame* fr = current_frame(ctx);
+  uint32_t x = vm_load_u32(&fr->rf, ins->b);
   vm_store_i64(&fr->rf, ins->a, (int64_t)x);
   return OP_CONTINUE;
 }

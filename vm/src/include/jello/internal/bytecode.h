@@ -450,6 +450,20 @@ typedef struct jello_op_info {
      JELLO_OPF_CAN_TRAP, op_bytes_write_f64_be)                                                    \
   OP(JOP_BYTES_BLIT, "BYTES_BLIT", REG, T_BYTES, REG, T_BYTES, REG, T_I32, IMM_NONE,               \
      JELLO_OPF_CAN_TRAP, op_bytes_blit)                                                            \
+  OP(JOP_DIV_U32, "DIV_U32", REG, POLY, REG, T_I32, REG, T_I32, IMM_NONE, JELLO_OPF_CAN_TRAP,      \
+     op_div_u32)                                                                                   \
+  OP(JOP_MOD_U32, "MOD_U32", REG, POLY, REG, T_I32, REG, T_I32, IMM_NONE, JELLO_OPF_CAN_TRAP,      \
+     op_mod_u32)                                                                                   \
+  OP(JOP_DIV_U64, "DIV_U64", REG, T_I64, REG, T_I64, REG, T_I64, IMM_NONE, JELLO_OPF_CAN_TRAP,     \
+     op_div_u64)                                                                                   \
+  OP(JOP_MOD_U64, "MOD_U64", REG, T_I64, REG, T_I64, REG, T_I64, IMM_NONE, JELLO_OPF_CAN_TRAP,     \
+     op_mod_u64)                                                                                   \
+  OP(JOP_LT_U32, "LT_U32", REG, T_BOOL, REG, T_I32, REG, T_I32, IMM_NONE, JELLO_OPF_NONE,          \
+     op_lt_u32)                                                                                    \
+  OP(JOP_LT_U64, "LT_U64", REG, T_BOOL, REG, T_I64, REG, T_I64, IMM_NONE, JELLO_OPF_NONE,          \
+     op_lt_u64)                                                                                    \
+  OP(JOP_ZEXT_I64, "ZEXT_I64", REG, T_I64, REG, T_I32, UNUSED, 0, IMM_NONE, JELLO_OPF_NONE,        \
+     op_zext_i64)                                                                                  \
   OP(JOP_FMA_F64, "FMA_F64", REG, T_F64, REG, T_F64, REG, T_F64, REG, JELLO_OPF_NONE, op_fma_f64)  \
   OP(JOP_LDEXP_F64, "LDEXP_F64", REG, T_F64, REG, T_F64, REG, T_I32, IMM_NONE, JELLO_OPF_NONE,     \
      op_ldexp_f64)                                                                                 \
