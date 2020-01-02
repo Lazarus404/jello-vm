@@ -51,9 +51,14 @@ void proc_stack_switch(void** save, void* load);
 
 typedef struct proc_sched proc_sched;
 
+typedef enum proc_exit {
+  PROC_STOPPED = 1,       /**< It was stopped. */
+} proc_exit;
+
 enum {
   PROC_PARK_NONE,
   PROC_PARK_RECEIVE,
+  PROC_PARK_ALL,
   PROC_PARK_NATIVE,
 };
 
@@ -88,13 +93,31 @@ typedef struct proc_poller {
 #if defined(_WIN32)
 #else
 #endif
+void proc_poller_wake(proc_poller* pl);
+void proc_poller_close(proc_poller* pl);
+
+#define PROC_POLL_CHUNK 1024u
+#define PROC_POLL_CHUNKS 1024u
+#define PROC_POLL_FDS (PROC_POLL_CHUNK * PROC_POLL_CHUNKS)
+
+static inline int32_t proc_poll_index(int fd) {
+#if defined(_WIN32)
+  uint32_t at = (uint32_t)fd >> 2;
+#else
+  uint32_t at = (uint32_t)fd;
+#endif
+  return fd < 0 || at >= PROC_POLL_FDS ? -1 : (int32_t)at;
+}
 
 typedef struct proc_poll_desc {
   pthread_mutex_t mu; /**< Guards the rest; taken before any process's `mu`. */
+  uint8_t open;       /**< Set from proc_poll_open until proc_poll_close. */
   uint8_t ready;      /**< What it became ready for, with no one waiting, since a wait last found
                        * it so. */
   int fd;             /**< The descriptor it is the record of, while `open`. */
 } proc_poll_desc;
+
+proc_poll_desc* proc_polls_find(proc_sched* s, int fd);
 
 #define PROC_MAX_SCHEDULERS 256u
 #define PROC_IDLE_WORDS (PROC_MAX_SCHEDULERS / 64u)
@@ -118,6 +141,7 @@ typedef struct proc_worker {
   pthread_mutex_t park_mu;    /**< Guards `woken`, for waiting on `park_cv`. */
   pthread_cond_t park_cv;     /**< Where it waits for work, unless it is scheduler 0. */
   uint8_t woken;              /**< Set by whatever took its bit in `idle_mask`, to end its wait. */
+  pthread_t thread;
 #ifdef PROC_TSAN
   void* fiber; /**< ThreadSanitizer's name for its thread's own stack. */
 #endif
@@ -136,6 +160,7 @@ typedef struct jello_process {
 #endif
   const struct jello_function* body; /**< What it runs, a root of its VM until it starts. */
   struct jello_process* queued;      /**< The next in its run queue. */
+  struct jello_process* live_next;
   struct jello_process* owner;    /**< The process whose finishing stops it, unless detached. */
   vm_parcel* inbox; /**< Messages not yet received, a ring of inbox_cap, a power of two. */
   uint32_t inbox_head;
@@ -145,6 +170,7 @@ typedef struct jello_process {
   uint8_t parked; /**< A PROC_PARK_* value; still set when woken because nothing could run. */
   uint8_t off;
   _Atomic uint8_t stopping; /**< Set under `mu` by proc_stop, to the first reason it was given. */
+  _Atomic uint8_t done;     /**< Set, once it has finished, after how it did is recorded. */
   uint8_t cleaning; /**< Its own: set while its cleanups run, when a stop waits, a park traps. */
   uint8_t pinned;   /**< Run only by scheduler 0: the main process, and those spawned on main. */
   struct proc_socket* sockets; /**< The sockets it owns, closed as it finishes; see net.c. */
@@ -165,6 +191,7 @@ struct proc_sched {
   _Atomic uint32_t pinned_ready;
   uint8_t main_idle;
   _Atomic uint8_t main_waiting; /**< Whether scheduler 0 waits for work, the main process parked. */
+  _Atomic uint8_t shutdown;     /**< Set once every process has finished, to end the threads. */
   _Atomic uint32_t idle;        /**< Schedulers other than 0 waiting for work. */
   _Atomic uint64_t idle_mask[PROC_IDLE_WORDS];
   _Atomic uint32_t spinning;
@@ -172,6 +199,7 @@ struct proc_sched {
   uint32_t nworkers;
   proc_worker* workers; /**< Scheduler 0, then the others. */
   jello_process* main;  /**< The main process; never finishes while the schedulers run. */
+  uint8_t ending;       /**< In proc_end_all, which stops processes spawned meanwhile too. */
   jello_process* live;  /**< The unfinished processes, the main process aside. */
   proc_timer** timers;  /**< A binary min-heap by due time. */
   uint32_t ntimers;
@@ -188,8 +216,13 @@ struct proc_sched {
   uint32_t native_idle;   /**< Its threads waiting for a call. */
   uint32_t native_nthreads;
   pthread_t native_threads[PROC_MAX_NATIVE_THREADS];
+  uint8_t native_shutdown; /**< Set once every process has finished, to end its threads. */
 
   pthread_mutex_t poll_lock; /**< Guards `polling` and adding chunks to the poller's table. */
+  proc_poller poller;        /**< Opened, and its thread started, by the first proc_poll_open. */
+  pthread_t poll_thread;
+  uint8_t polling; /**< Set once the poller is open and its thread started. */
+  proc_poll_desc* _Atomic poll_chunks[PROC_POLL_CHUNKS];
 
   proc_pool pool;            /**< Slots of the default sizes. */
   pthread_mutex_t pool_lock; /**< Guards every pool its processes' slots come from. */

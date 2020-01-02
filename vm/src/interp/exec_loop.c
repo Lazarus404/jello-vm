@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
-#include <jello/internal.h>
-#include <stdlib.h>
+/** @file
+ * The interpreter's main loop, which runs the hottest opcodes inline and the rest through
+ * op_dispatch, and the jello_vm_exec_numeric entry points. */
 
-/* -- the dispatch loop -- */
+#include <jello/internal.h>
+#include <jello/internal/proc_internal.h>
+#include <assert.h>
+#include <stdlib.h>
 
 jello_exec_status vm_exec_loop(exec_ctx* ctx) {
   jello_vm* vm = ctx->vm;
@@ -149,20 +153,20 @@ jello_exec_status vm_exec_loop(exec_ctx* ctx) {
       }
       case JOP_ADD_I32_IMM: {
         jello_type_kind k = vm_reg_kind_fast(rf, ins->a);
-        int32_t a = (int32_t)vm_load_u32(rf, ins->b);
-        vm_store_u32_masked(rf, ins->a, (uint32_t)(a + (int32_t)ins->imm), k);
+        uint32_t a = vm_load_u32(rf, ins->b);
+        vm_store_u32_masked(rf, ins->a, a + (uint32_t)ins->imm, k);
         break;
       }
       case JOP_SUB_I32_IMM: {
         jello_type_kind k = vm_reg_kind_fast(rf, ins->a);
-        int32_t a = (int32_t)vm_load_u32(rf, ins->b);
-        vm_store_u32_masked(rf, ins->a, (uint32_t)(a - (int32_t)ins->imm), k);
+        uint32_t a = vm_load_u32(rf, ins->b);
+        vm_store_u32_masked(rf, ins->a, a - (uint32_t)ins->imm, k);
         break;
       }
       case JOP_MUL_I32_IMM: {
         jello_type_kind k = vm_reg_kind_fast(rf, ins->a);
-        int32_t a = (int32_t)vm_load_u32(rf, ins->b);
-        vm_store_u32_masked(rf, ins->a, (uint32_t)(a * (int32_t)ins->imm), k);
+        uint32_t a = vm_load_u32(rf, ins->b);
+        vm_store_u32_masked(rf, ins->a, a * (uint32_t)ins->imm, k);
         break;
       }
 
@@ -243,6 +247,7 @@ jello_exec_status vm_exec_loop(exec_ctx* ctx) {
 
       default: {
         op_result r = op_dispatch(ctx, ins);
+        if(r == OP_TRAP_LOCATED) return JELLO_EXEC_TRAP;
         if(r == OP_TRAP) {
           vm->trap_func_index = fr->func_index;
           vm->trap_pc = fr->pc - 1u;

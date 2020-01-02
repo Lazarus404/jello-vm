@@ -1,12 +1,32 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
-#include <jello/internal.h>
+/** @file
+ * Interpreter handlers for Object ops, and the prototype-chain helpers JIT code shares. */
 
-/* -- Object opcodes -- */
+#include <jello/internal.h>
 
 static call_frame* current_frame(exec_ctx* ctx) {
   return &ctx->vm->call_frames[ctx->vm->call_frames_len - 1u];
+}
+
+static int obj_chain_find(jello_vm* vm, const jello_bc_module* m, const jello_object* o,
+                          uint32_t atom_id, int keep, jello_value* out, int* found) {
+  int chained = m->proto_enabled && atom_id != JELLO_ATOM___PROTO__;
+  const jello_object* cur = o;
+  for(uint32_t steps = 0;; steps++) {
+    *found = vm_object_find(cur, atom_id, keep, out);
+    if(*found) return 1;
+    if(!chained || !cur->proto) {
+      *out = jello_make_null();
+      return 1;
+    }
+    cur = cur->proto;
+    if(steps > 1024u) {
+      vm->trap_code = JELLO_TRAP_BOUNDS;
+      return 0;
+    }
+  }
 }
 
 static int obj_get_chain(jello_vm* vm, const jello_bc_module* m, jello_object* o,
@@ -28,6 +48,15 @@ static int obj_get_chain(jello_vm* vm, const jello_bc_module* m, jello_object* o
     }
   }
   *out = v;
+  return 1;
+}
+
+static int obj_has_chain(jello_vm* vm, const jello_bc_module* m, const jello_object* o,
+                         uint32_t atom_id, uint32_t* out) {
+  jello_value v;
+  int found;
+  if(!obj_chain_find(vm, m, o, atom_id, 0, &v, &found)) return 0;
+  *out = (uint32_t)found;
   return 1;
 }
 
@@ -57,7 +86,9 @@ op_result op_obj_has_atom(exec_ctx* ctx, const jello_insn* ins) {
     ctx->vm->trap_code = JELLO_TRAP_NULL_DEREF;
     return OP_TRAP;
   }
-  vm_store_u32(&fr->rf, ins->a, (uint32_t)(jello_object_has(o, ins->imm) != 0));
+  uint32_t has;
+  if(!obj_has_chain(ctx->vm, ctx->m, o, ins->imm, &has)) return OP_TRAP;
+  vm_store_u32(&fr->rf, ins->a, has);
   return OP_CONTINUE;
 }
 
@@ -133,7 +164,9 @@ op_result op_obj_has(exec_ctx* ctx, const jello_insn* ins) {
     ctx->vm->trap_code = JELLO_TRAP_BOUNDS;
     return OP_TRAP;
   }
-  vm_store_u32(&fr->rf, ins->a, (uint32_t)(jello_object_has(o, atom_id) != 0));
+  uint32_t has;
+  if(!obj_has_chain(ctx->vm, ctx->m, o, atom_id, &has)) return OP_TRAP;
+  vm_store_u32(&fr->rf, ins->a, has);
   return OP_CONTINUE;
 }
 

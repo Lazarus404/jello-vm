@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
-#include <jello/internal.h>
+/** @file
+ * Interpreter handlers for Bytes ops; every ranged or multi-byte access is bounds-checked in
+ * 64-bit arithmetic, so an offset plus a width cannot wrap back into range. */
 
-/* -- Bytes opcode handlers -- */
+#include <jello/internal.h>
 
 static call_frame* current_frame(exec_ctx* ctx) {
   return &ctx->vm->call_frames[ctx->vm->call_frames_len - 1u];
@@ -24,11 +26,15 @@ op_result op_const_bytes(exec_ctx* ctx, const jello_insn* ins) {
 op_result op_bytes_new(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   uint32_t len = vm_load_u32(&fr->rf, ins->b);
+  if(len > (uint32_t)INT32_MAX) {
+    ctx->vm->trap_code = JELLO_TRAP_BOUNDS;
+    return OP_TRAP;
+  }
   if(ctx->vm->max_bytes_len && len > ctx->vm->max_bytes_len) {
     ctx->vm->trap_code = JELLO_TRAP_LIMIT;
     return OP_TRAP;
   }
-  jello_bytes* b = jello_bytes_new(ctx->vm, len);
+  jello_bytes* b = vm_buffer_new(ctx->vm, len);
   void* p = (void*)b;
   memcpy(vm_reg_ptr(&fr->rf, ins->a), &p, sizeof(void*));
   return OP_CONTINUE;

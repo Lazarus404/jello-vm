@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * Interpreter handlers for exception ops, and the try-scope helpers JIT code shares. Each frame
+ * counts its own try scopes, which the VM keeps on one stack; THROW unwinds to the innermost open
+ * scope on any frame. */
+
 #include <jello/internal.h>
 
 #include <stdlib.h>
@@ -12,8 +17,6 @@ void vm_try_pop(jello_vm* vm) {
     vm->live_try_scopes--;
   }
 }
-
-/* -- exception-handling opcodes -- */
 
 op_result op_try(exec_ctx* ctx, const jello_insn* ins) {
   jello_vm* vm = ctx->vm;

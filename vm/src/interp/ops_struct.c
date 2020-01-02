@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
-#include <jello/internal.h>
+/** @file
+ * Interpreter handlers for Struct ops; fields sit at fixed offsets set by the struct signature. */
 
-/* -- Struct opcodes -- */
+#include <jello/internal.h>
 
 static call_frame* current_frame(exec_ctx* ctx) {
   return &ctx->vm->call_frames[ctx->vm->call_frames_len - 1u];

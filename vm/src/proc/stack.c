@@ -11,6 +11,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define PROC_SLAB_SLOTS 64u
+
 static uint8_t* free_link(const proc_pool* pool, uint8_t* slot) {
   return proc_slot_mid(pool, slot) - sizeof(uint8_t*);
 }

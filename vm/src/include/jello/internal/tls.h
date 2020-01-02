@@ -20,6 +20,7 @@ typedef struct net_tls net_tls;
 
 typedef struct net_tls_ops {
   uint32_t version; /**< NET_TLS_OPS_VERSION. */
+  net_tls* (*open)(void* config, int fd, const uint8_t* host, uint32_t len, int32_t* err);
   void (*close)(net_tls* s, int notify);
 } net_tls_ops;
 

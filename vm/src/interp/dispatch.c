@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * op_dispatch: runs the handler of an opcode the main loop does not run inline, through a table
+ * generated from JELLO_OP_LIST; computed goto with JELLO_USE_COMPUTED_GOTO on GCC or Clang,
+ * otherwise a switch. JIT code also calls it to run an opcode it does not compile. */
+
 #include <jello/internal.h>
 #include <stdio.h>
 #include <stdlib.h>
-
-/* -- op_dispatch: the cold-path table -- */
 
 static op_result op_unimplemented(exec_ctx* ctx, const jello_insn* ins) {
   (void)ctx;
@@ -39,7 +42,8 @@ op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins) {
 #undef OP
 #pragma GCC diagnostic pop
 #else
-#define OP(id, name, ar, ak, br, bk, cr, ck, ir, fl, h) case id: return h(ctx, ins);
+#define OP(id, name, ar, ak, br, bk, cr, ck, ir, fl, h)                                            \
+  case id: return h(ctx, ins);
   switch((jello_op)ins->op) {
     JELLO_OP_LIST(OP)
     default: return op_unimplemented(ctx, ins);

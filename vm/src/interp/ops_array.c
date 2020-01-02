@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
-#include <jello/internal.h>
+/** @file
+ * Interpreter handlers for Array ops; elements are stored at the slot size of their Array type's
+ * element type (`as.unary.elem`). */
 
-/* -- Array opcodes -- */
+#include <jello/internal.h>
 
 static call_frame* current_frame(exec_ctx* ctx) {
   return &ctx->vm->call_frames[ctx->vm->call_frames_len - 1u];
@@ -20,6 +22,10 @@ op_result op_array_new(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   jello_type_id tid = fr->f->reg_types[ins->a];
   uint32_t length = vm_load_u32(&fr->rf, ins->b);
+  if(length > (uint32_t)INT32_MAX) {
+    ctx->vm->trap_code = JELLO_TRAP_BOUNDS;
+    return OP_TRAP;
+  }
   jello_array* arr = jello_array_new(ctx->vm, ctx->m, tid, length);
   vm_store_ptr(&fr->rf, ins->a, arr);
   return OP_CONTINUE;
@@ -78,6 +84,10 @@ op_result op_array_resize(exec_ctx* ctx, const jello_insn* ins) {
     return OP_TRAP;
   }
   uint32_t new_len = vm_load_u32(&fr->rf, ins->c);
+  if(new_len > (uint32_t)INT32_MAX) {
+    ctx->vm->trap_code = JELLO_TRAP_BOUNDS;
+    return OP_TRAP;
+  }
   jello_array_resize(ctx->vm, ctx->m, arr, new_len);
   return OP_CONTINUE;
 }
@@ -91,7 +101,7 @@ op_result op_array_concat2(exec_ctx* ctx, const jello_insn* ins) {
     return OP_TRAP;
   }
   uint64_t total = (uint64_t)b->length + (uint64_t)c->length;
-  if(total > (uint64_t)UINT32_MAX) {
+  if(total > (uint64_t)INT32_MAX) {
     ctx->vm->trap_code = JELLO_TRAP_BOUNDS;
     return OP_TRAP;
   }

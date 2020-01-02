@@ -453,6 +453,21 @@ jello_box_f16* jello_box_f16_new(jello_vm* vm, uint16_t bits) {
   return b;
 }
 
+jello_value vm_clone_numbox(jello_vm* vm, jello_value v) {
+  if(!vm || !jello_is_ptr(v) || jello_as_ptr(v) == NULL) return v;
+  switch(((const jello_obj_header*)jello_as_ptr(v))->kind) {
+    case JELLO_OBJ_BOX_F64:
+      return jello_from_ptr(jello_box_f64_new(vm, ((const jello_box_f64*)jello_as_ptr(v))->value));
+    case JELLO_OBJ_BOX_F32:
+      return jello_from_ptr(jello_box_f32_new(vm, ((const jello_box_f32*)jello_as_ptr(v))->value));
+    case JELLO_OBJ_BOX_F16:
+      return jello_from_ptr(jello_box_f16_new(vm, ((const jello_box_f16*)jello_as_ptr(v))->value));
+    case JELLO_OBJ_BOX_I64:
+      return jello_from_ptr(jello_box_i64_new(vm, ((const jello_box_i64*)jello_as_ptr(v))->value));
+    default: return v;
+  }
+}
+
 /* -- Array -- */
 static uint32_t array_elem_size(const jello_bc_module* m, uint32_t array_type_id) {
   jello_type_id elem_tid = m->types[array_type_id].as.unary.elem;
@@ -486,6 +501,16 @@ void jello_array_resize(jello_vm* vm, const jello_bc_module* m, jello_array* a, 
   a->length = new_length;
 }
 
+static jello_function* function_init(jello_function* fn, uint32_t func_index, uint32_t ncaps,
+                                     jello_type_id type) {
+  fn->h.kind = (uint8_t)JELLO_OBJ_FUNCTION;
+  fn->h.type_id = type;
+  fn->func_index = func_index;
+  fn->ncaps = ncaps;
+  for(uint32_t i = 0; i < ncaps; i++) fn->captures[i] = 0;
+  return fn;
+}
+
 /* -- Function -- */
 jello_function* jello_function_new(jello_vm* vm, uint32_t func_index, uint32_t ncaps) {
   jello_function* fn = (jello_function*)jello_gc_alloc(vm, sizeof(jello_function) + (size_t)ncaps * sizeof(uint64_t));
@@ -503,6 +528,11 @@ void* vm_immortal_alloc(size_t size) {
   if(!h) abort();
   h->marked = GC_IMMORTAL;
   return obj_of(h);
+}
+
+jello_function* vm_function_immortal(uint32_t func_index, jello_type_id type) {
+  return function_init((jello_function*)vm_immortal_alloc(sizeof(jello_function)), func_index, 0,
+                       type);
 }
 
 size_t vm_bytes_immortal_size(uint32_t length) {

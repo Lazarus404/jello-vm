@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * Interpreter handlers for Dynamic, null, atom and function-value ops, indirect and tail calls,
+ * spill slots and SWITCH_KIND. The validator checks each FROM_DYN_* destination's kind, so one
+ * generic unbox serves them all. */
+
 #include <jello/internal.h>
 #include <stdlib.h>
 #include <stdio.h>
-
-/* -- the Dynamic boundary opcodes -- */
 
 static call_frame* current_frame(exec_ctx* ctx) {
   return &ctx->vm->call_frames[ctx->vm->call_frames_len - 1u];
@@ -53,7 +56,9 @@ op_result op_physeq(exec_ctx* ctx, const jello_insn* ins) {
 
 op_result op_const_null(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
-  vm_store_val(&fr->rf, ins->a, jello_make_null());
+  if(vm_reg_kind_fast(&fr->rf, ins->a) == JELLO_T_DYNAMIC)
+    vm_store_val(&fr->rf, ins->a, jello_make_null());
+  else vm_store_ptr(&fr->rf, ins->a, NULL);
   return OP_CONTINUE;
 }
 
@@ -89,10 +94,24 @@ op_result op_const_atom(exec_ctx* ctx, const jello_insn* ins) {
   return OP_CONTINUE;
 }
 
-/* -- Function values -- */
 op_result op_const_fun(exec_ctx* ctx, const jello_insn* ins) {
-  jello_function* fn = jello_function_new(ctx->vm, ins->imm, 0);
   call_frame* fr = current_frame(ctx);
+  jello_type_id type = fr->f->reg_types[ins->a];
+  _Atomic(jello_function*)* slot = ctx->m->const_funs ? &ctx->m->const_funs[ins->imm] : NULL;
+  jello_function* fn = slot ? atomic_load_explicit(slot, memory_order_acquire) : NULL;
+  if(slot && !fn) {
+    jello_function* made = vm_function_immortal(ins->imm, type);
+    if(atomic_compare_exchange_strong_explicit(slot, &fn, made, memory_order_acq_rel,
+                                               memory_order_acquire)) {
+      fn = made;
+    } else {
+      vm_immortal_free(made);
+    }
+  }
+  if(!fn || fn->h.type_id != type) {
+    fn = jello_function_new(ctx->vm, ins->imm, 0);
+    fn->h.type_id = type;
+  }
   vm_store_ptr(&fr->rf, ins->a, fn);
   return OP_CONTINUE;
 }
@@ -101,6 +120,7 @@ op_result op_closure(exec_ctx* ctx, const jello_insn* ins) {
   uint32_t ncaps = (uint32_t)ins->c;
   jello_function* fn = jello_function_new(ctx->vm, ins->imm, ncaps);
   call_frame* fr = current_frame(ctx);
+  fn->h.type_id = fr->f->reg_types[ins->a];
   for(uint32_t i = 0; i < ncaps; i++) {
     uint32_t src = (uint32_t)ins->b + i;
     fn->captures[i] = vm_reg_is_wide(&fr->rf, src)
@@ -111,7 +131,6 @@ op_result op_closure(exec_ctx* ctx, const jello_insn* ins) {
   return OP_CONTINUE;
 }
 
-/* -- indirect/tail calls through a Function value -- */
 op_result op_callr(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   jello_value v = vm_load_val(&fr->rf, ins->b);
@@ -182,7 +201,6 @@ op_result op_tailcallr(exec_ctx* ctx, const jello_insn* ins) {
   return OP_CONTINUE;
 }
 
-/* -- SPILL_PUSH/SPILL_POP -- */
 static int spill_ensure_cap(call_frame* fr, uint32_t slot) {
   if(slot < fr->spill_cap) return 1;
   uint32_t new_cap = fr->spill_cap ? fr->spill_cap * 2u : 8u;
@@ -211,7 +229,6 @@ op_result op_spill_pop(exec_ctx* ctx, const jello_insn* ins) {
   return OP_CONTINUE;
 }
 
-/* -- SWITCH_KIND/CASE_KIND -- */
 op_result op_switch_kind(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   jello_value v = vm_load_val(&fr->rf, ins->a);

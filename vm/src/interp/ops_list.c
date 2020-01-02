@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * Interpreter handlers for List ops, and jello_list_cons. A list is a chain of cons cells holding
+ * boxed heads; the empty list is the null pointer. */
+
 #include <jello/internal.h>
 
 jello_list* jello_list_cons(jello_vm* vm, uint32_t type_id, jello_value head, jello_list* tail) {
@@ -14,22 +18,6 @@ jello_list* jello_list_cons(jello_vm* vm, uint32_t type_id, jello_value head, je
 
 static call_frame* current_frame(exec_ctx* ctx) {
   return &ctx->vm->call_frames[ctx->vm->call_frames_len - 1u];
-}
-
-static jello_value vm_clone_numbox(jello_vm* vm, jello_value v) {
-  if(!vm || !jello_is_ptr(v) || jello_as_ptr(v) == NULL) return v;
-  switch(((const jello_obj_header*)jello_as_ptr(v))->kind) {
-    case JELLO_OBJ_BOX_F64:
-      return jello_from_ptr(jello_box_f64_new(vm, ((const jello_box_f64*)jello_as_ptr(v))->value));
-    case JELLO_OBJ_BOX_F32:
-      return jello_from_ptr(jello_box_f32_new(vm, ((const jello_box_f32*)jello_as_ptr(v))->value));
-    case JELLO_OBJ_BOX_F16:
-      return jello_from_ptr(jello_box_f16_new(vm, ((const jello_box_f16*)jello_as_ptr(v))->value));
-    case JELLO_OBJ_BOX_I64:
-      return jello_from_ptr(jello_box_i64_new(vm, ((const jello_box_i64*)jello_as_ptr(v))->value));
-    default:
-      return v;
-  }
 }
 
 op_result op_list_nil(exec_ctx* ctx, const jello_insn* ins) {

@@ -186,6 +186,7 @@ typedef struct frame_layout {
   const jello_bc_function* f; /* cache key */
   uint8_t* kind; /* fl->kind[r] == vm_reg_kind(m, f, r), precomputed once per function */
   uint8_t* wide;
+  uint8_t* init;
   uint32_t total;
   int has_pointer;
 } frame_layout;
@@ -287,14 +288,19 @@ struct jello_vm {
   const jello_bc_module* running_module;
   uint64_t* globals;
   uint8_t owns_globals;
+  uint8_t keep_processes;  /**< Set by jello_vm_keep_processes. */
   void* gc_transient_root; /**< An object still being populated, held as a root. */
   struct vm_parcel* parcel;
 
   struct jello_jit_module* active_jit;
+  struct jello_jit_module* kept_jit;
+  uintptr_t jit_stack_floor;
+  uintptr_t native_stack_limit;
   try_scope* try_scopes;
   uint32_t try_scopes_cap;
   uint32_t live_try_scopes; /**< Try scopes on every frame; zero means a throw is uncaught. */
   uint32_t unwind_len;
+  uint64_t jit_enters;      /**< For --jit-report. */
   uint64_t jit_bridges;     /**< For --jit-report. */
 
   int32_t reductions;        /**< Charges left in the window, 0 when made; the last one ends it. */
@@ -309,6 +315,7 @@ struct jello_vm {
 
   frame_layout** jit_layout_by_func;
   uint32_t jit_layout_by_func_len;
+  uint8_t layouts_shared;      /**< The layouts are another VM's, from vm_share_layouts. */
   struct jello_process* proc;  /**< The process it runs as, once its scheduler has started. */
   jello_trap_trace trap_trace; /**< How the last trap was reached; last, being cold. */
 };
@@ -330,6 +337,13 @@ static inline void* vm_global_ptr(const jello_bc_module* m, const uint64_t* glob
   memcpy(&p, &globals[g], sizeof p);
   return p;
 }
+
+static inline void vm_enter_module(jello_vm* vm, const jello_bc_module* m) {
+  vm->running_module = m;
+  vm->globals = m->globals;
+}
+
+#define JIT_NATIVE_RESERVE (64u * 1024u)
 #define VM_DEFAULT_FRAME_STACK_BYTES (64u * 1024u * 1024u)
 #define VM_DEFAULT_CALL_FRAMES 1000000u
 #define VM_MAX_SEGMENT_BYTES (1024u * 1024u * 1024u)
@@ -443,7 +457,11 @@ int vm_push_frame_raw(jello_vm* vm, const jello_bc_module* m, uint32_t func_inde
                       const uint64_t* capbuf, uint32_t ncaps);
 void vm_copy_captures_into_top(jello_vm* vm, const jello_function* fn);
 const jello_function* vm_callee_function(jello_vm* vm, jello_value v);
+const jello_function* vm_push_callr_frame(jello_vm* vm, const jello_bc_module* m, jello_value v,
+                                          uint32_t caller_dst, uint32_t arg_first,
+                                          uint32_t arg_count);
 void vm_pop_frame(jello_vm* vm);
+void vm_frame_unwind(jello_vm* vm);
 void vm_frame_reset(jello_vm* vm);
 void vm_free_layouts(jello_vm* vm);
 
@@ -692,8 +710,10 @@ static inline int vm_bytes_is_buffer(const jello_bytes* b) {
   return b->h.type_id == JELLO_BYTES_BUFFER;
 }
 jello_bytes* vm_buffer_new(jello_vm* vm, uint32_t length);
+jello_value vm_clone_numbox(jello_vm* vm, jello_value v);
 void* vm_immortal_alloc(size_t size);
 size_t vm_bytes_immortal_size(uint32_t length);
+jello_function* vm_function_immortal(uint32_t func_index, jello_type_id type);
 void vm_immortal_free(void* p);
 
 /* -- threads + the shared heap (thread/thread.c) -- */

@@ -1,15 +1,23 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * Interpreter handlers for the numeric ops the dispatch loop does not inline, and the F16
+ * conversions. */
+
 #include <jello/internal.h>
 #include <limits.h>
 #include <math.h>
 #include <string.h>
 
-/* -- cold-path numeric opcode handlers -- */
-
 static call_frame* current_frame(exec_ctx* ctx) {
   return &ctx->vm->call_frames[ctx->vm->call_frames_len - 1u];
+}
+
+static int float_converts(exec_ctx* ctx, double x, double lo, double hi) {
+  if(x > lo && x < hi) return 1;
+  ctx->vm->trap_code = JELLO_TRAP_ARITHMETIC;
+  return 0;
 }
 
 static void vm_store_bool(reg_frame* rf, uint32_t r, int b) {
@@ -54,19 +62,22 @@ uint16_t vm_f32_to_f16(float f) {
   uint32_t bits;
   memcpy(&bits, &f, sizeof bits);
   uint32_t sign = (bits >> 16) & 0x8000u;
-  uint32_t biased_exp = (bits >> 23) & 0xFFu;
-  uint32_t mant = bits & 0x7FFFFFu;
-
-  if(biased_exp == 0xFFu) {
-    return (uint16_t)(sign | 0x7C00u | (mant ? 0x200u : 0u));
+  uint32_t a = bits & 0x7FFFFFFFu;
+  if(a >= 0x7F800000u) return (uint16_t)(sign | 0x7C00u | (a > 0x7F800000u ? 0x200u : 0u));
+  if(a >= 0x477FF000u) return (uint16_t)(sign | 0x7C00u);
+  if(a < 0x38800000u) {
+    if(a <= 0x33000000u) return (uint16_t)sign;
+    uint32_t shift = 126u - (a >> 23);
+    uint32_t m = (a & 0x7FFFFFu) | 0x800000u;
+    uint32_t q = m >> shift, rest = m & ((1u << shift) - 1u), half = 1u << (shift - 1u);
+    if(rest > half || (rest == half && (q & 1u))) q++;
+    return (uint16_t)(sign | q);
   }
-  int32_t exp = (int32_t)biased_exp - 127 + 15;
-  if(exp <= 0) return (uint16_t)sign;
-  if(exp >= 0x1F) return (uint16_t)(sign | 0x7C00u);
-  return (uint16_t)(sign | ((uint32_t)exp << 10) | (mant >> 13));
+  uint32_t h = (a >> 13) - ((127u - 15u) << 10);
+  uint32_t rest = a & 0x1FFFu;
+  if(rest > 0x1000u || (rest == 0x1000u && (h & 1u))) h++;
+  return (uint16_t)(sign | h);
 }
-
-/* -- I32: bitwise + shift + div/mod + negate -- */
 
 op_result op_div_i32(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
@@ -128,6 +139,10 @@ op_result op_mod_u32(exec_ctx* ctx, const jello_insn* ins) {
   return OP_CONTINUE;
 }
 
+static inline int64_t sar_i64(int64_t a, unsigned n) {
+  return a < 0 ? ~(int64_t)(~(uint64_t)a >> n) : (int64_t)((uint64_t)a >> n);
+}
+
 #define DEF_BIN_I32_MASKED(NAME, EXPR)                                            \
   op_result NAME(exec_ctx* ctx, const jello_insn* ins) {                          \
     call_frame* fr = current_frame(ctx);                                          \
@@ -138,9 +153,9 @@ op_result op_mod_u32(exec_ctx* ctx, const jello_insn* ins) {
     return OP_CONTINUE;                                                           \
   }
 
-DEF_BIN_I32_MASKED(op_shl_i32, (int32_t)a << (int32_t)(b & 31u))
-DEF_BIN_I32_MASKED(op_shr_i32, (int32_t)a >> (int32_t)(b & 31u))
-DEF_BIN_I32_MASKED(op_bitand_i32, a & b)
+DEF_BIN_I32_MASKED(op_shl_i32, a << (b & 31u))
+DEF_BIN_I32_MASKED(op_shr_i32, (uint32_t)sar_i64((int32_t)a, b & 31u))
+DEF_BIN_I32_MASKED(op_bitand_i32, a& b)
 DEF_BIN_I32_MASKED(op_bitor_i32, a | b)
 DEF_BIN_I32_MASKED(op_bitxor_i32, a ^ b)
 
@@ -170,7 +185,7 @@ DEF_BIN_I64(op_bitand_i64, (uint64_t)a & (uint64_t)b)
 DEF_BIN_I64(op_bitor_i64, (uint64_t)a | (uint64_t)b)
 DEF_BIN_I64(op_bitxor_i64, (uint64_t)a ^ (uint64_t)b)
 DEF_BIN_I64(op_shl_i64, (uint64_t)a << (int)((uint64_t)b & 63u))
-DEF_BIN_I64(op_shr_i64, a >> (int)((uint64_t)b & 63u))
+DEF_BIN_I64(op_shr_i64, sar_i64(a, (unsigned)((uint64_t)b & 63u)))
 
 op_result op_div_i64(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
@@ -321,8 +336,6 @@ op_result op_lt_f32(exec_ctx* ctx, const jello_insn* ins) {
   return OP_CONTINUE;
 }
 
-/* -- conversions -- */
-
 op_result op_sext_i64(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   int32_t x = (int32_t)vm_load_u32(&fr->rf, ins->b);
@@ -393,6 +406,7 @@ op_result op_i32_from_i64(exec_ctx* ctx, const jello_insn* ins) {
 op_result op_i32_from_f64(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   double x = vm_load_f64(&fr->rf, ins->b);
+  if(!float_converts(ctx, x, VM_I32_FROM_FLOAT_LO, VM_I32_FROM_FLOAT_HI)) return OP_TRAP;
   vm_store_u32(&fr->rf, ins->a, (uint32_t)(int32_t)x);
   return OP_CONTINUE;
 }
@@ -407,6 +421,7 @@ op_result op_f64_from_i64(exec_ctx* ctx, const jello_insn* ins) {
 op_result op_i64_from_f64(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   double x = vm_load_f64(&fr->rf, ins->b);
+  if(!float_converts(ctx, x, VM_I64_FROM_FLOAT_LO, VM_I64_FROM_FLOAT_HI)) return OP_TRAP;
   vm_store_i64(&fr->rf, ins->a, (int64_t)x);
   return OP_CONTINUE;
 }
@@ -421,6 +436,7 @@ op_result op_f32_from_i32(exec_ctx* ctx, const jello_insn* ins) {
 op_result op_i32_from_f32(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   float x = vm_load_f32(&fr->rf, ins->b);
+  if(!float_converts(ctx, x, VM_I32_FROM_FLOAT_LO, VM_I32_FROM_FLOAT_HI)) return OP_TRAP;
   vm_store_u32(&fr->rf, ins->a, (uint32_t)(int32_t)x);
   return OP_CONTINUE;
 }
@@ -449,6 +465,7 @@ op_result op_f32_from_i64(exec_ctx* ctx, const jello_insn* ins) {
 op_result op_i64_from_f32(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   float x = vm_load_f32(&fr->rf, ins->b);
+  if(!float_converts(ctx, x, VM_I64_FROM_FLOAT_LO, VM_I64_FROM_FLOAT_HI)) return OP_TRAP;
   vm_store_i64(&fr->rf, ins->a, (int64_t)x);
   return OP_CONTINUE;
 }
@@ -478,6 +495,7 @@ op_result op_i32_from_f16(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   uint16_t bits = vm_load_f16_bits(&fr->rf, ins->b);
   float x = vm_f16_to_f32(bits);
+  if(!float_converts(ctx, x, VM_I32_FROM_FLOAT_LO, VM_I32_FROM_FLOAT_HI)) return OP_TRAP;
   vm_store_u32(&fr->rf, ins->a, (uint32_t)(int32_t)x);
   return OP_CONTINUE;
 }

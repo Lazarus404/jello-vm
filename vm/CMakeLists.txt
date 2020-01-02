@@ -33,6 +33,7 @@ add_library(jello_vm STATIC
   src/gc/gc.c
   src/gc/object.c
   src/proc/net.c
+  src/proc/poll.c
   src/proc/process.c
   src/proc/stack.c
   src/thread/thread.c

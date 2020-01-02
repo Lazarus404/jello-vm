@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * The interpreter's frame stack; call frames whose registers are bump-allocated slices of one
+ * VM-owned stack, freed in LIFO order, and a per-function cache of register layouts. */
+
 #include <jello/internal.h>
 #include <jello/internal/platform.h>
 #include <stdlib.h>
@@ -17,6 +21,8 @@ static int frame_stack_reserve(jello_vm* vm) {
   vm->frame_stack_cap = JIT_FRAME_STACK_MAX;
   return 1;
 }
+
+#define VM_FIRST_FRAME_STACK_BYTES (16u * 1024u)
 
 jello_type_kind vm_reg_kind(const jello_bc_module* m, const jello_bc_function* f, uint32_t r) {
   return m->types[f->reg_types[r]].kind;
@@ -37,51 +43,63 @@ static frame_layout* find_layout(jello_vm* vm, const jello_bc_function* f) {
 }
 
 void vm_free_layouts(jello_vm* vm) {
-  for(uint32_t i = 0; i < vm->frame_layouts_len; i++) {
-    free(vm->frame_layouts[i].kind);
-    free(vm->frame_layouts[i].wide);
+  if(!vm->layouts_shared) {
+    for(uint32_t i = 0; i < vm->frame_layouts_len; i++) {
+      free(vm->frame_layouts[i].kind);
+      free(vm->frame_layouts[i].wide);
+      free(vm->frame_layouts[i].init);
+    }
+    free(vm->frame_layouts);
+    free(vm->jit_layout_by_func);
   }
-  free(vm->frame_layouts);
+  vm->layouts_shared = 0;
   vm->frame_layouts = NULL;
   vm->frame_layouts_len = 0;
   vm->frame_layouts_cap = 0;
-  free(vm->jit_layout_by_func);
   vm->jit_layout_by_func = NULL;
   vm->jit_layout_by_func_len = 0;
 }
 
-static int is_pointer_kind(jello_type_kind k) {
-  return k == JELLO_T_BYTES || k == JELLO_T_STRUCT || k == JELLO_T_OBJECT || k == JELLO_T_DYNAMIC ||
-         k == JELLO_T_ARRAY || k == JELLO_T_FUNCTION || k == JELLO_T_LIST;
-}
-
-static void null_init_dynamic_regs(uint32_t nregs, reg_frame* rf) {
-  for(uint32_t r = 0; r < nregs; r++) {
-    if(vm_reg_kind_fast(rf, r) == JELLO_T_DYNAMIC) vm_store_val(rf, r, jello_make_null());
-  }
-}
-
-static frame_layout* build_layout(jello_vm* vm, const jello_bc_module* m, const jello_bc_function* f) {
+static frame_layout* build_layout(jello_vm* vm, const jello_bc_module* m,
+                                  const jello_bc_function* f) {
+  if(vm->layouts_shared) abort(); /* Shared layouts are complete, and another VM's to grow. */
   uint8_t* kind = f->nregs ? (uint8_t*)malloc((size_t)f->nregs * sizeof(uint8_t)) : NULL;
   uint8_t* wide = f->nregs ? (uint8_t*)malloc((size_t)f->nregs * sizeof(uint8_t)) : NULL;
-  int has_pointer = 0;
   for(uint32_t r = 0; r < f->nregs; r++) {
     jello_type_kind k = vm_reg_kind(m, f, r);
     kind[r] = (uint8_t)k;
     wide[r] = (uint8_t)(jello_slot_size(k) == 8u);
-    if(is_pointer_kind(k)) has_pointer = 1;
   }
 
   if(vm->frame_layouts_len == vm->frame_layouts_cap) {
+    for(uint32_t i = 0; i < vm->jit_layout_by_func_len; i++) {
+      frame_layout* p = vm->jit_layout_by_func[i];
+      vm->jit_layout_by_func[i] =
+          (frame_layout*)(uintptr_t)(p ? (size_t)(p - vm->frame_layouts) + 1u : 0u);
+    }
     vm->frame_layouts_cap = vm->frame_layouts_cap ? vm->frame_layouts_cap * 2u : 8u;
-    vm->frame_layouts = (frame_layout*)realloc(vm->frame_layouts, (size_t)vm->frame_layouts_cap * sizeof(frame_layout));
+    vm->frame_layouts = (frame_layout*)realloc(vm->frame_layouts, (size_t)vm->frame_layouts_cap *
+                                                                      sizeof(frame_layout));
+    for(uint32_t i = 0; i < vm->jit_layout_by_func_len; i++) {
+      size_t at = (size_t)(uintptr_t)vm->jit_layout_by_func[i];
+      vm->jit_layout_by_func[i] = at ? vm->frame_layouts + (at - 1u) : NULL;
+    }
   }
   frame_layout* fl = &vm->frame_layouts[vm->frame_layouts_len++];
   fl->f = f;
   fl->kind = kind;
   fl->wide = wide;
   fl->total = f->nregs * REG_SLOT_BYTES;
-  fl->has_pointer = has_pointer;
+  fl->has_pointer = vm_func_has_pointer(m, f);
+  fl->init = NULL;
+  if(fl->has_pointer && fl->total) {
+    fl->init = (uint8_t*)calloc(fl->total, 1);
+    if(!fl->init) abort();
+    reg_frame rf = {fl->init, kind, wide, fl->total};
+    for(uint32_t r = 0; r < f->nregs; r++) {
+      if(vm_reg_kind_fast(&rf, r) == JELLO_T_DYNAMIC) vm_store_val(&rf, r, jello_make_null());
+    }
+  }
   return fl;
 }
 
@@ -119,12 +137,6 @@ int jit_try_grow_call_frames(jello_vm* vm) {
   return 1;
 }
 
-uint32_t jit_layout_total_or_zero(jello_vm* vm, uint32_t fi) {
-  if(!vm || fi >= vm->jit_layout_by_func_len || !vm->jit_layout_by_func) return 0;
-  frame_layout* fl = vm->jit_layout_by_func[fi];
-  return fl ? fl->total : 0;
-}
-
 frame_layout* jit_layout_ptr_or_null(jello_vm* vm, uint32_t fi) {
   if(!vm || fi >= vm->jit_layout_by_func_len || !vm->jit_layout_by_func) return NULL;
   return vm->jit_layout_by_func[fi];
@@ -149,7 +161,9 @@ uint8_t* jit_current_frame_mem(jello_vm* vm) {
 static call_frame* push_frame_shell(jello_vm* vm, const jello_bc_module* m, uint32_t func_index,
                                      uint32_t caller_dst, uint8_t has_caller) {
   const jello_bc_function* f = &m->funcs[func_index];
-  frame_layout* fl = get_layout(vm, m, f);
+  frame_layout* fl =
+      func_index < vm->jit_layout_by_func_len ? vm->jit_layout_by_func[func_index] : NULL;
+  if(!fl || fl->f != f) fl = get_layout(vm, m, f);
 
   if((uint64_t)vm->frame_stack_top + fl->total > JIT_FRAME_STACK_MAX || vm->call_frames_len >= JIT_CALL_FRAMES_MAX) {
     vm->trap_code = JELLO_TRAP_STACK_OVERFLOW;
@@ -187,10 +201,7 @@ static call_frame* push_frame_shell(jello_vm* vm, const jello_bc_module* m, uint
   fr->spill_slots = NULL;
   fr->spill_cap = 0;
 
-  if(fl->has_pointer) {
-    memset(mem, 0, fl->total);
-    null_init_dynamic_regs(f->nregs, &fr->rf);
-  }
+  if(fl->has_pointer) memcpy(mem, fl->init, fl->total);
 
   return fr;
 }
@@ -258,6 +269,22 @@ const jello_function* vm_callee_function(jello_vm* vm, jello_value v) {
   return fn;
 }
 
+const jello_function* vm_push_callr_frame(jello_vm* vm, const jello_bc_module* m, jello_value v,
+                                          uint32_t caller_dst, uint32_t arg_first,
+                                          uint32_t arg_count) {
+  const jello_function* fn = vm_callee_function(vm, v);
+  if(!fn || !vm_push_frame(vm, m, fn->func_index, caller_dst, arg_first, arg_count, 1)) return NULL;
+  if(fn->ncaps == 0) return fn;
+  call_frame* fr = &vm->call_frames[vm->call_frames_len - 1u];
+  uint32_t cap_start = fr->f->cap_start;
+  for(uint32_t i = 0; i < fn->ncaps; i++) {
+    if(vm_reg_is_wide(&fr->rf, cap_start + i))
+      vm_store_i64(&fr->rf, cap_start + i, (int64_t)fn->captures[i]);
+    else vm_store_u32(&fr->rf, cap_start + i, (uint32_t)fn->captures[i]);
+  }
+  return fn;
+}
+
 void vm_pop_frame(jello_vm* vm) {
   call_frame* fr = &vm->call_frames[vm->call_frames_len - 1u];
   free(fr->spill_slots);
@@ -265,6 +292,11 @@ void vm_pop_frame(jello_vm* vm) {
   fr->spill_cap = 0;
   vm->frame_stack_top -= fr->rf.size;
   vm->call_frames_len--;
+}
+
+void vm_frame_unwind(jello_vm* vm) {
+  while(vm->call_frames_len > 0) vm_pop_frame(vm);
+  vm->frame_stack_top = 0;
 }
 
 void vm_frame_reset(jello_vm* vm) {
