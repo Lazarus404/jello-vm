@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * VM internals shared by load, interp, jit, gc, jdll and thread; the concrete module, register
+ * frames, call frames, the shared heap and the per-thread VM, plus the internal entry points
+ * between those parts. */
+
 #ifndef JELLO_VM_INTERNAL_H
 #define JELLO_VM_INTERNAL_H
 
@@ -10,9 +15,6 @@
 #include <stdatomic.h>
 #include <string.h>
 
-/* Internal VM layouts, frames, dispatch, GC fields. */
-
-/* -- native imports -- */
 typedef struct jello_import_sig {
   uint32_t library_atom;
   uint32_t export_atom;
@@ -22,7 +24,6 @@ typedef struct jello_import_sig {
   const struct jello_jdll_export* resolved;
 } jello_import_sig;
 
-/* -- the concrete module -- */
 struct jello_bc_module {
   uint32_t version;
   uint32_t features;
@@ -102,7 +103,6 @@ jello_bc_result jello_bc_validate_insn(
     uint32_t nfuncs);
 jello_bc_result jello_bc_validate_try_regions(const jello_bc_module* m);
 
-/* -- interpreter core -- */
 #define REG_SLOT_BYTES 8u
 
 typedef struct reg_frame {
@@ -191,7 +191,6 @@ typedef struct frame_layout {
   int has_pointer;
 } frame_layout;
 
-/* -- GC -- */
 typedef struct jello_gc_hdr {
   struct jello_gc_hdr* next; /* live-object list, or free-list, depending on state */
   uint32_t total_size;       /* header + payload, rounded up to this object's size class */
@@ -202,7 +201,6 @@ typedef struct jello_gc_hdr {
 #define GC_SHARED 3u
 
 #define VM_BYTES_SHARED_MIN 64u
-
 #define GC_NUM_SIZE_CLASSES 8
 #define GC_MAX_SIZE_CLASS_BYTES 4096u
 
@@ -212,11 +210,11 @@ typedef struct jello_space {
   uint64_t bytes_live;
   uint64_t next_collect; /**< Allocation collects once bytes_live reaches this. */
   uint32_t collections;
+  uint32_t freed_objects;
   uint32_t finalized_handles;
   double pause_ms; /**< Cumulative wall-clock time inside jello_gc_collect. */
 } jello_space;
 
-/* -- the shared heap -- */
 typedef struct jello_heap {
   jello_gc_hdr* gc_objects; /* every live object, singly linked */
   jello_gc_hdr* gc_free_classes[GC_NUM_SIZE_CLASSES]; /* one free-list head per size class */
@@ -230,7 +228,6 @@ typedef struct jello_heap {
   double gc_pause_ms; /* cumulative wall-clock time spent inside jello_gc_collect (Sec 2.10) */
   jello_space space;
 
-  /* -- stop-the-world -- */
   pthread_mutex_t alloc_lock;
   atomic_int stop_requested;
   pthread_mutex_t stw_lock;
@@ -276,6 +273,7 @@ struct jello_vm {
   call_frame* call_frames;
   uint32_t call_frames_len;
   uint32_t call_frames_cap;
+
   frame_layout* frame_layouts;
   uint32_t frame_layouts_len;
   uint32_t frame_layouts_cap;
@@ -316,6 +314,7 @@ struct jello_vm {
   frame_layout** jit_layout_by_func;
   uint32_t jit_layout_by_func_len;
   uint8_t layouts_shared;      /**< The layouts are another VM's, from vm_share_layouts. */
+  uint32_t heap_index;         /**< Its index in heap->threads. */
   struct jello_process* proc;  /**< The process it runs as, once its scheduler has started. */
   jello_trap_trace trap_trace; /**< How the last trap was reached; last, being cold. */
 };
@@ -356,15 +355,12 @@ static inline void vm_enter_module(jello_vm* vm, const jello_bc_module* m) {
 
 void vm_warm_jit_layouts(jello_vm* vm, const jello_bc_module* m);
 int jit_try_grow_call_frames(jello_vm* vm);
-uint32_t jit_layout_total_or_zero(jello_vm* vm, uint32_t fi);
 frame_layout* jit_layout_ptr_or_null(jello_vm* vm, uint32_t fi);
 int jit_call_push_numeric(jello_vm* vm, uint32_t callee_fi, uint32_t caller_dst,
                           uint32_t arg_first, uint32_t nargs);
 int jit_try_grow_frame_stack(jello_vm* vm, uint32_t need);
 
 uint8_t* jit_current_frame_mem(jello_vm* vm);
-
-/* -- register load/store: static inline for the hot dispatch path -- */
 static inline uint32_t vm_load_u32(reg_frame* rf, uint32_t r) {
   return *(const uint32_t*)vm_reg_ptr(rf, r);
 }
@@ -465,7 +461,6 @@ void vm_frame_unwind(jello_vm* vm);
 void vm_frame_reset(jello_vm* vm);
 void vm_free_layouts(jello_vm* vm);
 
-/* -- dispatch (dispatch.c) + main loop (exec_loop.c) -- */
 typedef enum op_result {
   OP_CONTINUE,
   OP_RETURN,
@@ -481,8 +476,6 @@ typedef struct exec_ctx {
 
 op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins);
 jello_exec_status vm_exec_loop(exec_ctx* ctx);
-
-/* -- cold-path opcode handlers (ops_arith.c) -- */
 op_result op_div_i32(exec_ctx* ctx, const jello_insn* ins);
 op_result op_mod_i32(exec_ctx* ctx, const jello_insn* ins);
 op_result op_div_u32(exec_ctx* ctx, const jello_insn* ins);
@@ -554,7 +547,6 @@ op_result op_bytes_len(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_get_u8(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_set_u8(exec_ctx* ctx, const jello_insn* ins);
 
-/* -- Bytes memory/layout opcode handlers (ops_bytes.c) -- */
 op_result op_bytes_concat2(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_eq(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_bitand2(exec_ctx* ctx, const jello_insn* ins);
@@ -595,8 +587,6 @@ int vm_dynamic_fits_ptr(const jello_bc_module* m, jello_value v, jello_type_kind
                         jello_type_id type);
 uint32_t vm_dynamic_is_enum(jello_value v, jello_type_id type);
 op_result op_null_check(exec_ctx* ctx, const jello_insn* ins);
-
-/* -- the boxing boundary (value/value.c) -- */
 jello_value vm_box_from_typed(jello_vm* vm, const jello_bc_module* m, const jello_bc_function* f,
                                reg_frame* rf, uint32_t r);
 int vm_store_from_boxed(jello_vm* vm, const jello_bc_module* m, const jello_bc_function* f,
@@ -641,7 +631,6 @@ op_result op_case_kind(exec_ctx* ctx, const jello_insn* ins);
 op_result op_global_get(exec_ctx* ctx, const jello_insn* ins);
 op_result op_global_set(exec_ctx* ctx, const jello_insn* ins);
 
-/* -- Struct opcode handlers (ops_struct.c) -- */
 op_result op_struct_new(exec_ctx* ctx, const jello_insn* ins);
 op_result op_struct_get(exec_ctx* ctx, const jello_insn* ins);
 op_result op_struct_set(exec_ctx* ctx, const jello_insn* ins);
@@ -653,15 +642,12 @@ op_result op_array_get(exec_ctx* ctx, const jello_insn* ins);
 op_result op_array_set(exec_ctx* ctx, const jello_insn* ins);
 op_result op_array_resize(exec_ctx* ctx, const jello_insn* ins);
 op_result op_array_concat2(exec_ctx* ctx, const jello_insn* ins);
-
-/* -- List opcode handlers (ops_list.c) -- */
 op_result op_list_nil(exec_ctx* ctx, const jello_insn* ins);
 op_result op_list_cons(exec_ctx* ctx, const jello_insn* ins);
 op_result op_list_head(exec_ctx* ctx, const jello_insn* ins);
 op_result op_list_tail(exec_ctx* ctx, const jello_insn* ins);
 op_result op_list_is_nil(exec_ctx* ctx, const jello_insn* ins);
 
-/* -- Exception-handling opcode handlers (ops_exc.c) -- */
 op_result op_try(exec_ctx* ctx, const jello_insn* ins);
 op_result op_endtry(exec_ctx* ctx, const jello_insn* ins);
 op_result op_throw(exec_ctx* ctx, const jello_insn* ins);
@@ -669,7 +655,6 @@ op_result op_throw(exec_ctx* ctx, const jello_insn* ins);
 #define JELLO_TRAP_INTERNAL_UNWIND ((jello_trap_code)0x7F)
 void vm_try_pop(jello_vm* vm);
 
-/* -- Object opcode handlers (ops_obj.c) -- */
 op_result op_obj_new(exec_ctx* ctx, const jello_insn* ins);
 op_result op_obj_has_atom(exec_ctx* ctx, const jello_insn* ins);
 op_result op_obj_get_atom(exec_ctx* ctx, const jello_insn* ins);
@@ -704,30 +689,32 @@ void vm_parcel_join(vm_parcel* into, vm_parcel* from);
 void proc_sockets_join(struct proc_socket_list** into, struct proc_socket_list** from);
 
 #define JELLO_BYTES_BUFFER 1u
+#define VM_RUNNING_OUTSIDE 2
 #define VM_REDUCTIONS 2000u
 
 static inline int vm_bytes_is_buffer(const jello_bytes* b) {
   return b->h.type_id == JELLO_BYTES_BUFFER;
 }
 jello_bytes* vm_buffer_new(jello_vm* vm, uint32_t length);
+uint32_t vm_shared_binaries_live(void);
 jello_value vm_clone_numbox(jello_vm* vm, jello_value v);
 void* vm_immortal_alloc(size_t size);
 size_t vm_bytes_immortal_size(uint32_t length);
 jello_function* vm_function_immortal(uint32_t func_index, jello_type_id type);
 void vm_immortal_free(void* p);
-
-/* -- threads + the shared heap (thread/thread.c) -- */
+uint32_t vm_struct_fields_bytes(const jello_bc_module* m, uint32_t struct_sig_id);
 jello_vm* jello_vm_create_joined(jello_vm* existing);
+void jello_vm_running(jello_vm* vm, int is_running);
 void vm_go_quiescent(jello_vm* vm);
 void vm_wait_for_resume(jello_vm* vm);
 void vm_leave_quiescent(jello_vm* vm);
 void vm_safepoint_check(jello_vm* vm);
 int vm_fuel_charge(jello_vm* vm);
+
 int vm_heap_stop_the_world(jello_vm* vm);
 void vm_heap_lock(jello_vm* vm);
 void vm_heap_resume_the_world(jello_vm* vm);
 
-/* -- the JDLL ABI (jdll/loader.c, jdll/marshal.c, jdll/call_native.c) -- */
 typedef struct jello_jdll_handle jello_jdll_handle;
 jello_jdll_handle* jello_jdll_load(const char* library_name);
 const char* jello_jdll_last_error(void);

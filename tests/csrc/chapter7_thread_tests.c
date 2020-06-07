@@ -267,11 +267,13 @@ static void* collector_thread_main(void* argp) {
   collector_thread_arg* arg = (collector_thread_arg*)argp;
   struct timespec pause = {0, 200 * 1000};
   while(!atomic_load(arg->stop)) {
+    jello_vm_running(arg->vm, 1);
     for(int i = 0; i < 200; i++) {
       jello_bytes* b = jello_bytes_new(arg->vm, 64);
       (void)b;
     }
     jello_gc_collect(arg->vm);
+    jello_vm_running(arg->vm, 0);
     nanosleep(&pause, NULL);
   }
   return NULL;

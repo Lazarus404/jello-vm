@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * The garbage collector; a non-moving mark-and-sweep collector over the spaces of a heap shared
+ * by threads, stopping the world only for the heap's own space, with size-class free lists, plus
+ * the constructors for Bytes, numeric boxes, arrays, functions, structs and native handles. */
+
 #include <jello/internal.h>
 #include <jello/internal/proc_internal.h>
 #include <jello/jdll.h>
@@ -10,7 +15,6 @@
 #include <time.h>
 #include <stdio.h>
 
-/* -- object header + size classes -- */
 static const uint32_t GC_SIZE_CLASSES[GC_NUM_SIZE_CLASSES] = {
   32u, 64u, 128u, 256u, 512u, 1024u, 2048u, 4096u,
 };
@@ -37,6 +41,12 @@ typedef struct shared_head {
   jdl_refs refs;
   jello_gc_hdr hdr;
 } shared_head;
+
+static _Atomic uint32_t shared_live;
+
+uint32_t vm_shared_binaries_live(void) {
+  return atomic_load_explicit(&shared_live, memory_order_relaxed);
+}
 
 /** Live bytes before the first collection, and the least the threshold ever falls to. */
 #define GC_MIN_THRESHOLD (4u * 1024u * 1024u)
@@ -161,12 +171,11 @@ void* jello_gc_alloc(jello_vm* vm, size_t size) {
   return obj_of(h);
 }
 
-/* -- mark -- */
-
 typedef struct mark_stack {
   void** items;
   uint32_t len;
   uint32_t cap;
+  uint32_t marked; /**< The objects it has marked, every one of which the sweep must find. */
 } mark_stack;
 
 static void ms_push(mark_stack* ms, void* p) {
@@ -190,6 +199,7 @@ static void mark_ptr(mark_stack* ms, void* p) {
   jello_gc_hdr* h = hdr_of(p);
   if(h->marked) return;
   h->marked = 1;
+  ms->marked++;
   ms_push(ms, p);
 }
 
@@ -211,7 +221,7 @@ static void trace_object(mark_stack* ms, const jello_bc_module* m, void* p) {
           jello_value v;
           memcpy(&v, s->fields + sig->field_offset[i], sizeof(jello_value));
           if(jello_is_ptr(v)) mark_ptr(ms, jello_as_ptr(v));
-        } else if(fk == JELLO_T_BYTES || fk == JELLO_T_STRUCT || fk == JELLO_T_OBJECT) {
+        } else if(vm_kind_is_gc_pointer(fk)) {
           void* fp;
           memcpy(&fp, s->fields + sig->field_offset[i], sizeof(void*));
           mark_ptr(ms, fp);
@@ -223,7 +233,7 @@ static void trace_object(mark_stack* ms, const jello_bc_module* m, void* p) {
       const jello_object* o = (const jello_object*)p;
       if(o->proto) mark_ptr(ms, o->proto);
       for(uint32_t i = 0; i < o->cap; i++) {
-        if(o->states[i] != JELLO_OBJ_SLOT_OCCUPIED) continue;
+        if(!vm_obj_slot_live(o->states[i])) continue;
         if(jello_is_ptr(o->vals[i])) mark_ptr(ms, jello_as_ptr(o->vals[i]));
       }
       return;
@@ -237,8 +247,7 @@ static void trace_object(mark_stack* ms, const jello_bc_module* m, void* p) {
         for(uint32_t i = 0; i < a->length; i++) {
           if(jello_is_ptr(vals[i])) mark_ptr(ms, jello_as_ptr(vals[i]));
         }
-      } else if(ek == JELLO_T_BYTES || ek == JELLO_T_STRUCT || ek == JELLO_T_OBJECT || ek == JELLO_T_ARRAY ||
-                 ek == JELLO_T_LIST) {
+      } else if(vm_kind_is_gc_pointer(ek)) {
         void* const* ptrs = (void* const*)a->data;
         for(uint32_t i = 0; i < a->length; i++) {
           mark_ptr(ms, ptrs[i]);
@@ -252,6 +261,13 @@ static void trace_object(mark_stack* ms, const jello_bc_module* m, void* p) {
       if(l->tail) mark_ptr(ms, l->tail);
       return;
     }
+    case JELLO_OBJ_ENUM: {
+      const jello_enum* e = (const jello_enum*)p;
+      for(uint32_t i = 0; i < e->nfields; i++) {
+        if(jello_is_ptr(e->fields[i])) mark_ptr(ms, jello_as_ptr(e->fields[i]));
+      }
+      return;
+    }
     case JELLO_OBJ_FUNCTION: {
       const jello_function* fn = (const jello_function*)p;
       const jello_bc_function* callee = &m->funcs[fn->func_index];
@@ -261,8 +277,7 @@ static void trace_object(mark_stack* ms, const jello_bc_module* m, void* p) {
           jello_value v;
           memcpy(&v, &fn->captures[i], sizeof(jello_value));
           if(jello_is_ptr(v)) mark_ptr(ms, jello_as_ptr(v));
-        } else if(ck == JELLO_T_BYTES || ck == JELLO_T_STRUCT || ck == JELLO_T_OBJECT ||
-                  ck == JELLO_T_ARRAY || ck == JELLO_T_FUNCTION || ck == JELLO_T_LIST) {
+        } else if(vm_kind_is_gc_pointer(ck)) {
           void* fp;
           memcpy(&fp, &fn->captures[i], sizeof(void*));
           mark_ptr(ms, fp);
@@ -307,8 +322,7 @@ static void scan_typed_frames(jello_vm* vm, mark_stack* ms) {
     reg_frame* rf = &fr->rf;
     for(uint32_t r = 0; r < f->nregs; r++) {
       jello_type_kind k = vm_reg_kind_fast(rf, r);
-      if(k == JELLO_T_BYTES || k == JELLO_T_STRUCT || k == JELLO_T_OBJECT || k == JELLO_T_ARRAY || k == JELLO_T_FUNCTION ||
-         k == JELLO_T_LIST) {
+      if(vm_kind_is_gc_pointer(k)) {
         void* p = NULL;
         memcpy(&p, vm_reg_ptr(rf, r), sizeof(void*));
         mark_ptr(ms, p);
@@ -377,8 +391,6 @@ void jello_gc_collect(jello_vm* vm) {
   vm_heap_resume_the_world(vm);
 }
 
-/* -- Bytes -- */
-
 jello_bytes* jello_bytes_new(jello_vm* vm, uint32_t length) {
   jello_bytes* b = (jello_bytes*)jello_gc_alloc(vm, sizeof(jello_bytes) + (size_t)length);
   b->h.kind = (uint8_t)JELLO_OBJ_BYTES;
@@ -421,8 +433,6 @@ jello_bytes* jello_bytes_join(jello_vm* vm, jello_bytes* const* parts, uint32_t 
   }
   return dst;
 }
-
-/* -- numeric boxing -- */
 
 jello_box_i64* jello_box_i64_new(jello_vm* vm, int64_t v) {
   jello_box_i64* b = (jello_box_i64*)jello_gc_alloc(vm, sizeof(jello_box_i64));
@@ -468,7 +478,6 @@ jello_value vm_clone_numbox(jello_vm* vm, jello_value v) {
   }
 }
 
-/* -- Array -- */
 static uint32_t array_elem_size(const jello_bc_module* m, uint32_t array_type_id) {
   jello_type_id elem_tid = m->types[array_type_id].as.unary.elem;
   return (uint32_t)jello_slot_size(m->types[elem_tid].kind);
@@ -490,13 +499,26 @@ void jello_array_resize(jello_vm* vm, const jello_bc_module* m, jello_array* a, 
   uint32_t elem_size = array_elem_size(m, a->h.type_id);
   if(new_length > a->cap) {
     uint32_t new_cap = a->cap ? a->cap : 8u;
-    while(new_cap < new_length) new_cap *= 2u;
+    while(new_cap < new_length) {
+      if(new_cap > UINT32_MAX / 2u) {
+        new_cap = new_length;
+        break;
+      }
+      new_cap *= 2u;
+    }
+    if(elem_size != 0u && (size_t)new_cap > SIZE_MAX / (size_t)elem_size) abort();
     void* grown = realloc(a->data, (size_t)new_cap * (size_t)elem_size);
     if(!grown) abort();
     a->data = grown;
     a->cap = new_cap;
-  } else if(new_length > a->length) {
-    memset((uint8_t*)a->data + (size_t)a->length * elem_size, 0, (size_t)(new_length - a->length) * elem_size);
+  }
+  if(new_length > a->length) {
+    memset((uint8_t*)a->data + (size_t)a->length * elem_size, 0,
+           (size_t)(new_length - a->length) * elem_size);
+    if(m->types[m->types[a->h.type_id].as.unary.elem].kind == JELLO_T_DYNAMIC) {
+      jello_value* vals = (jello_value*)a->data;
+      for(uint32_t i = a->length; i < new_length; i++) vals[i] = jello_make_null();
+    }
   }
   a->length = new_length;
 }
@@ -511,7 +533,6 @@ static jello_function* function_init(jello_function* fn, uint32_t func_index, ui
   return fn;
 }
 
-/* -- Function -- */
 jello_function* jello_function_new(jello_vm* vm, uint32_t func_index, uint32_t ncaps) {
   jello_function* fn = (jello_function*)jello_gc_alloc(vm, sizeof(jello_function) + (size_t)ncaps * sizeof(uint64_t));
   fn->h.kind = (uint8_t)JELLO_OBJ_FUNCTION;
@@ -543,16 +564,17 @@ void vm_immortal_free(void* p) {
   if(p) free(hdr_of(p));
 }
 
-/* -- Struct -- */
+uint32_t vm_struct_fields_bytes(const jello_bc_module* m, uint32_t struct_sig_id) {
+  const jello_struct_sig* sig = &m->struct_sigs[struct_sig_id];
+  if(sig->nfields == 0) return 0;
+  uint32_t last = sig->nfields - 1u;
+  jello_type_kind lk = m->types[sig->field_type[last]].kind;
+  return (sig->field_offset[last] + (uint32_t)jello_slot_size(lk) + 7u) & ~7u;
+}
+
 jello_struct* jello_struct_new(jello_vm* vm, const jello_bc_module* m, uint32_t struct_sig_id) {
   const jello_struct_sig* sig = &m->struct_sigs[struct_sig_id];
-  uint32_t total = 0;
-  if(sig->nfields > 0) {
-    uint32_t last = sig->nfields - 1u;
-    jello_type_kind lk = m->types[sig->field_type[last]].kind;
-    total = sig->field_offset[last] + (uint32_t)jello_slot_size(lk);
-    total = (total + 7u) & ~7u;
-  }
+  uint32_t total = vm_struct_fields_bytes(m, struct_sig_id);
   jello_struct* s = (jello_struct*)jello_gc_alloc(vm, sizeof(jello_struct) + (size_t)total);
   s->h.kind = (uint8_t)JELLO_OBJ_STRUCT;
   s->h.type_id = struct_sig_id;

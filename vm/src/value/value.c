@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * Boxing between typed registers and jello_value, used wherever a value crosses into Dynamic or
+ * into a boxed slot (TO_DYN, FROM_DYN_*, object fields, list heads, enum fields, spill slots),
+ * and the runtime kind queries KINDOF, SWITCH_KIND and IS_ENUM. */
+
 #include <jello/internal.h>
 
 /* -- the boxing boundary -- */
@@ -17,6 +22,10 @@ static uint32_t vm_expected_obj_kind_for_ptr_kind(jello_type_kind k) {
     case JELLO_T_BYTES: return (uint32_t)JELLO_OBJ_BYTES;
     case JELLO_T_STRUCT: return (uint32_t)JELLO_OBJ_STRUCT;
     case JELLO_T_OBJECT: return (uint32_t)JELLO_OBJ_OBJECT;
+    case JELLO_T_ARRAY: return (uint32_t)JELLO_OBJ_ARRAY;
+    case JELLO_T_FUNCTION: return (uint32_t)JELLO_OBJ_FUNCTION;
+    case JELLO_T_LIST: return (uint32_t)JELLO_OBJ_LIST;
+    case JELLO_T_ENUM: return (uint32_t)JELLO_OBJ_ENUM;
     default: return 0u;
   }
 }
@@ -75,6 +84,10 @@ jello_value vm_box_from_typed(jello_vm* vm, const jello_bc_module* m, const jell
 int vm_store_from_boxed(jello_vm* vm, const jello_bc_module* m, const jello_bc_function* f,
                          reg_frame* rf, uint32_t dst, jello_value v) {
   jello_type_kind k = vm_reg_kind(m, f, dst);
+  if(jello_is_null(v) && k != JELLO_T_DYNAMIC && !vm_kind_is_gc_pointer(k)) {
+    vm->trap_code = JELLO_TRAP_NULL_DEREF;
+    return 0;
+  }
   switch(k) {
     case JELLO_T_I8:
     case JELLO_T_I16:
@@ -88,8 +101,14 @@ int vm_store_from_boxed(jello_vm* vm, const jello_bc_module* m, const jello_bc_f
       vm_store_i64(rf, dst, jello_as_box_i64(v));
       return 1;
     case JELLO_T_F16:
-      if(jello_is_i32(v)) { vm_store_f16_bits(rf, dst, (uint16_t)(int16_t)jello_as_i32(v)); return 1; }
-      if(!jello_is_box_f16(v)) { vm->trap_code = JELLO_TRAP_TYPE_MISMATCH; return 0; }
+      if(jello_is_i32(v)) {
+        vm_store_f16_bits(rf, dst, vm_f32_to_f16((float)jello_as_i32(v)));
+        return 1;
+      }
+      if(!jello_is_box_f16(v)) {
+        vm->trap_code = JELLO_TRAP_TYPE_MISMATCH;
+        return 0;
+      }
       vm_store_f16_bits(rf, dst, jello_as_box_f16(v));
       return 1;
     case JELLO_T_F32:
@@ -114,10 +133,11 @@ int vm_store_from_boxed(jello_vm* vm, const jello_bc_module* m, const jello_bc_f
       vm_store_val(rf, dst, v);
       return 1;
     default: {
-      if(jello_is_null(v)) { vm_store_ptr(rf, dst, NULL); return 1; }
-      uint32_t want = vm_expected_obj_kind_for_ptr_kind(k);
-      if(want == 0u || !jello_is_ptr(v) || jello_as_ptr(v) == NULL ||
-         ((const jello_obj_header*)jello_as_ptr(v))->kind != (uint8_t)want) {
+      if(jello_is_null(v)) {
+        vm_store_ptr(rf, dst, NULL);
+        return 1;
+      }
+      if(!vm_dynamic_fits_ptr(m, v, k, f->reg_types[dst])) {
         vm->trap_code = JELLO_TRAP_TYPE_MISMATCH;
         return 0;
       }
@@ -127,7 +147,6 @@ int vm_store_from_boxed(jello_vm* vm, const jello_bc_module* m, const jello_bc_f
   }
 }
 
-/* -- SWITCH_KIND/CASE_KIND's own kind numbering -- */
 uint32_t vm_dynamic_static_kind(jello_value v) {
   if(jello_is_bool(v)) return (uint32_t)JELLO_T_BOOL;
   if(jello_is_i32(v)) return (uint32_t)JELLO_T_I32;
@@ -143,6 +162,9 @@ uint32_t vm_dynamic_static_kind(jello_value v) {
     case JELLO_OBJ_BOX_F16: return (uint32_t)JELLO_T_F16;
     case JELLO_OBJ_ARRAY: return (uint32_t)JELLO_T_ARRAY;
     case JELLO_OBJ_FUNCTION: return (uint32_t)JELLO_T_FUNCTION;
+    case JELLO_OBJ_LIST: return (uint32_t)JELLO_T_LIST;
+    case JELLO_OBJ_ENUM: return (uint32_t)JELLO_T_ENUM;
+    case JELLO_OBJ_HANDLE: return (uint32_t)JELLO_T_ABSTRACT;
     default: return (uint32_t)JELLO_T_DYNAMIC;
   }
 }
@@ -163,6 +185,9 @@ uint32_t vm_kindof_dynamic(jello_value v) {
     case JELLO_OBJ_BOX_F16: return 10u;
     case JELLO_OBJ_ARRAY: return 11u;
     case JELLO_OBJ_FUNCTION: return 12u;
+    case JELLO_OBJ_LIST: return 13u;
+    case JELLO_OBJ_ENUM: return 14u;
+    case JELLO_OBJ_HANDLE: return 15u;
     default: return 0x7fffffffu;
   }
 }

@@ -1,22 +1,18 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * Object tables; open addressing with linear probing and tombstones,
+ * keyed by atom id, with a power-of-two capacity. */
+
 #include <jello/internal.h>
 #include <stdlib.h>
 #include <string.h>
 
-/* -- Object: an open-addressing, tombstone-supporting hash table -- */
-
-static uint32_t hash_u32(uint32_t x) {
-  x ^= x >> 16;
-  x *= 0x7feb352du;
-  x ^= x >> 15;
-  x *= 0x846ca68bu;
-  x ^= x >> 16;
-  return x;
-}
-
 static size_t table_bytes(uint32_t cap) {
+#if SIZE_MAX <= UINT32_MAX
+  if((size_t)cap > SIZE_MAX / sizeof(jello_value)) abort();
+#endif
   size_t keys = (size_t)cap * sizeof(uint32_t);
   size_t align = sizeof(jello_value);
   size_t pad = (align - (keys % align)) % align;
@@ -53,10 +49,10 @@ jello_object* jello_object_new(jello_vm* vm, uint32_t type_id) {
 static uint32_t find_slot(jello_object* o, uint32_t atom_id, int* found) {
   if(o->len == 0u) {
     *found = 0;
-    return hash_u32(atom_id) & (o->cap - 1u);
+    return vm_atom_hash(atom_id) & (o->cap - 1u);
   }
   uint32_t mask = o->cap - 1u;
-  uint32_t i = hash_u32(atom_id) & mask;
+  uint32_t i = vm_atom_hash(atom_id) & mask;
   uint32_t first_tomb = UINT32_MAX;
   for(;;) {
     uint8_t st = o->states[i];
@@ -64,7 +60,7 @@ static uint32_t find_slot(jello_object* o, uint32_t atom_id, int* found) {
       *found = 0;
       return (first_tomb != UINT32_MAX) ? first_tomb : i;
     }
-    if(st == JELLO_OBJ_SLOT_OCCUPIED && o->keys[i] == atom_id) {
+    if(vm_obj_slot_live(st) && o->keys[i] == atom_id) {
       *found = 1;
       return i;
     }
@@ -76,11 +72,17 @@ static uint32_t find_slot(jello_object* o, uint32_t atom_id, int* found) {
 static uint32_t find_occupied_slot(const jello_object* o, uint32_t atom_id, int* found) {
   if(o->len == 0u) { *found = 0; return 0; }
   uint32_t mask = o->cap - 1u;
-  uint32_t i = hash_u32(atom_id) & mask;
+  uint32_t i = vm_atom_hash(atom_id) & mask;
   for(;;) {
     uint8_t st = o->states[i];
-    if(st == JELLO_OBJ_SLOT_EMPTY) { *found = 0; return 0; }
-    if(st == JELLO_OBJ_SLOT_OCCUPIED && o->keys[i] == atom_id) { *found = 1; return i; }
+    if(st == JELLO_OBJ_SLOT_EMPTY) {
+      *found = 0;
+      return 0;
+    }
+    if(vm_obj_slot_live(st) && o->keys[i] == atom_id) {
+      *found = 1;
+      return i;
+    }
     i = (i + 1u) & mask;
   }
 }
@@ -99,11 +101,11 @@ static void rehash(jello_object* o, uint32_t new_cap) {
   o->tombstones = 0;
 
   for(uint32_t i = 0; i < old_cap; i++) {
-    if(old_states[i] != JELLO_OBJ_SLOT_OCCUPIED) continue;
+    if(!vm_obj_slot_live(old_states[i])) continue;
     int found = 0;
     uint32_t slot = find_slot(o, old_keys[i], &found);
     o->keys[slot] = old_keys[i];
-    o->states[slot] = JELLO_OBJ_SLOT_OCCUPIED;
+    o->states[slot] = old_states[i];
     o->vals[slot] = old_vals[i];
     o->len++;
   }
@@ -111,11 +113,13 @@ static void rehash(jello_object* o, uint32_t new_cap) {
 }
 
 static void ensure_cap(jello_object* o) {
-  if((o->len + 1u) * JELLO_OBJECT_LOAD_NUM >= o->cap * JELLO_OBJECT_LOAD_DEN) {
+  if(((uint64_t)o->len + 1u) * JELLO_OBJECT_LOAD_NUM >= (uint64_t)o->cap * JELLO_OBJECT_LOAD_DEN) {
+    if(o->cap > UINT32_MAX / 2u) abort();
     rehash(o, o->cap * 2u);
     return;
   }
-  if((o->len + o->tombstones + 1u) * JELLO_OBJECT_LOAD_NUM >= o->cap * JELLO_OBJECT_LOAD_DEN) {
+  if(((uint64_t)o->len + o->tombstones + 1u) * JELLO_OBJECT_LOAD_NUM >=
+     (uint64_t)o->cap * JELLO_OBJECT_LOAD_DEN) {
     rehash(o, o->cap);
   }
 }
@@ -130,16 +134,14 @@ int vm_object_find(const jello_object* o, uint32_t atom_id, int keep, jello_valu
 }
 
 int jello_object_has(const jello_object* o, uint32_t atom_id) {
-  int found = 0;
-  (void)find_occupied_slot(o, atom_id, &found);
-  return found;
+  jello_value v;
+  return vm_object_find(o, atom_id, 0, &v);
 }
 
 jello_value jello_object_get(const jello_object* o, uint32_t atom_id) {
-  int found = 0;
-  uint32_t i = find_occupied_slot(o, atom_id, &found);
-  if(!found) return jello_make_null();
-  return o->vals[i];
+  jello_value v = jello_make_null();
+  (void)vm_object_find(o, atom_id, 1, &v);
+  return v;
 }
 
 uint8_t vm_object_state(const jello_object* o, uint32_t atom_id) {
@@ -191,6 +193,7 @@ int jello_object_remove(jello_object* o, uint32_t atom_id) {
   int found = 0;
   uint32_t i = find_slot(o, atom_id, &found);
   if(!found) return 0;
+  o->sealed -= o->states[i] == JELLO_OBJ_SLOT_SEALED;
   o->states[i] = JELLO_OBJ_SLOT_TOMB;
   o->len--;
   o->tombstones++;
@@ -201,17 +204,24 @@ void jello_object_clear(jello_object* o) {
   memset(o->states, 0, o->cap);
   o->len = 0;
   o->tombstones = 0;
+  o->sealed = 0;
 }
 
-jello_object* jello_object_copy(jello_vm* vm, const jello_object* src) {
+static jello_object* copy_object(jello_vm* vm, const jello_object* src, int shared) {
   jello_object* dst = jello_object_new(vm, src->h.type_id);
   for(uint32_t i = 0; i < src->cap; i++) {
-    if(src->states[i] == JELLO_OBJ_SLOT_OCCUPIED) {
-      jello_object_set(dst, src->keys[i], src->vals[i]);
-    }
+    if(!vm_obj_slot_live(src->states[i])) continue;
+    if(shared && src->states[i] == JELLO_OBJ_SLOT_OWNED) src->states[i] = JELLO_OBJ_SLOT_OCCUPIED;
+    int sealed = !shared && src->states[i] == JELLO_OBJ_SLOT_SEALED;
+    object_put(dst, src->keys[i], src->vals[i],
+               sealed ? JELLO_OBJ_SLOT_SEALED : JELLO_OBJ_SLOT_OCCUPIED);
   }
   dst->proto = src->proto;
   return dst;
+}
+
+jello_object* jello_object_copy(jello_vm* vm, const jello_object* src) {
+  return copy_object(vm, src, 1);
 }
 
 static int atom_order(const void* a, const void* b) {

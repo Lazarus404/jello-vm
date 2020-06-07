@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * The embedding API; load a `.jlo` module, run it on a VM, and build or inspect the values and
+ * heap objects it exchanges with C. Native-library authors also include jello/jdll.h. */
+
 #ifndef JELLO_H
 #define JELLO_H
 
 #include <stddef.h>
 #include <stdint.h>
 
-/* Host API -- opaque embedder surface. */
-
 typedef uint32_t jello_type_id;
-
-/* -- value kind tag -- */
 typedef enum jello_type_kind {
   JELLO_T_VOID = 1,
   JELLO_T_BOOL = 2,
@@ -38,7 +38,6 @@ typedef enum jello_type_kind {
 
 size_t jello_slot_size(jello_type_kind k);
 
-/* -- type-table entry and payload structs -- */
 typedef struct jello_fun_sig {
   jello_type_id ret;
   uint16_t nargs;
@@ -77,7 +76,6 @@ typedef struct jello_type_entry {
   } as;
 } jello_type_entry;
 
-/* -- loader API -- */
 struct jello_bc_module;
 typedef struct jello_bc_module jello_bc_module;
 
@@ -100,7 +98,6 @@ jello_bc_result jello_bc_read(const uint8_t* data, size_t size, jello_bc_module*
 void jello_bc_free(jello_bc_module* m);
 uint32_t jello_bc_get_entry(const jello_bc_module* m);
 
-/* -- interpreter -- */
 struct jello_vm;
 typedef struct jello_vm jello_vm;
 
@@ -128,14 +125,13 @@ typedef enum jello_trap_code {
 } jello_trap_code;
 
 jello_trap_code jello_vm_last_trap_code(const jello_vm* vm);
-
 void jello_vm_set_fuel(jello_vm* vm, uint64_t fuel);
 void jello_vm_set_max_bytes_len(jello_vm* vm, uint32_t max_len);
+void jello_vm_keep_processes(jello_vm* vm, int keep);
 uint32_t jello_vm_last_trap_pc(const jello_vm* vm);
 uint32_t jello_vm_last_trap_func_index(const jello_vm* vm);
 #define JELLO_TRAP_CALLERS_MAX 16u
 
-/* -- the Dynamic boundary -- */
 typedef uintptr_t jello_value;
 
 typedef enum jello_value_tag {
@@ -189,7 +185,6 @@ static inline jello_value jello_from_ptr(const void* p) {
   return (jello_value)(uintptr_t)p;
 }
 
-/* -- numeric-only value boundary (deliberately not jello_value) -- */
 typedef enum jello_numeric_kind {
   JELLO_NUM_VOID = 0,
   JELLO_NUM_BOOL,
@@ -220,11 +215,11 @@ typedef struct jello_jit_module jello_jit_module;
 
 jello_jit_module* jello_jit_module_create(const jello_bc_module* m);
 void jello_jit_module_destroy(jello_jit_module* jm);
+int jello_jit_available(void);
 
 jello_exec_status jello_vm_exec_numeric_with_jit(jello_vm* vm, jello_jit_module* jm,
     const jello_bc_module* m, jello_numeric_result* out);
 
-/* -- GC -- */
 void jello_gc_init(jello_vm* vm);
 void jello_gc_shutdown(jello_vm* vm);
 void* jello_gc_alloc(jello_vm* vm, size_t size);
@@ -235,7 +230,6 @@ void jello_gc_pop_roots(jello_vm* vm, uint32_t n);
 void jello_vm_gc_stats(const jello_vm* vm, uint32_t* out_live_bytes, uint32_t* out_collections,
                         double* out_pause_ms);
 
-/* -- heap object kind tag -- */
 typedef enum jello_obj_kind {
   JELLO_OBJ_BYTES = 1,
   JELLO_OBJ_STRUCT = 2,
@@ -256,7 +250,6 @@ typedef struct jello_obj_header {
   uint32_t type_id;
 } jello_obj_header;
 
-/* -- Bytes -- */
 typedef struct jello_bytes {
   jello_obj_header h;
   uint32_t length;
@@ -294,7 +287,6 @@ static inline double jello_as_box_f64(jello_value v) { return ((const jello_box_
 static inline float jello_as_box_f32(jello_value v) { return ((const jello_box_f32*)jello_as_ptr(v))->value; }
 static inline uint16_t jello_as_box_f16(jello_value v) { return ((const jello_box_f16*)jello_as_ptr(v))->value; }
 
-/* -- Struct -- */
 typedef struct jello_struct {
   jello_obj_header h;
   uint8_t fields[];
@@ -302,7 +294,6 @@ typedef struct jello_struct {
 
 jello_struct* jello_struct_new(jello_vm* vm, const jello_bc_module* m, uint32_t struct_sig_id);
 
-/* -- Object -- */
 typedef struct jello_object {
   jello_obj_header h;
   struct jello_object* proto;
@@ -316,7 +307,6 @@ typedef struct jello_object {
   uint8_t* states;
 } jello_object;
 
-/* -- Array -- */
 typedef struct jello_array {
   jello_obj_header h;
   uint32_t length;
@@ -327,7 +317,6 @@ typedef struct jello_array {
 jello_array* jello_array_new(jello_vm* vm, const jello_bc_module* m, uint32_t array_type_id, uint32_t length);
 void jello_array_resize(jello_vm* vm, const jello_bc_module* m, jello_array* a, uint32_t new_length);
 
-/* -- List -- */
 typedef struct jello_list {
   jello_obj_header h;
   jello_value head;
@@ -343,7 +332,6 @@ typedef struct jello_enum {
   jello_value fields[];
 } jello_enum;
 
-/* -- Function -- */
 typedef struct jello_function {
   jello_obj_header h;
   uint32_t func_index;
@@ -352,7 +340,6 @@ typedef struct jello_function {
 } jello_function;
 
 jello_function* jello_function_new(jello_vm* vm, uint32_t func_index, uint32_t ncaps);
-
 jello_object* jello_object_new(jello_vm* vm, uint32_t type_id);
 int jello_object_has(const jello_object* o, uint32_t atom_id);
 jello_value jello_object_get(const jello_object* o, uint32_t atom_id);
@@ -362,8 +349,6 @@ int jello_object_remove(jello_object* o, uint32_t atom_id);
 void jello_object_clear(jello_object* o);
 jello_object* jello_object_copy(jello_vm* vm, const jello_object* src);
 uint32_t jello_object_keys(const jello_object* o, int skip_proto, uint32_t* out);
-
-/* -- blocking -- */
 void jello_vm_blocking(jello_vm* vm, int is_blocking);
 
 #endif /* JELLO_H */

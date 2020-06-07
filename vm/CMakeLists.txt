@@ -71,6 +71,8 @@ if(JELLO_ENABLE_JIT)
     message(FATAL_ERROR "JELLO_ENABLE_JIT: unsupported CMAKE target arch '${JELLO_JIT_TARGET_ARCH}'")
   endif()
   target_compile_definitions(jello_vm PRIVATE JELLO_ENABLE_JIT)
+else()
+  target_sources(jello_vm PRIVATE src/jit/none.c)
 endif()
 if(CMAKE_C_COMPILER_TARGET)
   set_property(SOURCE tools/jelloc_image.S APPEND_STRING PROPERTY

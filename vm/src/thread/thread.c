@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * VM lifecycle and threads; creating and destroying VMs, attaching them to a shared heap,
+ * quiescence and safepoints, stop-the-world, fuel, and the per-VM settings of jello.h. The
+ * collector scans only call frames, never C stacks, so a parked thread needs no saved context. */
+
 #include <jello/internal.h>
 #include <jello/internal/platform.h>
 #include <jello/internal/proc_internal.h>
@@ -18,8 +23,8 @@ static jello_heap* heap_new(void) {
   if(pthread_mutex_init(&heap->alloc_lock, NULL) != 0) abort();
   if(pthread_mutex_init(&heap->stw_lock, NULL) != 0) abort();
   if(pthread_cond_init(&heap->stw_resume_cv, NULL) != 0) abort();
+  if(pthread_mutex_init(&heap->proc_lock, NULL) != 0) abort();
   atomic_init(&heap->stop_requested, 0);
-  heap->refcount = 1;
   return heap;
 }
 
@@ -32,19 +37,17 @@ static void heap_register(jello_heap* heap, jello_vm* vm) {
     heap->threads = nt;
     heap->threads_cap = ncap;
   }
+  vm->heap_index = heap->threads_len;
   heap->threads[heap->threads_len++] = vm;
+  heap->refcount++;
   pthread_mutex_unlock(&heap->alloc_lock);
 }
 
 static int heap_unregister(jello_heap* heap, jello_vm* vm) {
   pthread_mutex_lock(&heap->alloc_lock);
-  for(uint32_t i = 0; i < heap->threads_len; i++) {
-    if(heap->threads[i] == vm) {
-      heap->threads[i] = heap->threads[heap->threads_len - 1u];
-      heap->threads_len--;
-      break;
-    }
-  }
+  jello_vm* moved = heap->threads[--heap->threads_len];
+  heap->threads[vm->heap_index] = moved;
+  moved->heap_index = vm->heap_index;
   heap->refcount--;
   int last = (heap->refcount == 0);
   pthread_mutex_unlock(&heap->alloc_lock);
@@ -73,6 +76,8 @@ jello_vm* jello_vm_create_joined(jello_vm* existing) {
   jello_gc_init(vm); /* idempotent: gc_next_collect is already nonzero on a shared heap */
   return vm;
 }
+
+void jello_vm_keep_processes(jello_vm* vm, int keep) { vm->keep_processes = keep != 0; }
 
 void jello_vm_destroy(jello_vm* vm) {
   if(!vm) return;
@@ -118,8 +123,12 @@ void vm_wait_for_resume(jello_vm* vm) {
 }
 
 void vm_leave_quiescent(jello_vm* vm) {
-  vm_wait_for_resume(vm);
-  atomic_fetch_sub(&vm->quiescent_depth, 1);
+  for(;;) {
+    vm_wait_for_resume(vm);
+    atomic_fetch_sub(&vm->quiescent_depth, 1);
+    if(!atomic_load(&vm->heap->stop_requested)) return;
+    atomic_fetch_add(&vm->quiescent_depth, 1);
+  }
 }
 
 void vm_safepoint_check(jello_vm* vm) {
@@ -140,10 +149,18 @@ int vm_fuel_charge(jello_vm* vm) {
   return 0;
 }
 
+static void reductions_refill(jello_vm* vm) {
+  uint32_t window = VM_REDUCTIONS;
+  if(vm->fuel_limit && vm->fuel_remaining < window - 1u) window = (uint32_t)vm->fuel_remaining + 1u;
+  vm->reduction_window = window;
+  vm->reductions = (int32_t)window;
+}
+
 void jello_vm_set_fuel(jello_vm* vm, uint64_t fuel) {
   if(!vm) return;
   vm->fuel_limit = fuel;
   vm->fuel_remaining = fuel;
+  reductions_refill(vm);
 }
 
 void jello_vm_set_max_bytes_len(jello_vm* vm, uint32_t max_len) {
@@ -169,7 +186,16 @@ void jello_vm_blocking(jello_vm* vm, int is_blocking) {
   }
 }
 
-/* -- stop-the-world -- */
+void jello_vm_running(jello_vm* vm, int is_running) {
+  if(!vm) abort();
+  if(is_running) {
+    if(atomic_exchange(&vm->in_exec, VM_RUNNING_OUTSIDE)) abort(); /* Already running. */
+    vm_safepoint_check(vm);
+  } else if(atomic_exchange(&vm->in_exec, 0) != VM_RUNNING_OUTSIDE) {
+    abort(); /* Not marked running. */
+  }
+}
+
 int vm_heap_stop_the_world(jello_vm* vm) {
   jello_heap* heap = vm->heap;
   int expected = 0;
@@ -185,6 +211,8 @@ int vm_heap_stop_the_world(jello_vm* vm) {
     jello_vm* t = heap->threads[i];
     if(t == vm) continue;
     while(atomic_load(&t->quiescent_depth) == 0 && atomic_load(&t->in_exec) != 0) {
+      /* t is running and has not reached a safepoint; every loop passes one, interpreted
+       * (vm_poll_and_charge) or compiled (JIR_SAFEPOINT), or allocates. */
     }
   }
   return 1;

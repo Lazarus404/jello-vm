@@ -93,6 +93,8 @@ void jello_jit_module_free(jello_jit_module* jm) {
   jit_free_exec_buf(&jm->blob);
 }
 
+int jello_jit_available(void) { return 1; }
+
 jello_jit_module* jello_jit_module_create(const jello_bc_module* m) {
   jello_jit_module* jm = (jello_jit_module*)calloc(1, sizeof(jello_jit_module));
   if(!jm) return NULL;
