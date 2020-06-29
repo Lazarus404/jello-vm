@@ -13,6 +13,7 @@
 #include <stdlib.h>
 
 #if defined(_WIN32)
+#include "../../third_party/wepoll-1.5.8/wepoll.h"
 #elif defined(__linux__)
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
