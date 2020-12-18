@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * JIT module state; the per-module code blob, per-function compile records, lazy compilation
+ * in mixed mode, the crossings between interpreter and JIT code, and hot reload. */
+
 #ifndef JELLO_JIT_INTERNAL_H
 #define JELLO_JIT_INTERNAL_H
 
-/* Interpreter and profiler integration hooks. */
-
 #include <jello/internal/jit_impl.h>
 
-/* -- compiling one function to x64 -- */
 typedef struct jello_jit_code {
   jit_exec_buf buf;
   size_t entry_off;
@@ -28,6 +29,19 @@ typedef enum jello_jit_decline {
                          * (x64) a call-patch list that could not grow. */
   JIT_DECLINE_OOM,
 } jello_jit_decline;
+
+static inline const char* jello_jit_decline_name(jello_jit_decline d) {
+  switch(d) {
+    case JIT_DECLINE_NONE: return "none";
+    case JIT_DECLINE_IR_BUILD: return "ir-build";
+    case JIT_DECLINE_VERIFY: return "verify";
+    case JIT_DECLINE_SHAPE: return "shape";
+    case JIT_DECLINE_SURVIVE: return "survive";
+    case JIT_DECLINE_EMIT: return "emit";
+    case JIT_DECLINE_OOM: return "oom";
+  }
+  return "unknown";
+}
 
 typedef struct jello_jit_func_code {
   size_t blob_off, entry_off, body_off, size;
@@ -63,6 +77,9 @@ typedef struct jello_jit_module {
   const jello_bc_module* m;
 } jello_jit_module;
 
+typedef void(JELLO_JIT_ABI* jello_jit_enter_fn)(jello_vm* vm, uint8_t* frame_base,
+                                                jello_numeric_result* out, const void* body);
+
 extern size_t jit_append_window_bytes;
 
 typedef jello_exec_status(JELLO_JIT_ABI* jello_jit_entry_fn)(jello_vm* vm, uint8_t* frame_base,
@@ -71,7 +88,7 @@ typedef jello_exec_status(JELLO_JIT_ABI* jello_jit_entry_fn)(jello_vm* vm, uint8
 int jello_jit_compile_function(const jello_bc_module* m, uint32_t fi, jello_jit_code* out_code);
 void jello_jit_code_free(jello_jit_code* code);
 
-extern uint32_t jello_jit_module_prepare_count;
+extern _Atomic uint32_t jello_jit_module_prepare_count;
 
 int jello_jit_module_prepare(const jello_bc_module* m, jello_jit_module* out);
 void jello_jit_module_free(jello_jit_module* jm);
@@ -86,7 +103,6 @@ int jello_jit_emit_function_into(const jello_bc_module* m, uint32_t fi, jit_exec
 void jello_jit_patch_call_rel32(jit_exec_buf* buf, size_t at, int32_t rel);
 void jello_jit_patch_call(jit_exec_buf* buf, size_t site_off, size_t callee_off);
 
-/* -- Function identity across a recompile -- */
 typedef enum jello_reload_fn_status {
   JELLO_RELOAD_FN_UNCHANGED,          /* same signature, same body hash -- no-op */
   JELLO_RELOAD_FN_CHANGED,            /* same signature, different body hash -- recompile + patch */
@@ -100,6 +116,7 @@ jello_reload_fn_status jello_reload_analyze_function(const jello_bc_module* old_
 
 int jello_reload_struct_sig_changed(const jello_bc_module* old_m, const jello_bc_module* new_m, uint32_t struct_sig_id);
 int jello_reload_function_uses_struct_sig(const jello_bc_module* m, const jello_bc_function* f, uint32_t struct_sig_id);
+
 int jello_jit_reload_pause_all(jello_vm* vm);
 void jello_jit_reload_resume_all(jello_vm* vm);
 

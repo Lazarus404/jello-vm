@@ -17,6 +17,17 @@ static uint8_t* free_link(const proc_pool* pool, uint8_t* slot) {
   return proc_slot_mid(pool, slot) - sizeof(uint8_t*);
 }
 
+static size_t slab_bytes(const proc_pool* pool) {
+  return pool->guard_bytes + PROC_SLAB_SLOTS * ((size_t)pool->native_bytes + pool->frame_bytes);
+}
+
+proc_pool proc_pool_make(uint32_t native_bytes, uint32_t frame_bytes) {
+  uint32_t page = (uint32_t)jello_page_size();
+  proc_pool p = {
+      native_bytes - page / 2u, frame_bytes + page / 2u, page, NULL, NULL, NULL, NULL, 0};
+  return p;
+}
+
 void proc_slot_give(proc_pool* pool, uint8_t* slot) {
   memcpy(free_link(pool, slot), &pool->free, sizeof pool->free);
   pool->free = slot;

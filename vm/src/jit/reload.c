@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * Hot reload; compares an old and a new module function by function, then swaps the new
+ * module's code into a JIT module while every thread is paused. */
+
 #include <jello/internal/jit_internal.h>
 #include <sched.h>
 #include <stdlib.h>
 #include <string.h>
 
-/* -- Signature and body-hash comparison -- */
 static uint64_t fnv1a_update(uint64_t h, const void* data, size_t n) {
   const uint8_t* p = (const uint8_t*)data;
   for(size_t i = 0; i < n; i++) {
@@ -120,8 +123,6 @@ int jello_reload_function_uses_struct_sig(const jello_bc_module* m, const jello_
   return 0;
 }
 
-/* -- End-to-end reload -- */
-
 int jello_jit_module_reload(jello_vm* vm, jello_jit_module* jm, const jello_bc_module* old_m,
     const jello_bc_module* new_m, int allow_conflicts, jello_jit_reload_report* out_report) {
   if(!out_report) return 0;
@@ -207,10 +208,7 @@ int jello_jit_module_reload(jello_vm* vm, jello_jit_module* jm, const jello_bc_m
     return 0;
   }
 
-  if(out_report->n_changed == 0 && out_report->n_new == 0 &&
-      out_report->n_signature_conflicts == 0 && out_report->n_type_conflicts == 0) {
-    return 1;
-  }
+  if(new_m == jm->m) return 1;
 
   jello_jit_module new_jm;
   memset(&new_jm, 0, sizeof(new_jm));
@@ -247,7 +245,8 @@ int jello_jit_reload_pause_all(jello_vm* vm) {
   if(!vm_heap_stop_the_world(vm)) return 0; /* another stop-the-world was already in flight; nothing is paused now */
   jello_heap* heap = vm->heap;
   for(uint32_t i = 0; i < heap->threads_len; i++) {
-    if(atomic_load(&heap->threads[i]->in_exec) != 0) {
+    int in_exec = atomic_load(&heap->threads[i]->in_exec);
+    if(in_exec != 0 && in_exec != VM_RUNNING_OUTSIDE) {
       vm_heap_resume_the_world(vm);
       return 0;
     }

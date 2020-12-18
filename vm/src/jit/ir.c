@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * Lowers a bytecode function into the JIR in one pass, classifying each CALL as self-recursive
+ * or direct and placing safepoints where the interpreter checks for them. */
+
 #include <jello/internal/jit_impl.h>
 #include <stdlib.h>
-
-/* -- the bytecode-to-JIR lowering pass -- */
 
 typedef struct ir_builder {
   jello_jit_ir_insn* insns;
@@ -28,8 +30,6 @@ static void ir_push(ir_builder* b, jello_jit_ir_op op, uint8_t a, uint8_t bb, ui
   ins->imm = imm;
   ins->bc_pc = bc_pc;
 }
-
-/* -- per-family operator/kind resolution -- */
 
 static jello_jir_bin arith_operator(jello_op op) {
   switch(op) {
@@ -335,9 +335,15 @@ jello_jit_ir_function* jello_jit_ir_build(const jello_bc_module* m, uint32_t fi)
 int jello_jit_ir_verify(const jello_jit_ir_function* f, const jello_bc_function* src) {
   for(uint32_t i = 0; i < f->ninsns; i++) {
     const jello_jit_ir_insn* ins = &f->insns[i];
+
     unsigned mask = jello_jit_ir_op_reg_mask((jello_jit_ir_op)ins->op);
     if((mask & JELLO_JIR_REG_A) && ins->a >= f->nregs) return 0;
-    if((mask & JELLO_JIR_REG_B) && ins->b >= f->nregs) return 0;
+    jello_jit_ir_op op = (jello_jit_ir_op)ins->op;
+    if(op == JIR_CALL_SELF || op == JIR_CALL_DIRECT || op == JIR_CALL_NATIVE) {
+      if((uint32_t)ins->b + ins->c > f->nregs) return 0;
+    } else if((mask & JELLO_JIR_REG_B) && ins->b >= f->nregs) {
+      return 0;
+    }
     if((mask & JELLO_JIR_REG_C) && ins->c >= f->nregs) return 0;
     if(ins->bc_pc >= src->ninsns) return 0;
   }

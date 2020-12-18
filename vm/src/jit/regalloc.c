@@ -1,17 +1,19 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * The register allocator's backend-independent bookkeeping; caches registers' home slots in
+ * pool registers, with eviction, pinning and the survive register. */
+
 #include <jello/internal/jit_impl.h>
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 
-/* -- HashLink-style home/current read side -- */
-
-uint32_t jit_reg_reload_count;
-uint32_t jit_reg_discard_count;
-uint32_t jit_call_survive_armed_count;
-uint32_t jit_call_survive_decline_count;
+_Atomic uint32_t jit_reg_reload_count;
+_Atomic uint32_t jit_reg_discard_count;
+_Atomic uint32_t jit_call_survive_armed_count;
+_Atomic uint32_t jit_call_survive_decline_count;
 
 static int preg_is_xmm(int preg) {
   return preg >= (int)JIT_PREG_XMM0;
@@ -165,7 +167,7 @@ void jit_reg_bind(jit_reg_state* st, uint8_t vreg, int preg) {
 
 static int alloc_from_gpr_pool(jit_reg_state* st, uint8_t vreg, int and_load) {
   for(unsigned i = 0; i < jit_gpr_pool_len; i++) {
-    if(st->gpr_vreg[i] == (int8_t)JIT_PREG_NONE) {
+    if(st->gpr_vreg[i] == JIT_PREG_NONE && !st->gpr_pinned[i]) {
       int preg = (int)jit_gpr_pool[i];
       jit_reg_bind(st, vreg, preg);
       pin_gpr_index(st, i);
@@ -178,9 +180,9 @@ static int alloc_from_gpr_pool(jit_reg_state* st, uint8_t vreg, int and_load) {
   }
   {
     unsigned i = pick_unpinned_victim(st->gpr_pinned, jit_gpr_pool_len, st->next_gpr_victim);
-    int8_t victim = st->gpr_vreg[i];
-    if(victim != (int8_t)JIT_PREG_NONE) st->current[(uint8_t)victim] = (int8_t)JIT_PREG_NONE;
-    st->gpr_vreg[i] = (int8_t)JIT_PREG_NONE;
+    int16_t victim = st->gpr_vreg[i];
+    if(victim != JIT_PREG_NONE) st->current[victim] = (int8_t)JIT_PREG_NONE;
+    st->gpr_vreg[i] = JIT_PREG_NONE;
     int preg = (int)jit_gpr_pool[i];
     jit_reg_bind(st, vreg, preg);
     pin_gpr_index(st, i);
@@ -195,7 +197,7 @@ static int alloc_from_gpr_pool(jit_reg_state* st, uint8_t vreg, int and_load) {
 
 static int alloc_from_xmm_pool(jit_reg_state* st, uint8_t vreg, int and_load, int wide) {
   for(unsigned i = 0; i < jit_xmm_pool_len; i++) {
-    if(st->xmm_vreg[i] == (int8_t)JIT_PREG_NONE) {
+    if(st->xmm_vreg[i] == JIT_PREG_NONE && !st->xmm_pinned[i]) {
       int preg = (int)JIT_PREG_XMM0 + (int)i;
       jit_reg_bind(st, vreg, preg);
       pin_xmm_index(st, i);
@@ -209,9 +211,9 @@ static int alloc_from_xmm_pool(jit_reg_state* st, uint8_t vreg, int and_load, in
   }
   {
     unsigned i = pick_unpinned_victim(st->xmm_pinned, jit_xmm_pool_len, st->next_xmm_victim);
-    int8_t victim = st->xmm_vreg[i];
-    if(victim != (int8_t)JIT_PREG_NONE) st->current[(uint8_t)victim] = (int8_t)JIT_PREG_NONE;
-    st->xmm_vreg[i] = (int8_t)JIT_PREG_NONE;
+    int16_t victim = st->xmm_vreg[i];
+    if(victim != JIT_PREG_NONE) st->current[victim] = (int8_t)JIT_PREG_NONE;
+    st->xmm_vreg[i] = JIT_PREG_NONE;
     int preg = (int)JIT_PREG_XMM0 + (int)i;
     jit_reg_bind(st, vreg, preg);
     pin_xmm_index(st, i);

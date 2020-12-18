@@ -8,3 +8,7 @@
 #include <jello/internal/jit_internal.h>
 
 int jello_jit_available(void) { return 0; }
+
+jello_jit_module* jello_jit_module_create(const jello_bc_module* m) { return NULL; }
+
+void jello_jit_module_destroy(jello_jit_module* jm) {}

@@ -41,6 +41,8 @@ typedef struct proc_pool {
   uint8_t** slabs;       /**< Every slab it has mapped, for proc_pool_free. */
   uint32_t nslabs;
 } proc_pool;
+
+proc_pool proc_pool_make(uint32_t native_bytes, uint32_t frame_bytes);
 void proc_slot_give(proc_pool* pool, uint8_t* slot);
 
 static inline uint8_t* proc_slot_mid(const proc_pool* pool, uint8_t* slot) {

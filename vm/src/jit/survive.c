@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * Call-survive planning; picks the typed calls across which one I32 value stays in
+ * JIT_REG_SURVIVE instead of being reloaded from its home. */
+
 #include <jello/internal/jit_impl.h>
 #include <stdlib.h>
-
-/* -- The call-site-local register-survive pattern match -- */
 
 static int op_a_is_value_input(jello_jit_ir_op op) {
   switch(op) {
@@ -64,7 +66,8 @@ static int find_candidate(const jello_jit_ir_function* ir, const jello_bc_module
     unsigned mask = jello_jit_ir_op_reg_mask(op);
     if((mask & JELLO_JIR_REG_A) && !op_a_is_value_input(op)) {
       uint8_t v = ins->a;
-      if(v >= arg_first && v < arg_end) continue; /* consumed by this same call, not a survive candidate */
+      if(v >= arg_first && v < arg_end) continue;
+      if(v == call_ins->a) continue;
       if(vm_reg_kind(m, f, v) != JELLO_T_I32) continue;
       *out_candidate = v;
       return 1;
@@ -87,6 +90,7 @@ static int find_consumer(const jello_jit_ir_function* ir, const jello_bc_functio
       return 1;
     }
     if(op_is_branch(op)) return 0;
+    if(op == JIR_SLOW) return 0;
     if(insn_writes_vreg(ins, candidate)) return 0;
   }
   return 0;

@@ -1,25 +1,27 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * JIT module preparation, lazy compilation, and the interpreter's ways into JIT code. */
+
 #include <jello/internal/jit_internal.h>
 #include <jello/internal/platform.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 
+static size_t function_emit_budget(const jello_bc_function* f) {
+  return 2u * (size_t)f->ninsns * JIT_EMIT_CALL_INSN_BUDGET + 512u;
+}
+
 static size_t module_emit_cap(const jello_bc_module* m) {
   size_t cap = 4096u;
-  for(uint32_t fi = 0; fi < m->nfuncs; fi++) {
-    jello_jit_ir_function* ir = jello_jit_ir_build(m, fi);
-    if(!ir) continue;
-    cap += (size_t)ir->ninsns * JIT_EMIT_CALL_INSN_BUDGET + 512u;
-    jello_jit_ir_free(ir);
-  }
+  for(uint32_t fi = 0; fi < m->nfuncs; fi++) cap += function_emit_budget(&m->funcs[fi]);
   if(cap < JIT_EMIT_BUF_MIN_CAP) cap = JIT_EMIT_BUF_MIN_CAP;
   return cap;
 }
 
-uint32_t jello_jit_module_prepare_count;
+_Atomic uint32_t jello_jit_module_prepare_count;
 
 int jello_jit_module_prepare(const jello_bc_module* m, jello_jit_module* out) {
   jello_jit_module_prepare_count++;
@@ -122,9 +124,9 @@ int jello_jit_try_enter(jello_vm* vm, jello_jit_module* jm, jello_numeric_result
   uint32_t fi = fr->func_index;
   if(fi >= jm->nfuncs || jm->funcs[fi].size == 0) return 0;
 
-  jello_jit_entry_fn entry =
-      (jello_jit_entry_fn)(void*)(jm->blob.mem + jm->funcs[fi].blob_off + jm->funcs[fi].entry_off);
-  jit_try_enter_count++;
+  jello_jit_entry_fn entry = (jello_jit_entry_fn)(uintptr_t)(jm->blob.mem + jm->funcs[fi].blob_off +
+                                                             jm->funcs[fi].entry_off);
+  __atomic_add_fetch(&jit_try_enter_count, 1, __ATOMIC_RELAXED);
   *out_st = entry(vm, fr->rf.mem, out);
   return 1;
 }

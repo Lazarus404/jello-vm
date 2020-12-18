@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * JIT internals shared by every file under src/jit; the JIR, executable buffers, the register
+ * allocator, call-survive planning, and the C helpers JIT code calls. */
+
 #ifndef JELLO_JIT_IMPL_H
 #define JELLO_JIT_IMPL_H
-
-/* JIT engine: W^X buffers, IR, tier-1/tier-2 codegen. Single #include for
- * every source file under src/jit. */
 
 #include <jello/internal/bytecode.h>
 #include <jello/internal/vm_internal.h>
 
-/* -- the shared JIR -- */
 typedef enum jello_jit_ir_op {
   JIR_NOP = 0,
   JIR_RET,
@@ -178,12 +178,10 @@ typedef struct jello_jit_ir_function {
 #define JELLO_JIR_REG_A (1u << 0)
 #define JELLO_JIR_REG_B (1u << 1)
 #define JELLO_JIR_REG_C (1u << 2)
+
 unsigned jello_jit_ir_op_reg_mask(jello_jit_ir_op op);
-
 jello_jit_ir_function* jello_jit_ir_build(const jello_bc_module* m, uint32_t fi);
-
 int jello_jit_ir_verify(const jello_jit_ir_function* f, const jello_bc_function* src);
-
 void jello_jit_ir_free(jello_jit_ir_function* f);
 /* -- the private JIT-to-JIT calling convention -- */
 #if defined(__aarch64__)
@@ -202,7 +200,6 @@ typedef enum jit_x64_reg {
 } jit_x64_reg;
 #endif
 
-/* -- the minimal W^X proof mechanism -- */
 typedef struct jit_exec_buf {
   uint8_t* mem;  /* NULL if allocation failed */
   size_t cap;
@@ -244,13 +241,10 @@ typedef struct jit_reg_state {
   uint8_t survive_vreg;
 } jit_reg_state;
 
-extern uint32_t jit_reg_reload_count;
-extern uint32_t jit_reg_discard_count;
-
-extern uint32_t jit_call_survive_armed_count;
-extern uint32_t jit_call_survive_decline_count;
-
-/* -- The regalloc seam -- */
+extern _Atomic uint32_t jit_reg_reload_count;
+extern _Atomic uint32_t jit_reg_discard_count; /**< Calls to jit_reg_state_discard_currents. */
+extern _Atomic uint32_t jit_call_survive_armed_count;
+extern _Atomic uint32_t jit_call_survive_decline_count;
 extern const uint8_t jit_gpr_pool[];
 extern const uint32_t jit_gpr_pool_len;
 extern const uint32_t jit_xmm_pool_len;
@@ -262,7 +256,6 @@ void jit_spill_load_xmm32(jit_exec_buf* buf, unsigned dst_xmm, uint8_t vreg);
 void jit_spill_load_xmm64(jit_exec_buf* buf, unsigned dst_xmm, uint8_t vreg);
 void jit_spill_store_xmm32(jit_exec_buf* buf, uint8_t vreg, unsigned src_xmm);
 void jit_spill_store_xmm64(jit_exec_buf* buf, uint8_t vreg, unsigned src_xmm);
-
 void jit_reg_state_init(jit_reg_state* st, uint32_t nregs, jit_reg_emit_ctx emit);
 void jit_reg_state_free(jit_reg_state* st);
 void jit_reg_state_clobber_call(jit_reg_state* st);
@@ -304,21 +297,19 @@ void jit_trap_type_mismatch(jello_vm* vm);
 void jit_trap_fuel(jello_vm* vm);
 void jit_trap_limit(jello_vm* vm); 
 
+JELLO_JIT_ABI jello_bytes* jit_bytes_bitop(jello_vm* vm, jello_bytes* b, jello_bytes* c, int op_kind);
+JELLO_JIT_ABI jello_bytes* jit_bytes_concat2(jello_vm* vm, jello_bytes* b, jello_bytes* c);
+JELLO_JIT_ABI void jit_bits_write(jello_bytes* b, uint32_t width, uint32_t bit_off, uint32_t value);
+JELLO_JIT_ABI uint32_t jit_bits_read(const jello_bytes* b, uint32_t width, uint32_t bit_off);
+
 enum {
   JIT_EMIT_BUF_MIN_CAP = 65536u,
   JIT_EMIT_PER_INSN_BUDGET = 128u,
   JIT_EMIT_CALL_INSN_BUDGET = 512u,
 };
 
-/* -- the JIT frame is Chapter 3's frame, unmodified (jit/frame.c) -- */
 uint8_t* jit_frame_entry_base(jello_vm* vm);
-
-/* -- Bytes/Bits C helpers (jit/frame.c) -- */
-jello_bytes* jit_bytes_bitop(jello_vm* vm, jello_bytes* b, jello_bytes* c, int op_kind);
-void jit_bits_write(jello_bytes* b, uint32_t width, uint32_t bit_off, uint32_t value);
-uint32_t jit_bits_read(const jello_bytes* b, uint32_t width, uint32_t bit_off);
 void jit_frame_zero_and_null_init(uint8_t* mem, uint32_t total, const uint8_t* kind, uint32_t nregs);
-jello_bytes* jit_bytes_concat2(jello_vm* vm, jello_bytes* b, jello_bytes* c);
 
 #define JIT_TRAP_SITE_OFF                                                                          \
   ((uint32_t)(offsetof(jello_vm, trap_trace) + offsetof(jello_trap_trace, site)))

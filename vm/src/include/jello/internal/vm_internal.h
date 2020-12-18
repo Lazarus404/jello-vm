@@ -716,6 +716,10 @@ void vm_heap_lock(jello_vm* vm);
 void vm_heap_resume_the_world(jello_vm* vm);
 
 typedef struct jello_jdll_handle jello_jdll_handle;
+
+int jello_executable_path(char* out);
+int jello_directory_of(const char* path, char* dir);
+int jello_jdll_search_beside(const char* program, const char* dirs);
 jello_jdll_handle* jello_jdll_load(const char* library_name);
 const char* jello_jdll_last_error(void);
 const char* jello_jdll_path(const jello_jdll_handle* h);

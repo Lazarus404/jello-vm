@@ -71,9 +71,36 @@ static void* resolve_and_open(const char* library_name) {
   free(copy);
   return NULL;
 }
+
+static char* g_search;
 static _Thread_local char g_jdll_err[4608];
 
+int jello_directory_of(const char* path, char* dir) {
+  const char* slash = jello_last_slash(path);
+  int len = slash ? (slash == path ? 1 : (int)(slash - path)) : 1;
+  return snprintf(dir, PATH_MAX, "%.*s", len, slash ? path : ".") < PATH_MAX;
+}
+
+int jello_jdll_search_beside(const char* program, const char* dirs) {
+  char dir[PATH_MAX], search[3 * PATH_MAX];
+  int n = 0;
+  if(program) {
+    if(!jello_directory_of(program, dir)) return 0;
+    n = snprintf(search, sizeof search, "%s/jdll%c%s", dir, JELLO_PATH_LIST_SEP, dir);
+  }
+  if(dirs && n >= 0 && n < (int)sizeof search) {
+    if(n > 0) search[n++] = JELLO_PATH_LIST_SEP;
+    n += snprintf(search + n, sizeof search - (size_t)n, "%s", dirs);
+  }
+  if(n < 0 || n >= (int)sizeof search) return 0;
+  free(g_search);
+  g_search = n > 0 ? strdup(search) : NULL;
+  return 1;
+}
+
 const char* jello_jdll_last_error(void) { return g_jdll_err; }
+
+int jello_executable_path(char* out) { return jello_self_path(out, PATH_MAX); }
 
 typedef struct search {
   char soname[256];
@@ -110,7 +137,8 @@ const char* jello_jdll_path(const jello_jdll_handle* h) { return h->path; }
 
 void jello_jdll_unload(jello_jdll_handle* h) {
   if(!h) return;
-  dlclose(h->dl);
+  if(h->dl) jello_dl_close(h->dl);
+  free(h->path);
   free(h);
 }
 
