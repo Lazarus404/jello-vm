@@ -1643,6 +1643,7 @@ static int cmd_run(const char* in_path, int repeat, int gc_stats, uint64_t fuel,
   size_t n = fread(data, 1, (size_t)size, f);
   fclose(f);
 
+  jello_jdll_search_beside(in_path, NULL);
   jello_bc_module* m = NULL;
   jello_bc_result rr = jello_bc_read(data, n, &m);
   free(data);
@@ -1900,6 +1901,7 @@ static int cmd_dumpir(const char* in_path, int func_filter, int has_func_filter)
   size_t n = fread(data, 1, (size_t)size, f);
   fclose(f);
 
+  jello_jdll_search_beside(in_path, NULL);
   jello_bc_module* m = NULL;
   jello_bc_result rr = jello_bc_read(data, n, &m);
   free(data);
@@ -1988,6 +1990,7 @@ static int cmd_disasm(const char* in_path, const char* out_path) {
   size_t n = fread(data, 1, (size_t)size, f);
   fclose(f);
 
+  jello_jdll_search_beside(in_path, NULL);
   jello_bc_module* m = NULL;
   jello_bc_result rr = jello_bc_read(data, n, &m);
   free(data);

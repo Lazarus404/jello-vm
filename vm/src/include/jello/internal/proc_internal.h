@@ -44,6 +44,7 @@ typedef struct proc_pool {
 
 proc_pool proc_pool_make(uint32_t native_bytes, uint32_t frame_bytes);
 void proc_slot_give(proc_pool* pool, uint8_t* slot);
+void proc_pool_free(proc_pool* pool);
 
 static inline uint8_t* proc_slot_mid(const proc_pool* pool, uint8_t* slot) {
   return slot + pool->native_bytes;

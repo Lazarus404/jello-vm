@@ -32,3 +32,11 @@ void proc_slot_give(proc_pool* pool, uint8_t* slot) {
   memcpy(free_link(pool, slot), &pool->free, sizeof pool->free);
   pool->free = slot;
 }
+
+void proc_pool_free(proc_pool* pool) {
+  for(uint32_t i = 0; i < pool->nslabs; i++) jello_pages_unmap(pool->slabs[i], slab_bytes(pool));
+  free(pool->slabs);
+  pool->slabs = NULL;
+  pool->nslabs = 0;
+  pool->free = pool->fresh = pool->fresh_end = NULL;
+}
