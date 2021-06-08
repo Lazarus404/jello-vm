@@ -33,12 +33,22 @@
 #include <stdlib.h>
 #include <string.h>
 
+enum {
+  NET_TIMEOUT = -1, /**< The call's time ran out. */
+  NET_CLOSED = -2,  /**< The socket is closed, or not the caller's. */
+  NET_GAI = 100000, /**< Added to a getaddrinfo error. */
+};
+
+#define NET_READ_MAX (1u << 20)
+
 typedef struct proc_socket {
   jdl_refs refs;
   int fd; /**< -1 once closed; its owner's to change. */
   jello_process* owner;
   struct proc_socket* owned_prev; /**< In its owner's `sockets`. */
   struct proc_socket* owned_next;
+  struct sockaddr_storage peer; /**< A stream's other end, or the last datagram's sender. */
+  socklen_t peer_len;
   net_tls* tls; /**< A secured stream's TLS session, else NULL; its owner's to change. */
   const net_tls_ops* tls_ops; /**< The table of the TLS library that made `tls`. */
 } proc_socket;
@@ -46,6 +56,7 @@ typedef struct proc_socket {
 struct proc_socket_list {
   struct proc_socket_list* next;
   uint32_t len;
+  uint32_t cap;
   proc_socket* at[];
 };
 
@@ -56,3 +67,9 @@ void proc_sockets_join(struct proc_socket_list** into, struct proc_socket_list**
   *into = *from;
   *from = NULL;
 }
+
+typedef struct net_addrs {
+  struct addrinfo* list;
+  struct addrinfo one;
+  struct sockaddr_storage addr;
+} net_addrs;

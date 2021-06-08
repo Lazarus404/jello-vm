@@ -287,6 +287,7 @@ struct jello_vm {
   uint64_t* globals;
   uint8_t owns_globals;
   uint8_t keep_processes;  /**< Set by jello_vm_keep_processes. */
+  int32_t net_error;       /**< Why its last failing socket call failed; see net.c. */
   void* gc_transient_root; /**< An object still being populated, held as a root. */
   struct vm_parcel* parcel;
 
@@ -460,6 +461,7 @@ void vm_pop_frame(jello_vm* vm);
 void vm_frame_unwind(jello_vm* vm);
 void vm_frame_reset(jello_vm* vm);
 void vm_free_layouts(jello_vm* vm);
+void vm_share_layouts(jello_vm* vm, const jello_vm* from);
 
 typedef enum op_result {
   OP_CONTINUE,
@@ -667,8 +669,14 @@ op_result op_obj_clear(exec_ctx* ctx, const jello_insn* ins);
 op_result op_obj_copy(exec_ctx* ctx, const jello_insn* ins);
 op_result op_obj_keys(exec_ctx* ctx, const jello_insn* ins);
 
+jello_object* vm_object_clone(jello_vm* vm, const jello_object* src);
+
 typedef struct vm_protos {
   uint32_t len;
+  struct vm_proto_fix {
+    jello_object* object;
+    uint32_t global;
+  } at[];
 } vm_protos;
 
 typedef struct vm_parcel {
@@ -722,6 +730,7 @@ int jello_directory_of(const char* path, char* dir);
 int jello_jdll_search_beside(const char* program, const char* dirs);
 jello_jdll_handle* jello_jdll_load(const char* library_name);
 const char* jello_jdll_last_error(void);
+void* jello_jdll_symbol(const jello_jdll_handle* h, const char* name);
 const char* jello_jdll_path(const jello_jdll_handle* h);
 void jello_jdll_unload(jello_jdll_handle* h);
 const struct jello_jdll_export* jello_jdll_find_export(const jello_jdll_handle* h, const char* name);

@@ -38,7 +38,43 @@
 
 #define JELLO_SOCKET(fd) (fd)
 
+static inline int jello_sock_failed(void) { return -1; }
+static inline int jello_sockets_start(void) { return 1; }
+
 #endif
+
+static inline ssize_t jello_sock_check(ssize_t r) { return r < 0 ? jello_sock_failed() : r; }
+static inline int jello_sock_open(int family, int type) {
+#ifdef _WIN32
+  if(!jello_sockets_start()) return jello_sock_failed();
+  SOCKET s = WSASocketW(family, type, 0, NULL, 0, WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
+  return s == INVALID_SOCKET ? jello_sock_failed() : (int)(uint32_t)s;
+#else
+  return socket(family, type, 0);
+#endif
+}
+
+static inline int jello_sock_nonblocking(int fd) {
+#ifdef _WIN32
+  u_long on = 1;
+  return ioctlsocket(JELLO_SOCKET(fd), (long)FIONBIO, &on) == 0 ? 0 : jello_sock_failed();
+#else
+  int flags = fcntl(fd, F_GETFL, 0);
+  return flags >= 0 && fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0 &&
+                 fcntl(fd, F_SETFD, FD_CLOEXEC) == 0
+             ? 0
+             : -1;
+#endif
+}
+
+static inline void jello_sock_reuse_port(int fd) {
+  int one = 1;
+#ifdef _WIN32
+  setsockopt(JELLO_SOCKET(fd), SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char*)&one, sizeof one);
+#else
+  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+#endif
+}
 
 #ifdef _WIN32
 #endif
@@ -49,6 +85,92 @@ static inline void jello_sock_close(int fd) {
 #else
   close(fd);
 #endif
+}
+
+static inline int jello_accept(int fd, struct sockaddr* peer, socklen_t* peer_len) {
+#ifdef _WIN32
+  SOCKET s = accept(JELLO_SOCKET(fd), peer, peer_len);
+  return s == INVALID_SOCKET ? jello_sock_failed() : (int)(uint32_t)s;
+#else
+  return accept(fd, peer, peer_len);
+#endif
+}
+
+static inline int jello_connect(int fd, const struct sockaddr* to, socklen_t to_len) {
+#ifdef _WIN32
+  if(connect(JELLO_SOCKET(fd), to, to_len) == 0) return 0;
+  jello_sock_failed();
+  if(errno == EWOULDBLOCK) errno = EINPROGRESS;
+  return -1;
+#else
+  return connect(fd, to, to_len);
+#endif
+}
+
+static inline int jello_bind(int fd, const struct sockaddr* at, socklen_t at_len) {
+  return (int)jello_sock_check(bind(JELLO_SOCKET(fd), at, at_len));
+}
+
+static inline int jello_listen(int fd, int backlog) {
+  return (int)jello_sock_check(listen(JELLO_SOCKET(fd), backlog));
+}
+
+static inline int jello_getsockname(int fd, struct sockaddr* at, socklen_t* at_len) {
+  return (int)jello_sock_check(getsockname(JELLO_SOCKET(fd), at, at_len));
+}
+
+static inline int jello_sock_option(int fd, int name, int* value) {
+  socklen_t len = sizeof *value;
+  return (int)jello_sock_check(getsockopt(JELLO_SOCKET(fd), SOL_SOCKET, name, (char*)value, &len));
+}
+
+static inline int jello_sock_connect_error(int fd) {
+  int err = 0;
+  if(jello_sock_option(fd, SO_ERROR, &err) < 0) return errno;
+#ifdef _WIN32
+  if(err) {
+    WSASetLastError(err);
+    jello_sock_failed();
+    err = errno;
+  }
+#endif
+  return err;
+}
+
+static inline const char* jello_error_text(int code) {
+#ifdef _WIN32
+  switch(code) {
+    case EWOULDBLOCK: return "Resource temporarily unavailable";
+    case EINPROGRESS: return "Operation now in progress";
+    case EALREADY: return "Operation already in progress";
+    case EPROTOTYPE: return "Protocol wrong type for socket";
+    case ENOPROTOOPT: return "Protocol not available";
+    case EPROTONOSUPPORT: return "Protocol not supported";
+    case EOPNOTSUPP: return "Operation not supported";
+    case EAFNOSUPPORT: return "Address family not supported by protocol";
+    case EADDRINUSE: return "Address already in use";
+    case EADDRNOTAVAIL: return "Cannot assign requested address";
+    case ENETDOWN: return "Network is down";
+    case ENETUNREACH: return "Network is unreachable";
+    case ENETRESET: return "Network dropped connection on reset";
+    case ECONNABORTED: return "Software caused connection abort";
+    case ECONNRESET: return "Connection reset by peer";
+    case ENOBUFS: return "No buffer space available";
+    case EISCONN: return "Transport endpoint is already connected";
+    case ENOTCONN: return "Transport endpoint is not connected";
+    case ETIMEDOUT: return "Connection timed out";
+    case ECONNREFUSED: return "Connection refused";
+    case EHOSTUNREACH: return "No route to host";
+    case EMSGSIZE: return "Message too long";
+    default: break;
+  }
+#endif
+  return strerror(code);
+}
+
+static inline void jello_sock_nodelay(int fd) {
+  int one = 1;
+  setsockopt(JELLO_SOCKET(fd), IPPROTO_TCP, TCP_NODELAY, (const char*)&one, sizeof one);
 }
 
 #endif /* JELLO_INTERNAL_SOCKETS_H */

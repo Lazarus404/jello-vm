@@ -121,6 +121,7 @@ typedef enum jello_trap_code {
   JELLO_TRAP_UNCAUGHT_THROW = 8,
   JELLO_TRAP_STOPPED = 9,        /**< The process was asked to stop. */
   JELLO_TRAP_DEADLOCK = 10,      /**< The process waited for what no process could ever do. */
+  JELLO_TRAP_UNSENDABLE = 11,
   JELLO_TRAP_SEALED = 12,        /**< A write would change a sealed method (jello_object_seal). */
 } jello_trap_code;
 

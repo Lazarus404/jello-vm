@@ -25,6 +25,10 @@
 #endif
 
 #ifdef PROC_TSAN
+void* __tsan_get_current_fiber(void);
+void* __tsan_create_fiber(unsigned flags);
+void __tsan_destroy_fiber(void* fiber);
+void __tsan_switch_to_fiber(void* fiber, unsigned flags);
 #endif
 
 #define PROC_NATIVE_STACK_BYTES (256u * 1024u)
@@ -51,18 +55,27 @@ static inline uint8_t* proc_slot_mid(const proc_pool* pool, uint8_t* slot) {
 }
 
 void proc_stack_switch(void** save, void* load);
+void proc_stack_start(void);
+void* proc_stack_prepare(uint8_t* bottom, uint8_t* top, void (*entry)(void*), void* arg);
 
 typedef struct proc_sched proc_sched;
 
 typedef enum proc_exit {
+  PROC_RUNNING = -1,
+  PROC_NORMAL = 0,        /**< Its body returned. */
   PROC_STOPPED = 1,       /**< It was stopped. */
+  PROC_CRASHED = 2,       /**< It trapped; exit_value holds what an uncaught throw threw. */
+  PROC_PARENT_EXITED = 3, /**< It was stopped because the process owning it finished. */
 } proc_exit;
 
 enum {
   PROC_PARK_NONE,
   PROC_PARK_RECEIVE,
+  PROC_PARK_JOIN,
   PROC_PARK_ALL,
+  PROC_PARK_SLEEP,
   PROC_PARK_NATIVE,
+  PROC_PARK_POLL
 };
 
 #define PROC_TIMER_IDLE UINT32_MAX
@@ -77,12 +90,18 @@ typedef struct proc_timer {
   struct proc_timer* next;
 } proc_timer;
 
+enum { PROC_LEFT_NONE, PROC_LEFT_PARKED, PROC_LEFT_YIELDED, PROC_LEFT_FINISHED };
+
 typedef struct proc_native_call {
   jdll_export_fn fn;
   jdlo_ctx* ctx;
   struct jello_process* p;
   struct proc_native_call* next;
 } proc_native_call;
+
+enum { PROC_FD_READ = 1u, PROC_FD_WRITE = 2u, PROC_FD_CLOSED = 4u };
+
+#define PROC_POLL_BATCH 64u
 
 typedef struct proc_poller {
 #if defined(_WIN32)
@@ -93,9 +112,18 @@ typedef struct proc_poller {
 #endif
 } proc_poller;
 
+typedef struct proc_poll_event {
+  void* token;
+  uint32_t ready;
+} proc_poll_event;
+
+int proc_poller_open(proc_poller* pl);
+
 #if defined(_WIN32)
 #else
+static inline void proc_poller_rearm(proc_poller* pl, int fd, void* token, uint32_t events) {}
 #endif
+uint32_t proc_poller_wait(proc_poller* pl, proc_poll_event* out);
 void proc_poller_wake(proc_poller* pl);
 void proc_poller_close(proc_poller* pl);
 
@@ -115,9 +143,11 @@ static inline int32_t proc_poll_index(int fd) {
 typedef struct proc_poll_desc {
   pthread_mutex_t mu; /**< Guards the rest; taken before any process's `mu`. */
   uint8_t open;       /**< Set from proc_poll_open until proc_poll_close. */
+  uint8_t always;     /**< Set for a descriptor the poller cannot watch, as it is always ready. */
   uint8_t ready;      /**< What it became ready for, with no one waiting, since a wait last found
                        * it so. */
   int fd;             /**< The descriptor it is the record of, while `open`. */
+  struct jello_process* waiters[2]; /**< The process waiting to read, and to write. */
 } proc_poll_desc;
 
 proc_poll_desc* proc_polls_find(proc_sched* s, int fd);
@@ -163,8 +193,16 @@ typedef struct jello_process {
 #endif
   const struct jello_function* body; /**< What it runs, a root of its VM until it starts. */
   struct jello_process* queued;      /**< The next in its run queue. */
+  struct jello_process* live_prev;   /**< In its scheduler's list of unfinished processes. */
   struct jello_process* live_next;
+  struct jello_process* joiners; /**< Processes parked joining it, through join_next. */
+  struct jello_process* joining; /**< The process it is parked joining. */
+  struct jello_process* join_prev;
+  struct jello_process* join_next;
   struct jello_process* owner;    /**< The process whose finishing stops it, unless detached. */
+  struct jello_process* children; /**< The unfinished processes it owns, through sibling_next. */
+  struct jello_process* sibling_prev;
+  struct jello_process* sibling_next;
   vm_parcel* inbox; /**< Messages not yet received, a ring of inbox_cap, a power of two. */
   uint32_t inbox_head;
   uint32_t inbox_len;
@@ -174,7 +212,9 @@ typedef struct jello_process {
   uint8_t off;
   _Atomic uint8_t stopping; /**< Set under `mu` by proc_stop, to the first reason it was given. */
   _Atomic uint8_t done;     /**< Set, once it has finished, after how it did is recorded. */
+  uint8_t closed;
   uint8_t cleaning; /**< Its own: set while its cleanups run, when a stop waits, a park traps. */
+  uint8_t polled;   /**< What the file descriptor it waits on is ready for, PROC_FD_* bits. */
   uint8_t pinned;   /**< Run only by scheduler 0: the main process, and those spawned on main. */
   struct proc_socket* sockets; /**< The sockets it owns, closed as it finishes; see net.c. */
   proc_timer deadline;         /**< The deadline of its park, while it has one. */
@@ -185,6 +225,7 @@ typedef struct jello_process {
   jello_trap_code trap;        /**< Why it trapped, once it has finished. */
   jello_value exit_value;
   vm_parcel exit;
+  jello_numeric_result result; /**< Its body's result, once it has finished normally. */
 } jello_process;
 
 struct proc_sched {
@@ -195,6 +236,7 @@ struct proc_sched {
   uint8_t main_idle;
   _Atomic uint8_t main_waiting; /**< Whether scheduler 0 waits for work, the main process parked. */
   _Atomic uint8_t shutdown;     /**< Set once every process has finished, to end the threads. */
+  uint8_t start_failed;         /**< Set once a scheduler's thread has failed to start. */
   _Atomic uint32_t idle;        /**< Schedulers other than 0 waiting for work. */
   _Atomic uint64_t idle_mask[PROC_IDLE_WORDS];
   _Atomic uint32_t spinning;
@@ -206,6 +248,7 @@ struct proc_sched {
   jello_process* live;  /**< The unfinished processes, the main process aside. */
   proc_timer** timers;  /**< A binary min-heap by due time. */
   uint32_t ntimers;
+  uint32_t timers_cap;
   _Atomic uint64_t next_due; /**< The first timer's due time, or 0 when there is none. */
   uint64_t epoch;            /**< When it started, by proc_now. */
 
@@ -230,8 +273,17 @@ struct proc_sched {
   proc_pool pool;            /**< Slots of the default sizes. */
   pthread_mutex_t pool_lock; /**< Guards every pool its processes' slots come from. */
 };
+
+static inline int proc_finished(const jello_process* p) {
+  return atomic_load_explicit(&p->done, memory_order_acquire);
+}
+
+#define PROC_SPAWN_DETACHED 1u
+#define PROC_SPAWN_ON_MAIN 2u
+void proc_socket_moved(void* payload, const struct jello_vm* vm);
 void proc_retain(jello_process* p);
 uint64_t proc_now(void);
+uint64_t proc_deadline(int32_t ms);
 void proc_timer_release(proc_timer* t);
 
 static inline void proc_call_quiescent(struct jello_vm* vm, jdll_export_fn fn, jdlo_ctx* ctx) {
@@ -243,6 +295,8 @@ static inline void proc_call_quiescent(struct jello_vm* vm, jdll_export_fn fn, j
 typedef struct proc_reply {
   jdl_refs refs;   /**< The handles holding it, in any process. */
   vm_parcel value; /**< What was sent, once `sent`, for each holder to read a copy of. */
+  uint8_t sent;
+  jello_process* waiter; /**< The process waiting for it, while one does. */
 } proc_reply;
 
 #endif /* JELLO_PROC_INTERNAL_H */

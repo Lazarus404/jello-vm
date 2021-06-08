@@ -29,6 +29,38 @@
 
 #else
 
+static int change(proc_poller* pl, int fd, uint16_t flags, void* token) {
+  static const int16_t filters[2] = {EVFILT_READ, EVFILT_WRITE};
+  struct kevent evs[2];
+  for(int i = 0; i < 2; i++) EV_SET(&evs[i], (uintptr_t)fd, filters[i], flags, 0, 0, token);
+  return kevent(pl->fd, evs, 2, NULL, 0, NULL);
+}
+
+int proc_poller_open(proc_poller* pl) {
+  pl->fd = kqueue();
+  if(pl->fd < 0) return -1;
+  struct kevent ev;
+  EV_SET(&ev, 0, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, NULL);
+  if(fcntl(pl->fd, F_SETFD, FD_CLOEXEC) != 0 || kevent(pl->fd, &ev, 1, NULL, 0, NULL) != 0) {
+    int err = errno;
+    close(pl->fd);
+    errno = err;
+    return -1;
+  }
+  return 0;
+}
+
+uint32_t proc_poller_wait(proc_poller* pl, proc_poll_event* out) {
+  struct kevent evs[PROC_POLL_BATCH];
+  int n = kevent(pl->fd, NULL, 0, evs, (int)PROC_POLL_BATCH, NULL);
+  if(n < 0) return 0;
+  for(int i = 0; i < n; i++) {
+    uint32_t ready = evs[i].filter == EVFILT_READ ? PROC_FD_READ : PROC_FD_WRITE;
+    out[i] = (proc_poll_event){evs[i].filter == EVFILT_USER ? NULL : evs[i].udata, ready};
+  }
+  return (uint32_t)n;
+}
+
 void proc_poller_wake(proc_poller* pl) {
   struct kevent ev;
   EV_SET(&ev, 0, EVFILT_USER, 0, NOTE_TRIGGER, 0, NULL);

@@ -35,9 +35,12 @@
 #ifdef __linux__
 #include <sched.h>
 #endif
+
+extern char** environ;
 #endif
 
 #ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0 /* Apple's sockets are made SO_NOSIGPIPE instead; Windows has no SIGPIPE.   \
                         */
 #endif
 
@@ -112,6 +115,27 @@ static inline int jello_pages_commit(void* mem, size_t bytes) {
   return VirtualAlloc(mem, bytes, MEM_COMMIT, PAGE_READWRITE) != NULL;
 #else
   (void)mem;
+  (void)bytes;
+  return 1;
+#endif
+}
+
+static inline int jello_pages_guard(void* mem, size_t bytes) {
+#ifdef _WIN32
+  (void)mem;
+  (void)bytes;
+  return 1;
+#else
+  return mprotect(mem, bytes, PROT_NONE) == 0;
+#endif
+}
+
+static inline int jello_pages_stack(void* page, size_t bytes) {
+#ifdef _WIN32
+  return jello_pages_commit(page, bytes) &&
+         VirtualAlloc((char*)page - bytes, bytes, MEM_COMMIT, PAGE_READWRITE | PAGE_GUARD) != NULL;
+#else
+  (void)page;
   (void)bytes;
   return 1;
 #endif
@@ -207,6 +231,32 @@ static inline int jello_mkdir(const char* path) {
   return mkdir(path);
 #else
   return mkdir(path, 0777);
+#endif
+}
+
+static inline int jello_rename_replace(const char* from, const char* to) {
+#ifdef _WIN32
+  if(MoveFileExA(from, to, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return 0;
+  errno = GetLastError() == ERROR_ACCESS_DENIED ? EACCES : EIO;
+  return -1;
+#else
+  return rename(from, to);
+#endif
+}
+
+static inline int jello_setenv(const char* name, const char* value) {
+#ifdef _WIN32
+  return _putenv_s(name, value) == 0 ? 0 : -1;
+#else
+  return setenv(name, value, 1);
+#endif
+}
+
+static inline int jello_unsetenv(const char* name) {
+#ifdef _WIN32
+  return _putenv_s(name, "") == 0 ? 0 : -1;
+#else
+  return unsetenv(name);
 #endif
 }
 

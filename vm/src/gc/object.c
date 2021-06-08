@@ -224,6 +224,10 @@ jello_object* jello_object_copy(jello_vm* vm, const jello_object* src) {
   return copy_object(vm, src, 1);
 }
 
+jello_object* vm_object_clone(jello_vm* vm, const jello_object* src) {
+  return copy_object(vm, src, 0);
+}
+
 static int atom_order(const void* a, const void* b) {
   uint32_t x = *(const uint32_t*)a, y = *(const uint32_t*)b;
   return (x > y) - (x < y);

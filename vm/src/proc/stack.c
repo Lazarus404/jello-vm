@@ -40,3 +40,39 @@ void proc_pool_free(proc_pool* pool) {
   pool->nslabs = 0;
   pool->free = pool->fresh = pool->fresh_end = NULL;
 }
+
+void* proc_stack_prepare(uint8_t* bottom, uint8_t* top, void (*entry)(void*), void* arg) {
+  void (*start)(void) = proc_stack_start;
+#if defined(_WIN32) && defined(__aarch64__)
+  uint64_t frame[24] = {0};
+  memcpy(&frame[0], &entry, sizeof entry);
+  memcpy(&frame[1], &arg, sizeof arg);
+  memcpy(&frame[11], &start, sizeof start);
+#elif defined(_WIN32) && defined(__x86_64__)
+  uint64_t frame[32] = {0};
+  memcpy(&frame[25], &arg, sizeof arg);
+  memcpy(&frame[26], &entry, sizeof entry);
+  memcpy(&frame[31], &start, sizeof start);
+#elif defined(__aarch64__)
+  (void)bottom;
+  uint64_t frame[20] = {0};
+  memcpy(&frame[0], &entry, sizeof entry);
+  memcpy(&frame[1], &arg, sizeof arg);
+  memcpy(&frame[11], &start, sizeof start);
+#elif defined(__x86_64__)
+  (void)bottom;
+  uint64_t frame[7] = {0};
+  memcpy(&frame[2], &arg, sizeof arg);
+  memcpy(&frame[3], &entry, sizeof entry);
+  memcpy(&frame[6], &start, sizeof start);
+#endif
+#ifdef _WIN32
+  uint8_t* limit = (uint8_t*)((uintptr_t)(top - 1) & ~(uintptr_t)(jello_page_size() - 1u));
+  memcpy(&frame[20], &top, sizeof top);
+  memcpy(&frame[21], &limit, sizeof limit);
+  memcpy(&frame[22], &bottom, sizeof bottom);
+#endif
+  uint8_t* sp = top - sizeof frame;
+  memcpy(sp, frame, sizeof frame);
+  return sp;
+}

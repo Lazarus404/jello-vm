@@ -39,6 +39,8 @@ uint64_t proc_now(void) {
   return (uint64_t)t.tv_sec * 1000000000u + (uint64_t)t.tv_nsec;
 }
 
+uint64_t proc_deadline(int32_t ms) { return ms < 0 ? 0 : proc_now() + (uint64_t)ms * 1000000u; }
+
 void proc_retain(jello_process* p) { atomic_fetch_add_explicit(&p->refs, 1, memory_order_relaxed); }
 
 void proc_timer_release(proc_timer* t) {

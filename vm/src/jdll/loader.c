@@ -142,6 +142,10 @@ void jello_jdll_unload(jello_jdll_handle* h) {
   free(h);
 }
 
+void* jello_jdll_symbol(const jello_jdll_handle* h, const char* name) {
+  return h && h->dl ? jello_dl_symbol(h->dl, name) : NULL;
+}
+
 const jello_jdll_export* jello_jdll_find_export(const jello_jdll_handle* h, const char* name) {
   if(!h || !h->manifest) return NULL;
   for(uint32_t i = 0; i < h->manifest->nexports; i++) {

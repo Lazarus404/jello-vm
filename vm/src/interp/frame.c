@@ -42,6 +42,16 @@ static frame_layout* find_layout(jello_vm* vm, const jello_bc_function* f) {
   return NULL;
 }
 
+void vm_share_layouts(jello_vm* vm, const jello_vm* from) {
+  vm_free_layouts(vm);
+  vm->frame_layouts = from->frame_layouts;
+  vm->frame_layouts_len = from->frame_layouts_len;
+  vm->frame_layouts_cap = from->frame_layouts_len;
+  vm->jit_layout_by_func = from->jit_layout_by_func;
+  vm->jit_layout_by_func_len = from->jit_layout_by_func_len;
+  vm->layouts_shared = 1;
+}
+
 void vm_free_layouts(jello_vm* vm) {
   if(!vm->layouts_shared) {
     for(uint32_t i = 0; i < vm->frame_layouts_len; i++) {

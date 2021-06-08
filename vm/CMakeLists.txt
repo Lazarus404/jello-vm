@@ -31,7 +31,10 @@ add_library(jello_vm STATIC
   src/interp/ops_exc.c
   src/value/value.c
   src/gc/gc.c
+  src/gc/copy.c
   src/gc/object.c
+  src/proc/image.c
+  src/proc/natives.c
   src/proc/net.c
   src/proc/poll.c
   src/proc/process.c
