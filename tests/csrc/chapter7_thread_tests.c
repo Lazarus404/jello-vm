@@ -589,24 +589,28 @@ static jello_bc_module* build_std_argv_count_module(jello_jdll_handle* h) {
  * not roughly one time in thirty. */
 static void test_std_jdll_get_env_and_argv(jello_jdll_handle* std_h) {
   printf("== fixture: std JDLL get_env + argv ==\n");
-  setenv("JELLO_CHAPTER7_TEST_VAR", "chapter7", 1);
+  const char* env_value = "checked";
+  jello_setenv("JELLO_THREAD_TEST_VAR", env_value);
 
   jello_vm* vm = jello_vm_create();
-  jello_bc_module* m_env = build_std_get_env_module(std_h, "JELLO_CHAPTER7_TEST_VAR", 'c');
-  jello_numeric_result out;
-  jello_exec_status st = jello_vm_exec_numeric(vm, m_env, &out);
-  int env_ok = (st == JELLO_EXEC_OK && out.kind == JELLO_NUM_BOOL && out.as.b == 1);
-  printf("  get_env_ok=%d\n", env_ok);
-  assert(env_ok && "get_env must return the value this test just set via setenv");
-  free_std_module(m_env);
+  for(int iter = 0; iter < 20; iter++) {
+    jello_bc_module* m_env = build_std_get_env_module(std_h, "JELLO_THREAD_TEST_VAR", env_value[0]);
+    jello_numeric_result out;
+    jello_exec_status st = jello_vm_exec_numeric(vm, m_env, &out);
+    int env_ok = (st == JELLO_EXEC_OK && out.kind == JELLO_NUM_BOOL && out.as.b == 1);
+    if(iter == 0) printf("  get_env_ok=%d\n", env_ok);
+    assert(env_ok && "get_env must return the value this test just set via setenv");
+    free_std_module(m_env);
 
-  jello_bc_module* m_argv = build_std_argv_count_module(std_h);
-  st = jello_vm_exec_numeric(vm, m_argv, &out);
-  int argv_ok = (st == JELLO_EXEC_OK && out.kind == JELLO_NUM_I32 && out.as.i32 >= 1);
-  printf("  argv_count=%d argv_ok=%d\n", (st == JELLO_EXEC_OK) ? out.as.i32 : -1, argv_ok);
-  assert(argv_ok && "argv_count must be at least 1 (argv[0], the process's own path)");
-  free_std_module(m_argv);
-
+    jello_bc_module* m_argv = build_std_argv_count_module(std_h);
+    st = jello_vm_exec_numeric(vm, m_argv, &out);
+    int argv_ok = (st == JELLO_EXEC_OK && out.kind == JELLO_NUM_I32 && out.as.i32 >= 1);
+    if(iter == 0) printf("  argv_count=%d argv_ok=%d\n", (st == JELLO_EXEC_OK) ? out.as.i32 : -1, argv_ok);
+    assert(argv_ok && "argv_count must be at least 1 (argv[0], the process's own path) -- "
+                       "a failure here on iteration > 0 is the frame_layout aliasing bug "
+                       "this loop exists to catch reliably, not a fluke");
+    free_std_module(m_argv);
+  }
   jello_vm_destroy(vm);
   printf("  PASS\n");
 }

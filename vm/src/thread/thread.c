@@ -156,10 +156,21 @@ static void reductions_refill(jello_vm* vm) {
   vm->reductions = (int32_t)window;
 }
 
+static uint32_t reductions_used(const jello_vm* vm) {
+  return vm->reduction_window - (vm->reductions > 0 ? (uint32_t)vm->reductions : 0u);
+}
+
 void jello_vm_set_fuel(jello_vm* vm, uint64_t fuel) {
   if(!vm) return;
   vm->fuel_limit = fuel;
   vm->fuel_remaining = fuel;
+  reductions_refill(vm);
+}
+
+void vm_inherit_fuel(jello_vm* vm, const jello_vm* from) {
+  uint32_t used = reductions_used(from);
+  vm->fuel_limit = from->fuel_limit;
+  vm->fuel_remaining = from->fuel_remaining > used ? from->fuel_remaining - used : 0u;
   reductions_refill(vm);
 }
 

@@ -39,6 +39,7 @@ add_library(jello_vm STATIC
   src/proc/poll.c
   src/proc/process.c
   src/proc/stack.c
+  src/proc/switch.S
   src/thread/thread.c
   src/jdll/loader.c
   src/jdll/marshal.c
@@ -78,7 +79,7 @@ else()
   target_sources(jello_vm PRIVATE src/jit/none.c)
 endif()
 if(CMAKE_C_COMPILER_TARGET)
-  set_property(SOURCE tools/jelloc_image.S APPEND_STRING PROPERTY
+  set_property(SOURCE src/proc/switch.S tools/jelloc_image.S APPEND_STRING PROPERTY
     COMPILE_FLAGS " --target=${CMAKE_C_COMPILER_TARGET}")
 endif()
 target_include_directories(jello_vm PUBLIC src/include)

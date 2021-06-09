@@ -47,6 +47,7 @@ typedef struct proc_pool {
 } proc_pool;
 
 proc_pool proc_pool_make(uint32_t native_bytes, uint32_t frame_bytes);
+uint8_t* proc_slot_take(proc_pool* pool);
 void proc_slot_give(proc_pool* pool, uint8_t* slot);
 void proc_pool_free(proc_pool* pool);
 
@@ -118,11 +119,14 @@ typedef struct proc_poll_event {
 } proc_poll_event;
 
 int proc_poller_open(proc_poller* pl);
+int proc_poller_watch(proc_poller* pl, int fd, void* token);
 
 #if defined(_WIN32)
 #else
 static inline void proc_poller_rearm(proc_poller* pl, int fd, void* token, uint32_t events) {}
 #endif
+
+void proc_poller_unwatch(proc_poller* pl, int fd);
 uint32_t proc_poller_wait(proc_poller* pl, proc_poll_event* out);
 void proc_poller_wake(proc_poller* pl);
 void proc_poller_close(proc_poller* pl);

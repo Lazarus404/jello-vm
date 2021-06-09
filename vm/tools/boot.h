@@ -18,4 +18,9 @@
 
 int jello_boot_probe(const char* path, uint8_t** data, size_t* size);
 
+int jello_boot_create(const char* vm, const uint8_t* module, size_t size, const char* out,
+                      char* error, size_t error_size);
+
+int jello_boot_bundle(const jello_bc_module* m, const char* out, char* error, size_t error_size);
+
 #endif

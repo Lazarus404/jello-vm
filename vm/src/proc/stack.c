@@ -17,6 +17,10 @@ static uint8_t* free_link(const proc_pool* pool, uint8_t* slot) {
   return proc_slot_mid(pool, slot) - sizeof(uint8_t*);
 }
 
+static uint8_t* stacks_page(const proc_pool* pool, uint8_t* slot) {
+  return proc_slot_mid(pool, slot) - pool->guard_bytes / 2u;
+}
+
 static size_t slab_bytes(const proc_pool* pool) {
   return pool->guard_bytes + PROC_SLAB_SLOTS * ((size_t)pool->native_bytes + pool->frame_bytes);
 }
@@ -26,6 +30,33 @@ proc_pool proc_pool_make(uint32_t native_bytes, uint32_t frame_bytes) {
   proc_pool p = {
       native_bytes - page / 2u, frame_bytes + page / 2u, page, NULL, NULL, NULL, NULL, 0};
   return p;
+}
+
+uint8_t* proc_slot_take(proc_pool* pool) {
+  uint8_t* slot = pool->free;
+  if(slot) {
+    memcpy(&pool->free, free_link(pool, slot), sizeof pool->free);
+    return slot;
+  }
+  if(pool->fresh == pool->fresh_end) {
+    size_t bytes = slab_bytes(pool);
+    uint8_t** slabs = (uint8_t**)realloc(pool->slabs, sizeof(uint8_t*) * (pool->nslabs + 1u));
+    if(!slabs) return NULL;
+    pool->slabs = slabs;
+    void* mem = jello_pages_reserve(bytes);
+    if(!mem) return NULL;
+    if(!jello_pages_guard(mem, pool->guard_bytes)) {
+      jello_pages_unmap(mem, bytes);
+      return NULL;
+    }
+    pool->slabs[pool->nslabs++] = (uint8_t*)mem;
+    pool->fresh = (uint8_t*)mem + pool->guard_bytes;
+    pool->fresh_end = (uint8_t*)mem + bytes;
+  }
+  slot = pool->fresh;
+  if(!jello_pages_stack(stacks_page(pool, slot), pool->guard_bytes)) return NULL;
+  pool->fresh += (size_t)pool->frame_bytes + pool->native_bytes;
+  return slot;
 }
 
 void proc_slot_give(proc_pool* pool, uint8_t* slot) {

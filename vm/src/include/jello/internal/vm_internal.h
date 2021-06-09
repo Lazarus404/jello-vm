@@ -718,6 +718,7 @@ void vm_wait_for_resume(jello_vm* vm);
 void vm_leave_quiescent(jello_vm* vm);
 void vm_safepoint_check(jello_vm* vm);
 int vm_fuel_charge(jello_vm* vm);
+void vm_inherit_fuel(jello_vm* vm, const jello_vm* from);
 
 int vm_heap_stop_the_world(jello_vm* vm);
 void vm_heap_lock(jello_vm* vm);

@@ -31,7 +31,9 @@
 #include <unistd.h>
 
 #define PROC_CLEANUP_REDUCTIONS 100000u
+#define PROC_JIT_ENTRY_MARGIN (16u * 1024u)
 #define PROC_NEXT_STREAK 16u
+#define PROC_SPIN_NS 20000u
 
 uint64_t proc_now(void) {
   struct timespec t;

@@ -50,6 +50,19 @@ int proc_poller_open(proc_poller* pl) {
   return 0;
 }
 
+int proc_poller_watch(proc_poller* pl, int fd, void* token) {
+  struct stat st;
+  if(fstat(fd, &st) != 0) return -1;
+  if(S_ISREG(st.st_mode)) return 1;
+  if(change(pl, fd, EV_ADD | EV_CLEAR, token) == 0) return 0;
+  int err = errno;
+  change(pl, fd, EV_DELETE, NULL);
+  errno = err;
+  return -1;
+}
+
+void proc_poller_unwatch(proc_poller* pl, int fd) { change(pl, fd, EV_DELETE, NULL); }
+
 uint32_t proc_poller_wait(proc_poller* pl, proc_poll_event* out) {
   struct kevent evs[PROC_POLL_BATCH];
   int n = kevent(pl->fd, NULL, 0, evs, (int)PROC_POLL_BATCH, NULL);
