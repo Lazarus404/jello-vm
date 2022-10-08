@@ -174,6 +174,18 @@ void vm_inherit_fuel(jello_vm* vm, const jello_vm* from) {
   reductions_refill(vm);
 }
 
+void jello_vm_set_program_args(jello_vm* vm, int32_t argc, const char* const* argv) {
+  if(!vm) return;
+  vm->heap->program_argc = argc;
+  vm->heap->program_argv = argv;
+}
+
+void jello_vm_set_image(jello_vm* vm, const uint8_t* data, size_t size) {
+  if(!vm) return;
+  vm->heap->image = data;
+  vm->heap->image_size = size;
+}
+
 void jello_vm_set_max_bytes_len(jello_vm* vm, uint32_t max_len) {
   if(!vm) return;
   vm->max_bytes_len = max_len;
@@ -186,6 +198,27 @@ uint32_t jello_vm_last_trap_pc(const jello_vm* vm) {
 uint32_t jello_vm_last_trap_func_index(const jello_vm* vm) {
   return vm ? vm->trap_func_index : 0;
 }
+
+const char* jello_trap_code_name(jello_trap_code tc) {
+  switch(tc) {
+    case JELLO_TRAP_NONE: return "NONE";
+    case JELLO_TRAP_ARITHMETIC: return "ARITHMETIC";
+    case JELLO_TRAP_STACK_OVERFLOW: return "STACK_OVERFLOW";
+    case JELLO_TRAP_NULL_DEREF: return "NULL_DEREF";
+    case JELLO_TRAP_BOUNDS: return "BOUNDS";
+    case JELLO_TRAP_TYPE_MISMATCH: return "TYPE_MISMATCH";
+    case JELLO_TRAP_FUEL: return "FUEL";
+    case JELLO_TRAP_LIMIT: return "LIMIT";
+    case JELLO_TRAP_UNCAUGHT_THROW: return "UNCAUGHT_THROW";
+    case JELLO_TRAP_STOPPED: return "STOPPED";
+    case JELLO_TRAP_DEADLOCK: return "DEADLOCK";
+    case JELLO_TRAP_UNSENDABLE: return "UNSENDABLE";
+    case JELLO_TRAP_SEALED: return "SEALED";
+    default: return "UNKNOWN";
+  }
+}
+
+const char* jello_vm_last_trap_detail(const jello_vm* vm) { return vm ? vm->trap_detail : ""; }
 
 void jello_vm_blocking(jello_vm* vm, int is_blocking) {
   if(!vm) abort();

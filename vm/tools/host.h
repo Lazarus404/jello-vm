@@ -13,6 +13,9 @@
 extern const uint8_t jello_jelloc_image[];
 extern const uint8_t jello_jelloc_image_end[];
 
+void jello_print_host_result(const jello_bc_module* m, const jello_numeric_result* r, FILE* out,
+                             int bytes_newline);
+
 typedef struct jello_host_options {
   const char* tool; /**< Names the host in its messages; "jello: ...". */
   int jit;          /**< Create a JIT module for the run. A build without the JIT interprets,

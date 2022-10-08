@@ -107,7 +107,7 @@ endif()
 install(FILES src/include/jello.h DESTINATION include)
 install(FILES src/include/jello/jdll.h DESTINATION include/jello)
 
-add_library(jello_host STATIC tools/boot.c tools/deps.c)
+add_library(jello_host STATIC tools/host.c tools/boot.c tools/deps.c)
 target_include_directories(jello_host PUBLIC tools)
 target_link_libraries(jello_host PUBLIC jello_vm)
 jello_enable_warnings(jello_host)

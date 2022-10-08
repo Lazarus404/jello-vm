@@ -242,6 +242,8 @@ typedef struct jello_heap {
 
   int32_t program_argc; /**< From jello_vm_set_program_args. */
   const char* const* program_argv;
+  const uint8_t* image; /**< From jello_vm_set_image; NULL when unset. */
+  size_t image_size;
 } jello_heap;
 
 typedef struct jello_trap_trace {
@@ -336,6 +338,14 @@ static inline void* vm_global_ptr(const jello_bc_module* m, const uint64_t* glob
   void* p;
   memcpy(&p, &globals[g], sizeof p);
   return p;
+}
+
+static inline const jello_bytes* vm_result_bytes(const jello_numeric_result* r) {
+  const void* p = r->kind == JELLO_NUM_PTR                              ? r->as.ptr
+                  : r->kind == JELLO_NUM_DYN && jello_is_ptr(r->as.dyn) ? jello_as_ptr(r->as.dyn)
+                                                                        : NULL;
+  return p && ((const jello_obj_header*)p)->kind == (uint8_t)JELLO_OBJ_BYTES ? (const jello_bytes*)p
+                                                                             : NULL;
 }
 
 static inline void vm_enter_module(jello_vm* vm, const jello_bc_module* m) {

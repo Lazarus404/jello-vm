@@ -19,6 +19,7 @@
 enum {
   NET_TLS_WANT_READ = -1,  /**< To go on once its socket can be read. */
   NET_TLS_WANT_WRITE = -2, /**< To go on once its socket can be written. */
+  NET_TLS_FAILED = -3,     /**< Failed, for the reason `error` gives. */
   NET_TLS_ERRORS = 200000, /**< Added to the negated Mbed TLS error. */
 };
 
@@ -28,7 +29,9 @@ typedef struct net_tls net_tls;
 
 typedef struct net_tls_ops {
   uint32_t version; /**< NET_TLS_OPS_VERSION. */
+  const jello_jdll_handle_class* config_class;
   net_tls* (*open)(void* config, int fd, const uint8_t* host, uint32_t len, int32_t* err);
+  int (*handshake)(net_tls* s);
   int (*read)(net_tls* s, uint8_t* buf, uint32_t max);
   int (*write)(net_tls* s, const uint8_t* data, uint32_t len);
   int32_t (*error)(const net_tls* s);

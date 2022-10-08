@@ -16,3 +16,15 @@
 #include <string.h>
 
 enum { IMAGE_RUN_RESULT, IMAGE_RUN_FAILED, IMAGE_RUN_OUT_OF_FUEL };
+
+#define IMAGE_RUN_STACK (16u << 20)
+
+typedef struct image_run {
+  const uint8_t* image;
+  size_t size;
+  const char* const* argv;
+  int32_t argc;
+  uint64_t fuel;
+  uint8_t* out;
+  size_t out_len;
+} image_run;

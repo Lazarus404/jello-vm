@@ -1565,50 +1565,6 @@ static const char* trap_code_name(jello_trap_code tc) {
   }
 }
 
-static void print_host_result(const jello_numeric_result* r, FILE* out) {
-  switch(r->kind) {
-    case JELLO_NUM_VOID: fputs("null\n", out); break;
-    case JELLO_NUM_BOOL: fputs(r->as.b ? "true\n" : "false\n", out); break;
-    case JELLO_NUM_I32: fprintf(out, "%d\n", r->as.i32); break;
-    case JELLO_NUM_I64: fprintf(out, "%lld\n", (long long)r->as.i64); break;
-    case JELLO_NUM_F32: fprintf(out, "%g\n", (double)r->as.f32); break;
-    case JELLO_NUM_F64: fprintf(out, "%g\n", r->as.f64); break;
-    case JELLO_NUM_PTR: {
-      void* p = r->as.ptr;
-      if(!p) { fputs("null\n", out); break; }
-      const jello_obj_header* h = (const jello_obj_header*)p;
-      if(h->kind == (uint8_t)JELLO_OBJ_BYTES) {
-        const jello_bytes* b = (const jello_bytes*)p;
-        fwrite(b->data, 1, b->length, out);
-        fputc('\n', out);
-      } else {
-        fprintf(out, "ptr(%p)\n", p);
-      }
-      break;
-    }
-    case JELLO_NUM_DYN: {
-      jello_value v = r->as.dyn;
-      if(jello_is_null(v)) fputs("null\n", out);
-      else if(jello_is_bool(v)) fputs(jello_as_bool(v) ? "true\n" : "false\n", out);
-      else if(jello_is_i32(v)) fprintf(out, "%d\n", jello_as_i32(v));
-      else if(jello_is_atom(v)) fprintf(out, "atom(%u)\n", jello_as_atom(v));
-      else if(jello_is_ptr(v) && jello_as_ptr(v)) {
-        const jello_obj_header* h = (const jello_obj_header*)jello_as_ptr(v);
-        if(h->kind == (uint8_t)JELLO_OBJ_BYTES) {
-          const jello_bytes* b = (const jello_bytes*)jello_as_ptr(v);
-          fwrite(b->data, 1, b->length, out);
-          fputc('\n', out);
-        } else {
-          fprintf(out, "ptr(%p)\n", (void*)jello_as_ptr(v));
-        }
-      } else {
-        fputs("<value>\n", out);
-      }
-      break;
-    }
-  }
-}
-
 static void print_numeric_result(const jello_numeric_result* r, FILE* out) {
   switch(r->kind) {
     case JELLO_NUM_VOID: fprintf(out, "RESULT kind=VOID\n"); break;
@@ -1667,7 +1623,7 @@ static int cmd_run(const char* in_path, int repeat, int gc_stats, uint64_t fuel,
   clock_t t1 = clock();
 
   if(st == JELLO_EXEC_OK) {
-    if(host_print) print_host_result(&result, stdout);
+    if(host_print) jello_print_host_result(m, &result, stdout, 1);
     else print_numeric_result(&result, stdout);
   } else {
     if(host_print) {

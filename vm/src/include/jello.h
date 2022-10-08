@@ -126,8 +126,11 @@ typedef enum jello_trap_code {
 } jello_trap_code;
 
 jello_trap_code jello_vm_last_trap_code(const jello_vm* vm);
+const char* jello_trap_code_name(jello_trap_code tc);
 void jello_vm_set_fuel(jello_vm* vm, uint64_t fuel);
 void jello_vm_set_max_bytes_len(jello_vm* vm, uint32_t max_len);
+void jello_vm_set_program_args(jello_vm* vm, int32_t argc, const char* const* argv);
+void jello_vm_set_image(jello_vm* vm, const uint8_t* data, size_t size);
 void jello_vm_keep_processes(jello_vm* vm, int keep);
 uint32_t jello_vm_last_trap_pc(const jello_vm* vm);
 uint32_t jello_vm_last_trap_func_index(const jello_vm* vm);
@@ -185,6 +188,8 @@ static inline void* jello_as_ptr(jello_value v) {
 static inline jello_value jello_from_ptr(const void* p) {
   return (jello_value)(uintptr_t)p;
 }
+
+const char* jello_vm_last_trap_detail(const jello_vm* vm);
 
 typedef enum jello_numeric_kind {
   JELLO_NUM_VOID = 0,
