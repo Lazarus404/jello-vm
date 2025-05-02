@@ -48,6 +48,30 @@ uint32_t vm_shared_binaries_live(void) {
   return atomic_load_explicit(&shared_live, memory_order_relaxed);
 }
 
+/** The bytes a shared binary of `length` bytes takes, its block's headers included. */
+static size_t shared_size(uint32_t length) {
+  return sizeof(shared_head) + sizeof(jello_bytes) + (size_t)length;
+}
+
+static shared_head* shared_head_of(jello_bytes* bin) {
+  return (shared_head*)((uint8_t*)hdr_of(bin) - offsetof(shared_head, hdr));
+}
+
+/** What a Bytes holding shared binary `bin` counts live for it: the binary's whole block. */
+static uint32_t shared_native(const jello_bytes* bin) {
+  size_t n = shared_size(bin->length);
+  return n > UINT32_MAX ? UINT32_MAX : (uint32_t)n;
+}
+
+/** Drops a reference to shared binary `bin`, freeing it with the last. One that sees itself the
+ * only holder frees it without the atomic update, as nobody else can take a reference. */
+static void shared_release(jello_bytes* bin) {
+  shared_head* s = shared_head_of(bin);
+  if(__atomic_load_n(&s->refs, __ATOMIC_ACQUIRE) != 1u && !jdl_release(s)) return;
+  atomic_fetch_sub_explicit(&shared_live, 1u, memory_order_relaxed);
+  free(s);
+}
+
 /** Live bytes before the first collection, and the least the threshold ever falls to. */
 #define GC_MIN_THRESHOLD (4u * 1024u * 1024u)
 /** The same for a process's space, smaller, as there may be many. */
@@ -119,6 +143,25 @@ void jello_vm_gc_stats(const jello_vm* vm, uint32_t* out_live_bytes, uint32_t* o
   if(out_live_bytes) *out_live_bytes = vm->heap->gc_bytes_live;
   if(out_collections) *out_collections = vm->heap->gc_collections;
   if(out_pause_ms) *out_pause_ms = vm->heap->gc_pause_ms;
+}
+
+static void out_of_memory(size_t size) {
+  fprintf(stderr, "jello: out of memory: cannot allocate %zu bytes\n", size);
+  abort();
+}
+
+static jello_gc_hdr* free_class_pop(jello_space* space, int ci) {
+  jello_gc_hdr* h = ci >= 0 ? space->free_classes[ci] : NULL;
+  if(h) space->free_classes[ci] = h->next;
+  return h;
+}
+
+static void space_lock(jello_vm* vm, int shared) {
+  if(shared) vm_heap_lock(vm);
+}
+
+static void space_unlock(jello_vm* vm, int shared) {
+  if(shared) pthread_mutex_unlock(&vm->heap->alloc_lock);
 }
 
 void vm_parcel_join(vm_parcel* into, vm_parcel* from) {
@@ -364,7 +407,7 @@ void jello_gc_collect(jello_vm* vm) {
     jello_gc_hdr* next = h->next;
     if(!h->marked) {
       void* obj = obj_of(h);
-      heap->gc_freed_objects++;
+      space->freed_objects++;
       *prev = next;
       destroy_object(obj);
       int ci = size_class_index(h->total_size);
@@ -386,7 +429,8 @@ void jello_gc_collect(jello_vm* vm) {
   heap->gc_next_collect = (live_bytes < 256u * 1024u) ? (512u * 1024u) : (live_bytes * 2u);
 
   clock_gettime(CLOCK_MONOTONIC, &t1);
-  heap->gc_pause_ms += (double)(t1.tv_sec - t0.tv_sec) * 1000.0 + (double)(t1.tv_nsec - t0.tv_nsec) / 1e6;
+  space->pause_ms +=
+      (double)(t1.tv_sec - t0.tv_sec) * 1000.0 + (double)(t1.tv_nsec - t0.tv_nsec) / 1e6;
 
   vm_heap_resume_the_world(vm);
 }
@@ -432,6 +476,14 @@ jello_bytes* jello_bytes_join(jello_vm* vm, jello_bytes* const* parts, uint32_t 
     at += parts[i]->length;
   }
   return dst;
+}
+
+static jello_bytes* bytes_dup(jello_vm* vm, const jello_bytes* b, uint32_t start, uint32_t length,
+                              uint32_t type_id) {
+  jello_bytes* n = jello_bytes_new(vm, length);
+  n->h.type_id = type_id;
+  if(length) memcpy(n->data, b->data + start, length);
+  return n;
 }
 
 jello_box_i64* jello_box_i64_new(jello_vm* vm, int64_t v) {

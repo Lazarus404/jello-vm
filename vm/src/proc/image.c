@@ -28,3 +28,31 @@ typedef struct image_run {
   uint8_t* out;
   size_t out_len;
 } image_run;
+
+static void give(image_run* r, int tag, const void* data, size_t n) {
+  r->out = (uint8_t*)malloc(n + 1u);
+  r->out_len = r->out ? n + 1u : 0u;
+  if(!r->out) return;
+  r->out[0] = (uint8_t)tag;
+  memcpy(r->out + 1, data, n);
+}
+
+static int split_args(image_run* r, const uint8_t* args, uint32_t len, char** store) {
+  if(len && args[len - 1u]) return 0;
+  int32_t n = 0;
+  for(uint32_t i = 0; i < len; i++) n += !args[i];
+  *store = (char*)malloc(len ? len : 1u);
+  const char** argv = (const char**)malloc(sizeof(char*) * (size_t)(n ? n : 1));
+  if(!*store || !argv) {
+    free(argv);
+    return 0;
+  }
+  if(len) memcpy(*store, args, len);
+  for(uint32_t i = 0, k = 0; k < (uint32_t)n; k++) {
+    argv[k] = *store + i;
+    i += (uint32_t)strlen(argv[k]) + 1u;
+  }
+  r->argv = argv;
+  r->argc = n;
+  return 1;
+}

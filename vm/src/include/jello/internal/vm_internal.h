@@ -221,11 +221,9 @@ typedef struct jello_heap {
   uint32_t gc_bytes_live;
   uint32_t gc_next_collect;
   uint32_t gc_collections;
-  uint32_t gc_freed_objects;
   void** gc_roots;
   uint32_t gc_roots_len;
   uint32_t gc_roots_cap;
-  double gc_pause_ms; /* cumulative wall-clock time spent inside jello_gc_collect (Sec 2.10) */
   jello_space space;
 
   pthread_mutex_t alloc_lock;
@@ -454,6 +452,7 @@ uint16_t vm_f32_to_f16(float f);
 
 jello_type_kind vm_reg_kind(const jello_bc_module* m, const jello_bc_function* f, uint32_t r);
 int vm_func_has_pointer(const jello_bc_module* m, const jello_bc_function* f);
+void vm_frame_stack_attach(jello_vm* vm, uint8_t* mem, uint32_t bytes, uint32_t call_frames);
 
 /* -- frame stack + per-function layout cache (frame.c) -- */
 int vm_push_frame(jello_vm* vm, const jello_bc_module* m, uint32_t func_index,
@@ -469,6 +468,7 @@ const jello_function* vm_push_callr_frame(jello_vm* vm, const jello_bc_module* m
                                           uint32_t arg_count);
 void vm_pop_frame(jello_vm* vm);
 void vm_frame_unwind(jello_vm* vm);
+void vm_frame_segments_free(jello_vm* vm);
 void vm_frame_reset(jello_vm* vm);
 void vm_free_layouts(jello_vm* vm);
 void vm_share_layouts(jello_vm* vm, const jello_vm* from);

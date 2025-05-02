@@ -32,6 +32,38 @@ static jello_bc_result err(jello_bc_error e, const char* msg, size_t off) {
 
 static _Thread_local char g_validate_err[512];
 
+static const char* native_kind_name(uint8_t kind) {
+  static const char* const names[] = {
+      [JELLO_T_VOID] = "Void",         [JELLO_T_BOOL] = "Bool",
+      [JELLO_T_ATOM] = "Atom",         [JELLO_T_I8] = "I8",
+      [JELLO_T_I16] = "I16",           [JELLO_T_I32] = "I32",
+      [JELLO_T_I64] = "I64",           [JELLO_T_F16] = "F16",
+      [JELLO_T_F32] = "F32",           [JELLO_T_F64] = "F64",
+      [JELLO_T_BYTES] = "Bytes",       [JELLO_T_LIST] = "List",
+      [JELLO_T_ARRAY] = "Array",       [JELLO_T_STRUCT] = "Struct",
+      [JELLO_T_OBJECT] = "Object",     [JELLO_T_FUNCTION] = "Function",
+      [JELLO_T_ABSTRACT] = "Abstract", [JELLO_T_DYNAMIC] = "Dynamic",
+      [JELLO_T_ENUM] = "Enum",
+  };
+  return kind < sizeof names / sizeof names[0] && names[kind] ? names[kind] : "?";
+}
+
+static void append_text(char* out, size_t size, const char* text) {
+  size_t at = strlen(out);
+  if(at + 1 < size) snprintf(out + at, size - at, "%s", text);
+}
+
+static void append_signature(char* out, size_t size, uint8_t ret, uint8_t arity,
+                             const uint8_t* args) {
+  append_text(out, size, "(");
+  for(uint8_t j = 0; j < arity; j++) {
+    if(j) append_text(out, size, ", ");
+    append_text(out, size, native_kind_name(args[j]));
+  }
+  append_text(out, size, ") -> ");
+  append_text(out, size, native_kind_name(ret));
+}
+
 static jello_bc_result validate_insn_ctx(
     const jello_bc_module* m,
     const jello_bc_function* f,

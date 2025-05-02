@@ -60,6 +60,49 @@ static int obj_has_chain(jello_vm* vm, const jello_bc_module* m, const jello_obj
   return 1;
 }
 
+static jello_object* obj_link_of(jello_value v) {
+  if(!jello_is_ptr(v) || jello_as_ptr(v) == NULL) return NULL;
+  jello_object* o = (jello_object*)jello_as_ptr(v);
+  return o->h.kind == (uint8_t)JELLO_OBJ_OBJECT ? o : NULL;
+}
+
+static int obj_chain_seals(const jello_object* o, uint32_t atom_id) {
+  for(uint32_t steps = 0; o && steps <= 1024u; o = o->proto, steps++) {
+    if(!o->sealed) continue;
+    if(atom_id == UINT32_MAX || vm_object_state(o, atom_id) == JELLO_OBJ_SLOT_SEALED) return 1;
+  }
+  return 0;
+}
+
+static int obj_relink_seals(const jello_object* o, const jello_object* link) {
+  if(obj_chain_seals(o->proto, UINT32_MAX)) return 1;
+  if(!obj_chain_seals(link, UINT32_MAX)) return 0;
+  for(uint32_t i = 0; i < o->cap; i++) {
+    uint8_t state = o->states[i];
+    if(vm_obj_slot_live(state) && state != JELLO_OBJ_SLOT_SEALED &&
+       o->keys[i] != JELLO_ATOM___PROTO__ && obj_chain_seals(link, o->keys[i])) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int obj_write_sealed(jello_vm* vm, const jello_bc_module* m, const jello_object* o,
+                            uint32_t atom_id, const jello_object* link) {
+  int links = m->proto_enabled && atom_id == JELLO_ATOM___PROTO__;
+  int chained = m->proto_enabled && obj_chain_seals(o->proto, UINT32_MAX);
+  if(!o->sealed && !chained && !(links && obj_chain_seals(link, UINT32_MAX))) return 0;
+  uint8_t state = vm_object_state(o, atom_id);
+  int sealed = state == JELLO_OBJ_SLOT_SEALED;
+  if(!sealed && links) {
+    sealed = link != o->proto && obj_relink_seals(o, link);
+  } else if(!sealed && chained && state == JELLO_OBJ_SLOT_EMPTY) {
+    sealed = obj_chain_seals(o->proto, atom_id);
+  }
+  if(sealed) vm->trap_code = JELLO_TRAP_SEALED;
+  return sealed;
+}
+
 static void obj_set_direct(const jello_bc_module* m, jello_object* o, uint32_t atom_id, jello_value v) {
   jello_object_set(o, atom_id, v);
   if(!m->proto_enabled || atom_id != JELLO_ATOM___PROTO__) return;
@@ -69,6 +112,14 @@ static void obj_set_direct(const jello_bc_module* m, jello_object* o, uint32_t a
   } else {
     o->proto = NULL;
   }
+}
+
+static int obj_set_f64(jello_vm* vm, const jello_bc_module* m, jello_object* o, uint32_t atom_id,
+                       double d) {
+  if(obj_write_sealed(vm, m, o, atom_id, NULL)) return 0;
+  vm_object_set_f64(vm, o, atom_id, d);
+  if(m->proto_enabled && atom_id == JELLO_ATOM___PROTO__) o->proto = NULL;
+  return 1;
 }
 
 op_result op_obj_new(exec_ctx* ctx, const jello_insn* ins) {

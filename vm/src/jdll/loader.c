@@ -5,15 +5,12 @@
  * Opening native libraries; finds and opens `<name>.jdll` and checks its jello_jdll_manifest. */
 
 #include <jello/internal/jdll_internal.h>
-
-#include <dlfcn.h>
 #include <jello/internal/platform.h>
 
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <sys/stat.h>
 
 struct jello_jdll_handle {
@@ -109,6 +106,16 @@ typedef struct search {
   char tried[4096];
   char unopened[sizeof "cannot open : " + PATH_MAX + 256];
 } search;
+
+static int already_tried(const search* s, const char* dir, size_t dir_len) {
+  for(const char* at = s->tried; *at;) {
+    const char* end = strstr(at, ", ");
+    size_t len = end ? (size_t)(end - at) : strlen(at);
+    if(len == dir_len && memcmp(at, dir, len) == 0) return 1;
+    at += len + (end ? 2u : 0u);
+  }
+  return 0;
+}
 
 jello_jdll_handle* jello_jdll_load(const char* library_name) {
   if(!library_name || !library_name[0]) return NULL;

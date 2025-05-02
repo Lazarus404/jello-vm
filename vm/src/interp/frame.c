@@ -24,6 +24,40 @@ static int frame_stack_reserve(jello_vm* vm) {
 
 #define VM_FIRST_FRAME_STACK_BYTES (16u * 1024u)
 
+static void load_segment(jello_vm* vm, frame_segment* seg) {
+  vm->segment = seg;
+  vm->frame_stack = seg->mem;
+  vm->frame_stack_top = seg->top;
+  vm->frame_stack_limit = seg->limit;
+  vm->frame_stack_max = seg->bytes;
+}
+
+static void save_segment(jello_vm* vm) {
+  vm->segment->top = vm->frame_stack_top;
+  vm->segment->limit = vm->frame_stack_limit;
+}
+
+void vm_frame_stack_attach(jello_vm* vm, uint8_t* mem, uint32_t bytes, uint32_t call_frames) {
+  vm->first_segment =
+      (frame_segment){.mem = mem, .bytes = bytes, .limit = JELLO_PAGES_COMMIT_COSTS ? 0 : bytes};
+  load_segment(vm, &vm->first_segment);
+  vm->call_frames_limit = call_frames;
+}
+
+static int grow_frame_stack(jello_vm* vm, uint64_t top) {
+  if(top > vm->frame_stack_max) return 0;
+  uint64_t want = (uint64_t)vm->frame_stack_limit * 2u;
+  if(want < top) want = top;
+  if(want < VM_FIRST_FRAME_STACK_BYTES) want = VM_FIRST_FRAME_STACK_BYTES;
+  uint64_t end = jello_page_round_up((uint64_t)(uintptr_t)vm->frame_stack + want);
+  uint64_t limit = end - (uint64_t)(uintptr_t)vm->frame_stack;
+  if(limit > vm->frame_stack_max) limit = vm->frame_stack_max;
+  uint32_t had = vm->frame_stack_limit;
+  if(!jello_pages_commit(vm->frame_stack + had, (size_t)(limit - had))) return 0;
+  vm->frame_stack_limit = (uint32_t)limit;
+  return 1;
+}
+
 jello_type_kind vm_reg_kind(const jello_bc_module* m, const jello_bc_function* f, uint32_t r) {
   return m->types[f->reg_types[r]].kind;
 }
@@ -150,6 +184,62 @@ int jit_try_grow_call_frames(jello_vm* vm) {
 frame_layout* jit_layout_ptr_or_null(jello_vm* vm, uint32_t fi) {
   if(!vm || fi >= vm->jit_layout_by_func_len || !vm->jit_layout_by_func) return NULL;
   return vm->jit_layout_by_func[fi];
+}
+
+static void clear_frames(call_frame* frames, uint32_t from, uint32_t to) {
+  memset(frames + from, 0, (size_t)(to - from) * sizeof(call_frame));
+}
+
+static int grow_call_frames(jello_vm* vm) {
+  if(vm->call_frames_len < vm->call_frames_cap) return 1;
+  uint32_t new_cap = vm->call_frames_cap ? vm->call_frames_cap * 2u : VM_FIRST_CALL_FRAMES;
+  call_frame* p = (call_frame*)realloc(vm->call_frames, (size_t)new_cap * sizeof(call_frame));
+  if(!p) return 0;
+  clear_frames(p, vm->call_frames_cap, new_cap);
+  vm->call_frames = p;
+  vm->call_frames_cap = new_cap;
+  return 1;
+}
+
+static void free_segments(jello_vm* vm, frame_segment* seg) {
+  while(seg) {
+    frame_segment* above = seg->above;
+    vm->segment_bytes -= seg->bytes;
+    jello_pages_unmap(seg->mem, seg->bytes);
+    free(seg);
+    seg = above;
+  }
+}
+
+static frame_segment* segment_above(jello_vm* vm, uint32_t total) {
+  frame_segment* below = vm->segment;
+  if(below->above && below->above->bytes >= total) return below->above;
+  free_segments(vm, below->above);
+  below->above = NULL;
+  uint64_t page = (uint64_t)jello_page_size();
+  uint64_t room = (VM_MAX_SEGMENT_BYTES - vm->segment_bytes) & ~(page - 1u);
+  uint64_t bytes = jello_page_round_up(
+      (uint64_t)vm->frame_stack_max * 2u > total ? (uint64_t)vm->frame_stack_max * 2u : total);
+  if(bytes > room) bytes = room;
+  if(bytes < total) return NULL;
+  frame_segment* seg = (frame_segment*)calloc(1, sizeof(frame_segment));
+  if(!seg) return NULL;
+  seg->mem = (uint8_t*)jello_pages_reserve((size_t)bytes);
+  if(!seg->mem) {
+    free(seg);
+    return NULL;
+  }
+  seg->bytes = (uint32_t)bytes;
+  seg->limit = JELLO_PAGES_COMMIT_COSTS ? 0 : seg->bytes;
+  seg->below = below;
+  below->above = seg;
+  vm->segment_bytes += seg->bytes;
+  return seg;
+}
+
+void vm_frame_segments_free(jello_vm* vm) {
+  free_segments(vm, vm->first_segment.above);
+  vm->first_segment.above = NULL;
 }
 
 int jit_call_push_numeric(jello_vm* vm, uint32_t callee_fi, uint32_t caller_dst,

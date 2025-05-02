@@ -77,6 +77,10 @@ int jello_jit_module_prepare(const jello_bc_module* m, jello_jit_module* out) {
 
 size_t jit_append_window_bytes;
 
+static int count_call(jello_jit_func_code* fc) {
+  return __atomic_add_fetch(&fc->calls, 1, __ATOMIC_RELAXED) >= JIT_COMPILE_AFTER_CALLS;
+}
+
 void jello_jit_module_free(jello_jit_module* jm) {
   if(!jm) return;
   if(jm->funcs) {
@@ -129,4 +133,11 @@ int jello_jit_try_enter(jello_vm* vm, jello_jit_module* jm, jello_numeric_result
   __atomic_add_fetch(&jit_try_enter_count, 1, __ATOMIC_RELAXED);
   *out_st = entry(vm, fr->rf.mem, out);
   return 1;
+}
+
+static __attribute__((noinline)) void enter_body(jello_vm* vm, const jello_jit_module* jm,
+                                                 uint8_t* frame_base,
+                                                 const jello_jit_func_code* fc) {
+  jello_jit_enter_fn enter = (jello_jit_enter_fn)(uintptr_t)(jm->blob.mem + jm->enter_off);
+  enter(vm, frame_base, NULL, jm->blob.mem + fc->blob_off + fc->body_off);
 }

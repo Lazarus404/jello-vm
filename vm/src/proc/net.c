@@ -60,6 +60,42 @@ struct proc_socket_list {
   proc_socket* at[];
 };
 
+static pthread_mutex_t net_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static jello_process* owner_of(const proc_socket* k) {
+  return __atomic_load_n(&k->owner, __ATOMIC_ACQUIRE);
+}
+
+static void set_owner(proc_socket* k, jello_process* p) {
+  __atomic_store_n(&k->owner, p, __ATOMIC_RELEASE);
+}
+
+static void adopt(proc_socket* k, jello_process* p) {
+  proc_retain(p);
+  k->owned_prev = NULL;
+  k->owned_next = p->sockets;
+  if(p->sockets) p->sockets->owned_prev = k;
+  p->sockets = k;
+  set_owner(k, p);
+}
+
+static void disown(proc_socket* k) {
+  if(k->owned_prev) k->owned_prev->owned_next = k->owned_next;
+  else k->owner->sockets = k->owned_next;
+  if(k->owned_next) k->owned_next->owned_prev = k->owned_prev;
+  k->owned_prev = k->owned_next = NULL;
+  set_owner(k, NULL);
+}
+
+static const net_tls_ops* tls_library(const jello_bc_module* m) {
+  const jello_jdll_handle* const* handles = (const jello_jdll_handle* const*)m->jdll_handles;
+  for(uint32_t i = 0; i < m->njdll_handles; i++) {
+    const net_tls_ops* ops = (const net_tls_ops*)jello_jdll_symbol(handles[i], "jello_tls_ops");
+    if(ops && ops->version == NET_TLS_OPS_VERSION) return ops;
+  }
+  return NULL;
+}
+
 void proc_sockets_join(struct proc_socket_list** into, struct proc_socket_list** from) {
   struct proc_socket_list* last = *from;
   while(last->next) last = last->next;
@@ -68,8 +104,16 @@ void proc_sockets_join(struct proc_socket_list** into, struct proc_socket_list**
   *from = NULL;
 }
 
+static void failed(jdlo_ctx* c, int32_t err) { c->vm->net_error = err; }
+
 typedef struct net_addrs {
   struct addrinfo* list;
   struct addrinfo one;
   struct sockaddr_storage addr;
 } net_addrs;
+
+static int32_t port_of(const struct sockaddr_storage* a) {
+  if(a->ss_family == AF_INET) return ntohs(((const struct sockaddr_in*)a)->sin_port);
+  if(a->ss_family == AF_INET6) return ntohs(((const struct sockaddr_in6*)a)->sin6_port);
+  return -1;
+}

@@ -209,6 +209,16 @@ static jello_bc_result validate_callr_window(
   return ok();
 }
 
+static jello_bc_result check_target(const jello_insn* ins, uint32_t pc, int64_t tgt, int64_t lo,
+                                    uint32_t ninsns, const char* range_msg) {
+  if(tgt < 0 || tgt >= (int64_t)ninsns) return err(JELLO_BC_BAD_FORMAT, range_msg, 0);
+  if(tgt < lo) return err(JELLO_BC_BAD_FORMAT, "switch_kind target must follow its table", 0);
+  if(ins[tgt - (int64_t)pc].op == (uint8_t)JOP_CASE_KIND) {
+    return err(JELLO_BC_BAD_FORMAT, "jump target inside a switch_kind table", 0);
+  }
+  return ok();
+}
+
 jello_bc_result jello_bc_validate_insn(
     const jello_bc_module* m,
     const jello_type_id* reg_types,
@@ -813,6 +823,14 @@ jello_bc_result jello_bc_validate_insn(
 }
 
 #define NO_RESULT ((jello_type_id)UINT32_MAX)
+
+static int result_ok(const jello_bc_module* m, jello_type_id expected, jello_type_id actual) {
+  return expected == NO_RESULT || type_ids_compatible(m, expected, actual);
+}
+
+static const jello_fun_sig* fun_sig_of(const jello_bc_module* m, jello_type_id tid) {
+  return &m->sigs[m->types[tid].as.fun.sig_id];
+}
 
 static int region_visit(int32_t* depth, uint32_t* work, uint32_t* nwork, int64_t pc,
                         uint32_t ninsns, int32_t d) {

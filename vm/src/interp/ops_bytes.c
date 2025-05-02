@@ -71,6 +71,12 @@ op_result op_bytes_get_u8(exec_ctx* ctx, const jello_insn* ins) {
   return OP_CONTINUE;
 }
 
+static void* ptr_arg(exec_ctx* ctx, call_frame* fr, uint32_t r) {
+  void* p = vm_load_ptr(&fr->rf, r);
+  if(!p) ctx->vm->trap_code = JELLO_TRAP_NULL_DEREF;
+  return p;
+}
+
 op_result op_bytes_set_u8(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   void* p = NULL;

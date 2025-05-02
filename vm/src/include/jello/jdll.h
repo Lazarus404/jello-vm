@@ -153,6 +153,9 @@ typedef struct jello_jdll_manifest {
 #define JELLO_JDLL_HIDDEN __attribute__((visibility("hidden")))
 #endif
 
+#ifndef JELLO_JDLL_HOST
+#endif
+
 #ifdef __cplusplus
 }
 #endif
