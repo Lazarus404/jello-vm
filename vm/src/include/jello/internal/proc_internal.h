@@ -284,7 +284,9 @@ static inline int proc_finished(const jello_process* p) {
 
 #define PROC_SPAWN_DETACHED 1u
 #define PROC_SPAWN_ON_MAIN 2u
+void proc_leave_to_host(struct jello_vm* vm);
 void proc_socket_moved(void* payload, const struct jello_vm* vm);
+int proc_on_main(const struct jello_vm* vm);
 void proc_retain(jello_process* p);
 uint64_t proc_now(void);
 uint64_t proc_deadline(int32_t ms);

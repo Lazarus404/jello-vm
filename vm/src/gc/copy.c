@@ -173,3 +173,11 @@ static void fix_proto(const jello_vm* vm, jello_object* o, uint32_t g) {
   jello_object* proto = p && ((const jello_obj_header*)p)->kind == JELLO_OBJ_OBJECT ? p : NULL;
   set_proto(o, proto_slot(o), proto);
 }
+
+static void fix_protos(jello_vm* vm, const vm_protos* protos, const copier* c) {
+  for(uint32_t i = 0; protos && i < protos->len; i++) {
+    jello_object* o = protos->at[i].object;
+    if(c) o = (jello_object*)map_get(c, o);
+    if(o) fix_proto(vm, o, protos->at[i].global);
+  }
+}

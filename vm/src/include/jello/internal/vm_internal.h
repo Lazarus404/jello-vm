@@ -704,6 +704,7 @@ static inline void vm_parcel_move(vm_parcel* to, vm_parcel* from) {
   *from = vm_parcel_empty();
 }
 void vm_parcel_join(vm_parcel* into, vm_parcel* from);
+int proc_socket_note(struct proc_socket_list** list, void* payload);
 void proc_sockets_join(struct proc_socket_list** into, struct proc_socket_list** from);
 
 #define JELLO_BYTES_BUFFER 1u

@@ -54,6 +54,10 @@ static int heap_unregister(jello_heap* heap, jello_vm* vm) {
   return last;
 }
 
+static uint8_t* frame_stack_reserve(void) {
+  return (uint8_t*)jello_pages_reserve(VM_DEFAULT_FRAME_STACK_BYTES);
+}
+
 jello_vm* jello_vm_create(void) {
   jello_vm* vm = (jello_vm*)calloc(1, sizeof(jello_vm));
   if(!vm) return NULL;
@@ -158,6 +162,18 @@ static void reductions_refill(jello_vm* vm) {
 
 static uint32_t reductions_used(const jello_vm* vm) {
   return vm->reduction_window - (vm->reductions > 0 ? (uint32_t)vm->reductions : 0u);
+}
+
+static int reductions_settle(jello_vm* vm) {
+  if(!vm->fuel_limit) return 0;
+  uint32_t used = reductions_used(vm);
+  if(vm->fuel_remaining < used) {
+    vm->fuel_remaining = 0;
+    vm->trap_code = JELLO_TRAP_FUEL;
+    return -1;
+  }
+  vm->fuel_remaining -= used;
+  return 0;
 }
 
 void jello_vm_set_fuel(jello_vm* vm, uint64_t fuel) {

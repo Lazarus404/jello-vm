@@ -96,6 +96,23 @@ static const net_tls_ops* tls_library(const jello_bc_module* m) {
   return NULL;
 }
 
+int proc_socket_note(struct proc_socket_list** list, void* payload) {
+  struct proc_socket_list* l = *list;
+  if(!l || l->len == l->cap) {
+    uint32_t cap = l ? l->cap * 2 : 4;
+    l = (struct proc_socket_list*)realloc(l, sizeof *l + sizeof(proc_socket*) * cap);
+    if(!l) return 0;
+    if(!*list) {
+      l->next = NULL;
+      l->len = 0;
+    }
+    l->cap = cap;
+    *list = l;
+  }
+  l->at[l->len++] = (proc_socket*)payload;
+  return 1;
+}
+
 void proc_sockets_join(struct proc_socket_list** into, struct proc_socket_list** from) {
   struct proc_socket_list* last = *from;
   while(last->next) last = last->next;
