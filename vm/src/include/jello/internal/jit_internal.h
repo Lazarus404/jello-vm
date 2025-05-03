@@ -80,7 +80,21 @@ typedef struct jello_jit_module {
 typedef void(JELLO_JIT_ABI* jello_jit_enter_fn)(jello_vm* vm, uint8_t* frame_base,
                                                 jello_numeric_result* out, const void* body);
 
+int jello_jit_emit_mixed_stubs(jit_exec_buf* buf, size_t* enter_off, size_t* bridge_off,
+                               size_t* lazy_off);
+int jit_compile_function_now(jello_jit_module* jm, uint32_t fi);
+
 extern size_t jit_append_window_bytes;
+
+JELLO_JIT_ABI const void* jit_lazy_target(jello_vm* vm);
+JELLO_JIT_ABI void jit_run_interp_top(jello_vm* vm);
+JELLO_JIT_ABI const void* jit_callr_push(jello_vm* vm, uint32_t dst, uint32_t callee_reg,
+                                         uint32_t arg_first, uint32_t nargs);
+JELLO_JIT_ABI void jit_throw(jello_vm* vm, uint32_t payload_reg, uint32_t fi, uint32_t pc);
+JELLO_JIT_ABI void jit_unwind_lost(jello_vm* vm);
+
+int jello_jit_enter_pushed_frame(jello_vm* vm);
+void jit_native_stack_here(jello_vm* vm);
 
 typedef jello_exec_status(JELLO_JIT_ABI* jello_jit_entry_fn)(jello_vm* vm, uint8_t* frame_base,
                                                              jello_numeric_result* out);
@@ -97,11 +111,20 @@ int jello_jit_try_enter(jello_vm* vm, jello_jit_module* jm, jello_numeric_result
 extern uint32_t jit_try_enter_count;
 
 int jello_jit_emit_function_into(const jello_bc_module* m, uint32_t fi, jit_exec_buf* buf,
-    jello_jit_func_code* out_fc, jello_jit_call_patch** patches, uint32_t* npatch, uint32_t* patch_cap,
-    int allow_calls);
+                                 jello_jit_func_code* out_fc, const void* const* entries);
 
 void jello_jit_patch_call_rel32(jit_exec_buf* buf, size_t at, int32_t rel);
 void jello_jit_patch_call(jit_exec_buf* buf, size_t site_off, size_t callee_off);
+int jit_resolve_target_bc(uint32_t bc_pc, int32_t imm, uint32_t ninsns, uint32_t* out);
+int jit_ir_shape_ok(const jello_jit_ir_function* ir, const jello_bc_module* m,
+                    const jello_bc_function* f, uint32_t fi, jello_type_kind* out_ret_kind,
+                    int allow_calls, uint32_t* bad_pc);
+int jit_scan_targets(const jello_jit_ir_function* ir, uint32_t ninsns, uint8_t* is_target,
+                     uint8_t* is_loop_anchor, uint32_t* out_nloop_anchors, uint32_t** out_catch_pcs,
+                     uint32_t* out_ncatch);
+int jit_decline(jello_jit_func_code* fc, jello_jit_decline why, const jello_bc_function* f,
+                uint32_t pc);
+int jit_list_push(void* items_ptr, size_t* count, size_t* cap, const void* item, size_t elem);
 
 typedef enum jello_reload_fn_status {
   JELLO_RELOAD_FN_UNCHANGED,          /* same signature, same body hash -- no-op */

@@ -40,6 +40,11 @@ struct jdlo_ctx {
   void* handle_payload;
   uint32_t handle_bytes;
 };
+
+extern const jello_jdll_api jello_jdll_host_api;
+extern const jello_jdll_manifest vm_builtin_manifest;
+
+int vm_builtin_export(const jello_jdll_export* e);
 void jdl_release_ret(jdlo_ctx* c);
 
 #endif /* JELLO_JDLL_INTERNAL_H */

@@ -232,9 +232,8 @@ void* jello_gc_alloc(jello_vm* vm, size_t size);
 void jello_gc_collect(jello_vm* vm);
 void jello_gc_push_root(jello_vm* vm, void* obj);
 void jello_gc_pop_roots(jello_vm* vm, uint32_t n);
-
-void jello_vm_gc_stats(const jello_vm* vm, uint32_t* out_live_bytes, uint32_t* out_collections,
-                        double* out_pause_ms);
+void jello_vm_gc_stats(const jello_vm* vm, uint64_t* out_live_bytes, uint32_t* out_collections,
+                       double* out_pause_ms);
 
 typedef enum jello_obj_kind {
   JELLO_OBJ_BYTES = 1,
@@ -259,11 +258,15 @@ typedef struct jello_obj_header {
 typedef struct jello_bytes {
   jello_obj_header h;
   uint32_t length;
-  uint8_t data[];
+  uint32_t shared; /**< 1 when `owner` is a shared binary it holds a reference to, else 0. */
+  uint8_t* data;
+  struct jello_bytes* owner;
+  uint8_t storage[];
 } jello_bytes;
 
 jello_bytes* jello_bytes_new(jello_vm* vm, uint32_t length);
 jello_bytes* jello_bytes_new_zeroed(jello_vm* vm, uint32_t length);
+jello_bytes* jello_bytes_slice(jello_vm* vm, jello_bytes* src, uint32_t start, uint32_t length);
 
 /* -- numeric boxing -- */
 typedef struct jello_box_i64 { jello_obj_header h; int64_t value; } jello_box_i64;
@@ -337,6 +340,9 @@ typedef struct jello_enum {
   uint32_t nfields;
   jello_value fields[];
 } jello_enum;
+
+jello_enum* jello_enum_new(jello_vm* vm, uint32_t type_id, uint32_t tag, uint32_t nfields,
+                           const jello_value* fields);
 
 typedef struct jello_function {
   jello_obj_header h;

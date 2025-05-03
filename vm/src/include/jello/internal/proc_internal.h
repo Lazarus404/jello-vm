@@ -155,6 +155,9 @@ typedef struct proc_poll_desc {
 } proc_poll_desc;
 
 proc_poll_desc* proc_polls_find(proc_sched* s, int fd);
+proc_poll_desc* proc_polls_make(proc_sched* s, int fd);
+void proc_polls_end(proc_sched* s);
+void proc_poll_ready(proc_sched* s, proc_poll_event e);
 
 #define PROC_MAX_SCHEDULERS 256u
 #define PROC_IDLE_WORDS (PROC_MAX_SCHEDULERS / 64u)
@@ -282,21 +285,41 @@ static inline int proc_finished(const jello_process* p) {
   return atomic_load_explicit(&p->done, memory_order_acquire);
 }
 
+static inline vm_parcel* proc_inbox_at(const jello_process* p, uint32_t i) {
+  return &p->inbox[(p->inbox_head + i) & (p->inbox_cap - 1u)];
+}
+
 #define PROC_SPAWN_DETACHED 1u
 #define PROC_SPAWN_ON_MAIN 2u
+
+jello_process* proc_spawn(struct jello_vm* vm, const struct jello_function* body, proc_pool* pool,
+                          unsigned flags, jello_trap_code* trap);
+int proc_run_for(struct jello_vm* vm, uint32_t ms);
 void proc_leave_to_host(struct jello_vm* vm);
+void proc_trap(struct jdlo_ctx* c, jello_trap_code code);
+extern const struct jello_jdll_handle_class proc_socket_class;
 void proc_socket_moved(void* payload, const struct jello_vm* vm);
+void proc_sockets_end(jello_process* p);
 int proc_on_main(const struct jello_vm* vm);
+jello_process* proc_self(struct jello_vm* vm);
 void proc_retain(jello_process* p);
+void proc_release(jello_process* p);
+jello_trap_code proc_receive(struct jello_vm* vm, jello_value* out);
 uint64_t proc_now(void);
 uint64_t proc_deadline(int32_t ms);
 void proc_timer_release(proc_timer* t);
+jello_trap_code proc_poll_open(struct jello_vm* vm, int fd, int* watched);
+jello_trap_code proc_poll_close(struct jello_vm* vm, int fd);
+jello_trap_code proc_call_blocking(struct jello_vm* vm, jdll_export_fn fn, jdlo_ctx* ctx);
 
 static inline void proc_call_quiescent(struct jello_vm* vm, jdll_export_fn fn, jdlo_ctx* ctx) {
   vm_go_quiescent(vm);
   fn(ctx);
   vm_leave_quiescent(vm);
 }
+void proc_on_exit(struct jello_vm* vm, jello_value fn);
+void proc_wait_all(struct jello_vm* vm);
+void proc_end_all(struct jello_vm* vm);
 
 typedef struct proc_reply {
   jdl_refs refs;   /**< The handles holding it, in any process. */
@@ -304,5 +327,7 @@ typedef struct proc_reply {
   uint8_t sent;
   jello_process* waiter; /**< The process waiting for it, while one does. */
 } proc_reply;
+
+extern const struct jello_jdll_handle_class proc_handle_class;
 
 #endif /* JELLO_PROC_INTERNAL_H */

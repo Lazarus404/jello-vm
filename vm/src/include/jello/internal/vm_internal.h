@@ -101,6 +101,8 @@ jello_bc_result jello_bc_validate_insn(
     uint32_t pc,
     uint32_t ninsns,
     uint32_t nfuncs);
+
+jello_bc_result jello_bc_validate_results(const jello_bc_module* m);
 jello_bc_result jello_bc_validate_try_regions(const jello_bc_module* m);
 
 #define REG_SLOT_BYTES 8u
@@ -148,6 +150,9 @@ typedef struct jello_handle {
   uint32_t native_bytes;
 } jello_handle;
 
+jello_handle* jello_handle_new(jello_vm* vm, const struct jello_jdll_handle_class* cls,
+                               void* payload, uint32_t native_bytes);
+
 jello_bytes* jello_bytes_join(jello_vm* vm, jello_bytes* const* parts, uint32_t n,
                               const jello_bytes* separator);
 
@@ -168,7 +173,14 @@ typedef struct call_frame {
   uint8_t has_pointer;
   uint32_t caller_dst; /* register in the caller's frame that RET writes into */
   try_scope try_stack[JELLO_TRY_STACK_MAX];
-  uint32_t try_stack_len;
+  union {
+    struct {
+      uint16_t try_stack_len;  /**< Its open try scopes, the top ones of the VM's try_scopes. */
+      uint16_t starts_segment; /**< 1 when it is the first frame of a frame stack segment, whose
+                                * pop returns to the segment below. */
+    };
+    uint32_t pop_work;
+  };
   jello_value* spill_slots;
   uint32_t spill_cap;
 } call_frame;
@@ -200,6 +212,10 @@ typedef struct jello_gc_hdr {
 #define GC_IMMORTAL 2u
 #define GC_SHARED 3u
 
+static inline int vm_is_immortal(const void* p) {
+  return ((const jello_gc_hdr*)p - 1)->marked == GC_IMMORTAL;
+}
+
 #define VM_BYTES_SHARED_MIN 64u
 #define GC_NUM_SIZE_CLASSES 8
 #define GC_MAX_SIZE_CLASS_BYTES 4096u
@@ -221,9 +237,6 @@ typedef struct jello_heap {
   uint32_t gc_bytes_live;
   uint32_t gc_next_collect;
   uint32_t gc_collections;
-  void** gc_roots;
-  uint32_t gc_roots_len;
-  uint32_t gc_roots_cap;
   jello_space space;
 
   pthread_mutex_t alloc_lock;
@@ -289,6 +302,9 @@ struct jello_vm {
   uint8_t keep_processes;  /**< Set by jello_vm_keep_processes. */
   int32_t net_error;       /**< Why its last failing socket call failed; see net.c. */
   void* gc_transient_root; /**< An object still being populated, held as a root. */
+  void** gc_roots;         /**< The roots jello_gc_push_root pushed, a stack. */
+  uint32_t gc_roots_len;
+  uint32_t gc_roots_cap;
   struct vm_parcel* parcel;
 
   struct jello_jit_module* active_jit;
@@ -322,6 +338,14 @@ struct jello_vm {
 
 #define JIT_FRAME_STACK_MAX (64u * 1024u * 1024u)
 #define JIT_CALL_FRAMES_MAX 200000u
+
+static inline int vm_space_shared(const jello_heap* heap, const jello_space* space) {
+  return space == &heap->space;
+}
+
+static inline int vm_owns_space(const jello_vm* vm) {
+  return !vm_space_shared(vm->heap, vm->space);
+}
 
 static inline jello_type_kind vm_global_kind(const jello_bc_module* m, uint32_t g) {
   return m->types[m->global_types[g]].kind;
@@ -365,11 +389,12 @@ static inline void vm_enter_module(jello_vm* vm, const jello_bc_module* m) {
 void vm_warm_jit_layouts(jello_vm* vm, const jello_bc_module* m);
 int jit_try_grow_call_frames(jello_vm* vm);
 frame_layout* jit_layout_ptr_or_null(jello_vm* vm, uint32_t fi);
+JELLO_JIT_ABI int jit_try_grow_push(jello_vm* vm, uint64_t top);
 int jit_call_push_numeric(jello_vm* vm, uint32_t callee_fi, uint32_t caller_dst,
                           uint32_t arg_first, uint32_t nargs);
 int jit_try_grow_frame_stack(jello_vm* vm, uint32_t need);
 
-uint8_t* jit_current_frame_mem(jello_vm* vm);
+JELLO_JIT_ABI uint8_t* jit_current_frame_mem(jello_vm* vm);
 static inline uint32_t vm_load_u32(reg_frame* rf, uint32_t r) {
   return *(const uint32_t*)vm_reg_ptr(rf, r);
 }
@@ -467,6 +492,14 @@ const jello_function* vm_push_callr_frame(jello_vm* vm, const jello_bc_module* m
                                           uint32_t caller_dst, uint32_t arg_first,
                                           uint32_t arg_count);
 void vm_pop_frame(jello_vm* vm);
+void vm_trace_frames(jello_vm* vm, uint32_t stop);
+static inline void vm_clear_trap(jello_vm* vm) {
+  vm->trap_code = JELLO_TRAP_NONE;
+  vm->trap_detail[0] = '\0';
+  vm->trap_trace.len = 0;
+  vm->trap_trace.site = 0;
+  vm->trap_trace.full = 0;
+}
 void vm_frame_unwind(jello_vm* vm);
 void vm_frame_segments_free(jello_vm* vm);
 void vm_frame_reset(jello_vm* vm);
@@ -484,10 +517,13 @@ typedef struct exec_ctx {
   jello_vm* vm;
   const jello_bc_module* m;
   jello_numeric_result* out;
+  uint32_t stop_len;
 } exec_ctx;
 
 op_result op_dispatch(exec_ctx* ctx, const jello_insn* ins);
 jello_exec_status vm_exec_loop(exec_ctx* ctx);
+jello_exec_status vm_exec_function(jello_vm* vm, const jello_function* fn, const uint64_t* args,
+                                   uint32_t nargs, jello_numeric_result* out);
 op_result op_div_i32(exec_ctx* ctx, const jello_insn* ins);
 op_result op_mod_i32(exec_ctx* ctx, const jello_insn* ins);
 op_result op_div_u32(exec_ctx* ctx, const jello_insn* ins);
@@ -560,6 +596,7 @@ op_result op_bytes_get_u8(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_set_u8(exec_ctx* ctx, const jello_insn* ins);
 
 op_result op_bytes_concat2(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_join(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_eq(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_bitand2(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_bitor2(exec_ctx* ctx, const jello_insn* ins);
@@ -591,6 +628,8 @@ op_result op_bytes_write_f64_be(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bits_write(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bits_read(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_blit(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_slice(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_freeze(exec_ctx* ctx, const jello_insn* ins);
 
 /* -- Null and enum tests (ops_dyn.c, value/value.c) -- */
 op_result op_is_null(exec_ctx* ctx, const jello_insn* ins);
@@ -608,10 +647,16 @@ uint32_t vm_dynamic_static_kind(jello_value v);
 
 int vm_object_find(const jello_object* o, uint32_t atom_id, int keep, jello_value* out);
 void vm_object_set_f64(jello_vm* vm, jello_object* o, uint32_t atom_id, double d);
-
-/* -- JIT-facing Object wrappers (ops_obj.c) -- */
-jello_value jit_obj_chain_get(jello_vm* vm, const jello_bc_module* m, jello_object* o, uint32_t atom_id);
-void jit_obj_set_direct(const jello_bc_module* m, jello_object* o, uint32_t atom_id, jello_value v);
+JELLO_JIT_ABI jello_value jit_obj_chain_get(jello_vm* vm, const jello_bc_module* m, jello_object* o,
+                                            uint32_t atom_id, int keep);
+JELLO_JIT_ABI uint32_t jit_obj_chain_has(jello_vm* vm, const jello_bc_module* m,
+                                         const jello_object* o, uint32_t atom_id);
+JELLO_JIT_ABI void jit_obj_set_direct(jello_vm* vm, const jello_bc_module* m, jello_object* o,
+                                      uint32_t atom_id, jello_value v);
+JELLO_JIT_ABI void jit_obj_set_f64(jello_vm* vm, const jello_bc_module* m, jello_object* o,
+                                   uint32_t atom_id, double d);
+JELLO_JIT_ABI uint32_t jit_obj_remove(jello_vm* vm, jello_object* o, uint32_t atom_id);
+JELLO_JIT_ABI void jit_obj_clear(jello_vm* vm, jello_object* o);
 uint8_t vm_object_state(const jello_object* o, uint32_t atom_id);
 
 /* -- Dynamic boundary opcode handlers (ops_dyn.c) -- */
@@ -660,12 +705,20 @@ op_result op_list_head(exec_ctx* ctx, const jello_insn* ins);
 op_result op_list_tail(exec_ctx* ctx, const jello_insn* ins);
 op_result op_list_is_nil(exec_ctx* ctx, const jello_insn* ins);
 
+op_result op_enum_new(exec_ctx* ctx, const jello_insn* ins);
+op_result op_enum_tag(exec_ctx* ctx, const jello_insn* ins);
+op_result op_enum_get(exec_ctx* ctx, const jello_insn* ins);
+
 op_result op_try(exec_ctx* ctx, const jello_insn* ins);
 op_result op_endtry(exec_ctx* ctx, const jello_insn* ins);
 op_result op_throw(exec_ctx* ctx, const jello_insn* ins);
 
 #define JELLO_TRAP_INTERNAL_UNWIND ((jello_trap_code)0x7F)
+
+int vm_try_push(jello_vm* vm, uint32_t catch_pc, uint32_t payload_reg);
 void vm_try_pop(jello_vm* vm);
+int vm_throw_find(jello_vm* vm, jello_value payload);
+int vm_catch_in_segment(exec_ctx* ctx);
 
 op_result op_obj_new(exec_ctx* ctx, const jello_insn* ins);
 op_result op_obj_has_atom(exec_ctx* ctx, const jello_insn* ins);
@@ -703,9 +756,18 @@ static inline void vm_parcel_move(vm_parcel* to, vm_parcel* from) {
   *to = *from;
   *from = vm_parcel_empty();
 }
+
+jello_trap_code vm_parcel_pack(jello_vm* vm, jello_value v, int drop, vm_parcel* out);
+jello_value vm_parcel_take(jello_vm* vm, vm_parcel* pc);
+void vm_parcel_splice(jello_vm* vm, jello_space* space, vm_parcel* pc);
 void vm_parcel_join(vm_parcel* into, vm_parcel* from);
+void vm_parcel_free(vm_parcel* pc);
 int proc_socket_note(struct proc_socket_list** list, void* payload);
+void proc_sockets_pack(const jello_vm* vm, struct proc_socket_list** list);
+void proc_sockets_take(struct jello_process* p, struct proc_socket_list** list);
 void proc_sockets_join(struct proc_socket_list** into, struct proc_socket_list** from);
+jello_trap_code vm_copy_start(jello_vm* vm, jello_space* into, void** root, uint64_t* globals,
+                              struct proc_socket_list** sockets);
 
 #define JELLO_BYTES_BUFFER 1u
 #define VM_RUNNING_OUTSIDE 2
@@ -715,21 +777,35 @@ static inline int vm_bytes_is_buffer(const jello_bytes* b) {
   return b->h.type_id == JELLO_BYTES_BUFFER;
 }
 jello_bytes* vm_buffer_new(jello_vm* vm, uint32_t length);
+jello_bytes* vm_bytes_clone(jello_vm* vm, const jello_bytes* b);
 uint32_t vm_shared_binaries_live(void);
 jello_value vm_clone_numbox(jello_vm* vm, jello_value v);
 void* vm_immortal_alloc(size_t size);
 size_t vm_bytes_immortal_size(uint32_t length);
+jello_bytes* vm_bytes_immortal_at(void* at, uint32_t length);
 jello_function* vm_function_immortal(uint32_t func_index, jello_type_id type);
+jello_enum* vm_enum_immortal(uint32_t type_id, uint32_t tag);
+void vm_space_free(jello_space* space);
 void vm_immortal_free(void* p);
 uint32_t vm_struct_fields_bytes(const jello_bc_module* m, uint32_t struct_sig_id);
 jello_vm* jello_vm_create_joined(jello_vm* existing);
 void jello_vm_running(jello_vm* vm, int is_running);
+jello_vm* vm_create_attached(jello_vm* existing, uint8_t* mem, uint32_t bytes, uint32_t call_frames,
+                             int own_space);
+void vm_destroy_attached(jello_vm* vm);
 void vm_go_quiescent(jello_vm* vm);
 void vm_wait_for_resume(jello_vm* vm);
 void vm_leave_quiescent(jello_vm* vm);
 void vm_safepoint_check(jello_vm* vm);
 int vm_fuel_charge(jello_vm* vm);
+int vm_reductions_out(jello_vm* vm);
+int proc_window_end(jello_vm* vm, int trapped);
 void vm_inherit_fuel(jello_vm* vm, const jello_vm* from);
+
+static inline int vm_poll_and_charge(jello_vm* vm) {
+  if(atomic_load(&vm->heap->stop_requested)) vm_safepoint_check(vm);
+  return --vm->reductions > 0 ? 0 : vm_reductions_out(vm);
+}
 
 int vm_heap_stop_the_world(jello_vm* vm);
 void vm_heap_lock(jello_vm* vm);

@@ -24,6 +24,7 @@ typedef enum jello_jit_ir_op {
   JIR_CALL_SELF,   /* self-recursive CALL: a=dst, b=first_arg, c=nargs */
   JIR_CALL_DIRECT, /* same-module CALL to a different function: a=dst, b=first_arg, c=nargs, imm=callee function index */
   JIR_CALL_NATIVE, /* a=dst, b=first_arg, c=nargs, imm=import index */
+  JIR_CALLR,       /**< Call through a Function value; a=dst, b=callee, c=nargs, imm=first_arg. */
 
   /* -- typed constants -- */
   JIR_CONST_I8_IMM, /* a=dst, imm=literal value (masked to the dest's own narrow width at emit time, exactly as vm_store_u32_masked already does) */
@@ -35,6 +36,9 @@ typedef enum jello_jit_ir_op {
   JIR_CONST_BOOL,   /* a=dst, imm=0/1 */
   JIR_CONST_NULL,   /* a=dst */
   JIR_CONST_ATOM,   /* a=dst, imm=atom id */
+  JIR_TRY,    /**< a=payload register (Dynamic), imm=handler offset from bc_pc + 1, as for JMP. */
+  JIR_ENDTRY, /**< Closes the innermost try region. */
+  JIR_THROW,  /**< a=payload register (Dynamic); never falls through. */
 
   /* -- arithmetic -- */
   JIR_BIN_I32, /* a=dst, b=lhs, c=rhs, imm=jello_jir_bin */
@@ -67,6 +71,9 @@ typedef enum jello_jit_ir_op {
   JIR_FROM_DYN, /* a=dst, b=src Dynamic, imm=target jello_type_kind (resolved at lowering time even for FROM_DYN_PTR, whose bytecode-level dest kind is POLY) */
   JIR_KINDOF,   /* a=dst I32, b=src Dynamic */
   JIR_PHYSEQ,   /* a=dst Bool, b=reg1, c=reg2 */
+  JIR_IS_NULL,    /**< a=dst Bool, b=src Dynamic or reference. */
+  JIR_NULL_CHECK, /**< a=src Dynamic or reference; traps NULL_DEREF when null. */
+  JIR_IS_ENUM,    /**< a=dst Bool, b=src Dynamic, imm=enum type. */
 
   /* -- Bytes -- */
   JIR_BYTES_NEW,     /* a=dst, b=len */
@@ -81,6 +88,7 @@ typedef enum jello_jit_ir_op {
   JIR_BYTES_BLIT,    /* a=dst, b=src, c=offset */
   JIR_BITS_WRITE,    /* a=bytes, b=val, c=width, imm=bit offset */
   JIR_BITS_READ,     /* a=dst, b=bytes, c=width, imm=bit offset */
+  JIR_BYTES_FREEZE,  /**< a=bytes. */
 
   /* -- Struct -- */
   JIR_STRUCT_NEW, /* a=dst */
@@ -98,6 +106,16 @@ typedef enum jello_jit_ir_op {
   JIR_OBJ_REMOVE,   /* a=dst Bool, b=object, c=key atom reg */
   JIR_OBJ_CLEAR,    /* b=object */
   JIR_OBJ_COPY,     /* a=dst, b=src */
+
+  JIR_ARRAY_LEN, /**< a=dst I32, b=array. */
+  JIR_ARRAY_GET, /**< a=dst, b=array, c=idx. */
+  JIR_ARRAY_SET, /**< a=val, b=array, c=idx. */
+
+  JIR_ENUM_TAG, /**< a=dst I32, b=enum. */
+  JIR_ENUM_GET, /**< a=dst, b=enum, c=field index. */
+
+  JIR_GLOBAL_GET, /**< a=dst, imm=global index. */
+  JIR_GLOBAL_SET, /**< a=val, imm=global index. */
 } jello_jit_ir_op;
 
 typedef enum jello_jir_bin {
@@ -216,6 +234,8 @@ int jit_exec_buf_begin_patch(jit_exec_buf* buf);
 int jit_exec_buf_end_patch(jit_exec_buf* buf);
 int jit_exec_buf_write(jit_exec_buf* buf, const void* bytes, size_t n);
 int jit_finalize_exec_buf(jit_exec_buf* buf);
+int jit_exec_buf_begin_append(jit_exec_buf* buf, size_t bound);
+int jit_exec_buf_end_append(jit_exec_buf* buf);
 void jit_free_exec_buf(jit_exec_buf* buf);
 
 enum {
@@ -289,18 +309,21 @@ int jit_survive_plan_build(const jello_jit_ir_function* ir, const jello_bc_modul
     const jello_bc_function* f, const uint8_t* is_target, jit_survive_plan* out_plan);
 void jit_survive_plan_free(jit_survive_plan* plan);
 void jit_debug_assert_rsp_aligned16(uint64_t rsp);
-void jit_trap_arithmetic(jello_vm* vm);
-void jit_trap_stack_overflow(jello_vm* vm);
-void jit_trap_null_deref(jello_vm* vm);
-void jit_trap_bounds(jello_vm* vm);
-void jit_trap_type_mismatch(jello_vm* vm);
+
+JELLO_JIT_ABI void jit_trap_arithmetic(jello_vm* vm);
+JELLO_JIT_ABI void jit_trap_stack_overflow(jello_vm* vm);
+JELLO_JIT_ABI void jit_trap_null_deref(jello_vm* vm);
+JELLO_JIT_ABI void jit_trap_bounds(jello_vm* vm);
+JELLO_JIT_ABI void jit_trap_type_mismatch(jello_vm* vm);
 void jit_trap_fuel(jello_vm* vm);
-void jit_trap_limit(jello_vm* vm); 
+JELLO_JIT_ABI void jit_trap_limit(jello_vm* vm);
+JELLO_JIT_ABI void jit_trap_pop_frame(jello_vm* vm);
 
 JELLO_JIT_ABI jello_bytes* jit_bytes_bitop(jello_vm* vm, jello_bytes* b, jello_bytes* c, int op_kind);
 JELLO_JIT_ABI jello_bytes* jit_bytes_concat2(jello_vm* vm, jello_bytes* b, jello_bytes* c);
 JELLO_JIT_ABI void jit_bits_write(jello_bytes* b, uint32_t width, uint32_t bit_off, uint32_t value);
 JELLO_JIT_ABI uint32_t jit_bits_read(const jello_bytes* b, uint32_t width, uint32_t bit_off);
+JELLO_JIT_ABI int jit_run_handler(jello_vm* vm, const jello_bc_module* m, uint32_t fi, uint32_t pc);
 
 enum {
   JIT_EMIT_BUF_MIN_CAP = 65536u,
@@ -310,6 +333,7 @@ enum {
 
 uint8_t* jit_frame_entry_base(jello_vm* vm);
 void jit_frame_zero_and_null_init(uint8_t* mem, uint32_t total, const uint8_t* kind, uint32_t nregs);
+int jello_jit_ir_slow_runs_handler(jello_op op);
 
 #define JIT_TRAP_SITE_OFF                                                                          \
   ((uint32_t)(offsetof(jello_vm, trap_trace) + offsetof(jello_trap_trace, site)))

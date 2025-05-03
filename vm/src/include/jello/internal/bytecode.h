@@ -473,12 +473,18 @@ typedef struct jello_op_info {
      op_global_get)                                                                                \
   OP(JOP_GLOBAL_SET, "GLOBAL_SET", REG, POLY, UNUSED, 0, UNUSED, 0, IMM_POOL, JELLO_OPF_NONE,      \
      op_global_set)                                                                                \
+  OP(JOP_BYTES_SLICE, "BYTES_SLICE", REG, T_BYTES, REG, T_BYTES, REG, T_I32, IMM_NONE,             \
+     JELLO_OPF_CAN_ALLOC | JELLO_OPF_CAN_TRAP, op_bytes_slice)                                     \
   OP(JOP_IS_NULL, "IS_NULL", REG, T_BOOL, REG, POLY, UNUSED, 0, IMM_NONE, JELLO_OPF_NONE,          \
      op_is_null)                                                                                   \
   OP(JOP_NULL_CHECK, "NULL_CHECK", REG, POLY, UNUSED, 0, UNUSED, 0, IMM_NONE, JELLO_OPF_CAN_TRAP,  \
      op_null_check)                                                                                \
   OP(JOP_IS_ENUM, "IS_ENUM", REG, T_BOOL, REG, T_DYNAMIC, UNUSED, 0, IMM_RAW,                      \
      JELLO_OPF_TOUCHES_DYNAMIC, op_is_enum)                                                        \
+  OP(JOP_BYTES_FREEZE, "BYTES_FREEZE", REG, T_BYTES, UNUSED, 0, UNUSED, 0, IMM_NONE,               \
+     JELLO_OPF_CAN_TRAP, op_bytes_freeze)                                                          \
+  OP(JOP_BYTES_JOIN, "BYTES_JOIN", REG, T_BYTES, REG, T_ARRAY, REG, T_BYTES, IMM_NONE,             \
+     JELLO_OPF_CAN_TRAP | JELLO_OPF_CAN_ALLOC, op_bytes_join)
 
 #define OP(id, name, ar, ak, br, bk, cr, ck, ir, fl, h) id,
 typedef enum jello_op {
@@ -486,7 +492,7 @@ typedef enum jello_op {
 } jello_op;
 #undef OP
 
-#define JOP_COUNT (JOP_IS_ENUM + 1)
+#define JOP_COUNT (JOP_BYTES_JOIN + 1)
 
 extern const jello_op_info jello_op_table[JOP_COUNT];
 
