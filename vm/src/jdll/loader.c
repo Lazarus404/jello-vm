@@ -117,26 +117,100 @@ static int already_tried(const search* s, const char* dir, size_t dir_len) {
   return 0;
 }
 
-jello_jdll_handle* jello_jdll_load(const char* library_name) {
-  if(!library_name || !library_name[0]) return NULL;
+static int found_in(search* s, const char* dir, size_t dir_len) {
+  if(dir_len == 0 || already_tried(s, dir, dir_len)) return 0;
+  size_t used = strlen(s->tried);
+  snprintf(s->tried + used, sizeof s->tried - used, "%s%.*s", used ? ", " : "", (int)dir_len, dir);
+  int slash = !jello_is_slash(dir[dir_len - 1]);
+  if(snprintf(s->path, sizeof s->path, "%.*s%s%s", (int)dir_len, dir, slash ? "/" : "",
+              s->soname) >= (int)sizeof s->path)
+    return 0;
+  struct stat st;
+  if(stat(s->path, &st) != 0) return 0;
+  char why[256];
+  s->dl = jello_dl_open(s->path, why, sizeof why);
+  if(!s->dl) snprintf(s->unopened, sizeof s->unopened, "cannot open %s: %s", s->path, why);
+  return s->dl != NULL;
+}
 
-  void* dl = resolve_and_open(library_name);
-  if(!dl) return NULL;
+static int found_in_each(search* s, const char* dirs) {
+  while(dirs && *dirs) {
+    const char* sep = strchr(dirs, JELLO_PATH_LIST_SEP);
+    size_t len = sep ? (size_t)(sep - dirs) : strlen(dirs);
+    if(found_in(s, dirs, len)) return 1;
+    dirs = sep ? sep + 1 : NULL;
+  }
+  return 0;
+}
+
+static int find(search* s) {
+  if(found_in_each(s, g_search) || found_in(s, ".", 1) ||
+     found_in_each(s, getenv("JELLO_JDLL_PATH")))
+    return 1;
+  char self[PATH_MAX], dir[PATH_MAX], lib[PATH_MAX];
+  if(!jello_executable_path(self) || !jello_directory_of(self, dir)) return 0;
+  if(found_in(s, dir, strlen(dir))) return 1;
+  char* slash = (char*)jello_last_slash(dir);
+  if(!slash || slash == dir) return 0;
+  *slash = '\0';
+  return snprintf(lib, sizeof lib, "%s/lib", dir) < (int)sizeof lib &&
+         found_in(s, lib, strlen(lib));
+}
+
+jello_jdll_handle* jello_jdll_load(const char* library_name) {
+  g_jdll_err[0] = '\0';
+  if(!library_name || !library_name[0]) {
+    snprintf(g_jdll_err, sizeof g_jdll_err, "a .jdll needs a name");
+    return NULL;
+  }
+  if(strcmp(library_name, "vm") == 0) {
+    jello_jdll_handle* h = (jello_jdll_handle*)calloc(1, sizeof(jello_jdll_handle));
+    if(!h) {
+      snprintf(g_jdll_err, sizeof g_jdll_err, "out of memory");
+      return NULL;
+    }
+    h->manifest = &vm_builtin_manifest;
+    return h;
+  }
+  search s = {.tried = "", .unopened = ""};
+  snprintf(s.soname, sizeof s.soname, JELLO_JDLL_SONAME_FMT, library_name);
+  if(!find(&s)) {
+    if(s.unopened[0]) snprintf(g_jdll_err, sizeof g_jdll_err, "%s", s.unopened);
+    else snprintf(g_jdll_err, sizeof g_jdll_err, "cannot find %s in %s", s.soname, s.tried);
+    return NULL;
+  }
+  void* dl = s.dl;
 
   char sym[256];
   snprintf(sym, sizeof sym, "jello_jdll_manifest_%s", library_name);
-  const jello_jdll_manifest* manifest = (const jello_jdll_manifest*)dlsym(dl, sym);
-  if(!manifest || manifest->magic != JELLO_JDLL_MANIFEST_MAGIC ||
-     manifest->abi_version != JELLO_JDLL_ABI_VERSION ||
-     !manifest->library_name || strcmp(manifest->library_name, library_name) != 0) {
-    dlclose(dl);
+  const jello_jdll_manifest* manifest = (const jello_jdll_manifest*)jello_dl_symbol(dl, sym);
+  if(!manifest || manifest->magic != JELLO_JDLL_MANIFEST_MAGIC || !manifest->library_name ||
+     strcmp(manifest->library_name, library_name) != 0) {
+    jello_dl_close(dl);
+    snprintf(g_jdll_err, sizeof g_jdll_err, "%s is not a %s library", s.path, library_name);
     return NULL;
   }
+  if(manifest->abi_version != JELLO_JDLL_ABI_VERSION || !manifest->api) {
+    snprintf(g_jdll_err, sizeof g_jdll_err,
+             "%s was built for ABI %u; rebuild it against this VM's jello/jdll.h (ABI %u)", s.path,
+             (unsigned)manifest->abi_version, (unsigned)JELLO_JDLL_ABI_VERSION);
+    jello_dl_close(dl);
+    return NULL;
+  }
+  __atomic_store_n(manifest->api, &jello_jdll_host_api, __ATOMIC_RELEASE);
 
   jello_jdll_handle* h = (jello_jdll_handle*)malloc(sizeof(jello_jdll_handle));
-  if(!h) { dlclose(dl); return NULL; }
+  char* path = strdup(s.path);
+  if(!h || !path) {
+    free(h);
+    free(path);
+    jello_dl_close(dl);
+    snprintf(g_jdll_err, sizeof g_jdll_err, "out of memory");
+    return NULL;
+  }
   h->dl = dl;
   h->manifest = manifest;
+  h->path = path;
   return h;
 }
 

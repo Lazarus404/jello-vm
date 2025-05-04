@@ -39,6 +39,9 @@ uint32_t jdl_arg_bytes_len(jdlo_ctx* c, int index) {
   return b ? b->length : 0u;
 }
 jello_value jdl_arg_value(jdlo_ctx* c, int index) { return vm_load_val(c->caller_rf, arg_reg(c, index)); }
+const char* jdl_atom_name(jdlo_ctx* c, uint32_t atom_id) {
+  return atom_id < c->m->natoms ? c->m->atoms[atom_id] : NULL;
+}
 
 void jdl_release_ret(jdlo_ctx* c) {
   free(c->ret_bytes);
@@ -75,10 +78,9 @@ void jdl_return_bytes_copy(jdlo_ctx* c, const uint8_t* data, uint32_t len) {
     if(!copy) { jdl_fail(c, "jdl_return_bytes_copy: out of memory"); return; }
     memcpy(copy, data, len);
   }
-  c->ret.bytes.data = copy;
-  c->ret.bytes.len = len;
-  c->ret_kind_given = JELLO_T_BYTES;
-  c->returned = 1;
+  set_ret(c, JELLO_T_BYTES);
+  c->ret_bytes = copy;
+  c->ret_bytes_len = len;
 }
 void jdl_return_value(jdlo_ctx* c, jello_value v) {
   set_ret(c, JELLO_T_DYNAMIC);
@@ -89,6 +91,32 @@ void jdl_return_void(jdlo_ctx* c) {
   c->returned = 1;
 }
 
+void* jdl_arg_handle(jdlo_ctx* c, int index, const jello_jdll_handle_class* cls) {
+  jello_value v = vm_load_val(c->caller_rf, arg_reg(c, index));
+  if(jello_is_null(v)) return NULL;
+  if(jello_is_ptr(v) && jello_as_ptr(v) != NULL) {
+    const jello_handle* hd = (const jello_handle*)jello_as_ptr(v);
+    if(hd->h.kind == (uint8_t)JELLO_OBJ_HANDLE && hd->cls == cls) return hd->payload;
+  }
+  jdl_fail(c, "native handle of the wrong class");
+  return NULL;
+}
+void jdl_return_handle(jdlo_ctx* c, const jello_jdll_handle_class* cls, void* payload,
+                       uint32_t native_bytes) {
+  set_ret(c, JELLO_T_DYNAMIC);
+  c->handle_class = cls;
+  c->handle_payload = payload;
+  c->handle_bytes = native_bytes;
+  c->ret.dyn = jello_make_null();
+}
+void jdl_return_null(jdlo_ctx* c) { jdl_return_value(c, jello_make_null()); }
+
+int32_t jdl_program_arg_count(jdlo_ctx* c) { return c->vm->heap->program_argc; }
+const char* jdl_program_arg(jdlo_ctx* c, int32_t index) {
+  const jello_heap* heap = c->vm->heap;
+  return index >= 0 && index < heap->program_argc ? heap->program_argv[index] : NULL;
+}
+
 void jdl_fail(jdlo_ctx* c, const char* msg) {
   c->failed = 1;
   c->fail_said = msg != NULL;
@@ -97,4 +125,15 @@ void jdl_fail(jdlo_ctx* c, const char* msg) {
              c->sig->resolved->name, msg);
 }
 
+jello_value jdl_object_get(const jello_object* o, uint32_t atom_id) {
+  return jello_object_get(o, atom_id);
+}
+void jdl_object_seal(jello_object* o, uint32_t atom_id, jello_value v) {
+  jello_object_seal(o, atom_id, v);
+}
+uint32_t jdl_object_keys(const jello_object* o, int skip_proto, uint32_t* out) {
+  return jello_object_keys(o, skip_proto, out);
+}
+
 #define HOST_MEMBER(f) .f = f,
+const jello_jdll_api jello_jdll_host_api = {JELLO_JDLL_API(HOST_MEMBER)};

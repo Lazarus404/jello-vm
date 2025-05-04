@@ -10,6 +10,25 @@
 
 #include <stdlib.h>
 
+int vm_try_push(jello_vm* vm, uint32_t catch_pc, uint32_t payload_reg) {
+  call_frame* fr = &vm->call_frames[vm->call_frames_len - 1u];
+  if(vm->live_try_scopes == vm->try_scopes_cap) {
+    uint32_t cap = vm->try_scopes_cap ? vm->try_scopes_cap * 2u : JELLO_TRY_STACK_MAX;
+    try_scope* grown = (try_scope*)realloc(vm->try_scopes, (size_t)cap * sizeof(try_scope));
+    if(!grown) {
+      vm->trap_code = JELLO_TRAP_STACK_OVERFLOW;
+      return 0;
+    }
+    vm->try_scopes = grown;
+    vm->try_scopes_cap = cap;
+  }
+  try_scope* ts = &vm->try_scopes[vm->live_try_scopes++];
+  fr->try_stack_len++;
+  ts->catch_pc = catch_pc;
+  ts->payload_reg = payload_reg;
+  return 1;
+}
+
 void vm_try_pop(jello_vm* vm) {
   call_frame* fr = &vm->call_frames[vm->call_frames_len - 1u];
   if(fr->try_stack_len > 0) {
@@ -19,16 +38,9 @@ void vm_try_pop(jello_vm* vm) {
 }
 
 op_result op_try(exec_ctx* ctx, const jello_insn* ins) {
-  jello_vm* vm = ctx->vm;
-  call_frame* fr = &vm->call_frames[vm->call_frames_len - 1u];
-  if(fr->try_stack_len >= JELLO_TRY_STACK_MAX) {
-    vm->trap_code = JELLO_TRAP_STACK_OVERFLOW;
-    return OP_TRAP;
-  }
-  try_scope* ts = &fr->try_stack[fr->try_stack_len++];
-  ts->catch_pc = (uint32_t)((int32_t)fr->pc + (int32_t)ins->imm);
-  ts->payload_reg = ins->a;
-  return OP_CONTINUE;
+  call_frame* fr = &ctx->vm->call_frames[ctx->vm->call_frames_len - 1u];
+  uint32_t catch_pc = (uint32_t)((int32_t)fr->pc + (int32_t)ins->imm);
+  return vm_try_push(ctx->vm, catch_pc, ins->a) ? OP_CONTINUE : OP_TRAP;
 }
 
 op_result op_endtry(exec_ctx* ctx, const jello_insn* ins) {
@@ -37,22 +49,39 @@ op_result op_endtry(exec_ctx* ctx, const jello_insn* ins) {
   return OP_CONTINUE;
 }
 
+int vm_throw_find(jello_vm* vm, jello_value payload) {
+  if(vm->live_try_scopes == 0) return 0;
+  for(uint32_t i = vm->call_frames_len; i-- > 0;) {
+    call_frame* fr = &vm->call_frames[i];
+    if(fr->try_stack_len == 0) continue;
+    fr->try_stack_len--;
+    try_scope ts = vm->try_scopes[--vm->live_try_scopes];
+    vm_store_val(&fr->rf, ts.payload_reg, payload);
+    fr->pc = ts.catch_pc;
+    vm->unwind_len = i + 1u;
+    return 1;
+  }
+  return 0;
+}
+
+int vm_catch_in_segment(exec_ctx* ctx) {
+  jello_vm* vm = ctx->vm;
+  if(vm->trap_code != JELLO_TRAP_INTERNAL_UNWIND || vm->unwind_len <= ctx->stop_len) return 0;
+  while(vm->call_frames_len > vm->unwind_len) vm_pop_frame(vm);
+  vm->trap_code = JELLO_TRAP_NONE;
+  return 1;
+}
+
 op_result op_throw(exec_ctx* ctx, const jello_insn* ins) {
   jello_vm* vm = ctx->vm;
   call_frame* fr = &vm->call_frames[vm->call_frames_len - 1u];
   jello_value payload = vm_load_val(&fr->rf, ins->a);
-
-  while(vm->call_frames_len > 0) {
-    call_frame* top = &vm->call_frames[vm->call_frames_len - 1u];
-    if(top->try_stack_len > 0) {
-      try_scope ts = top->try_stack[--top->try_stack_len];
-      vm_store_val(&top->rf, ts.payload_reg, payload);
-      top->pc = ts.catch_pc;
-      return OP_CONTINUE;
-    }
-    if(vm->call_frames_len == 1u) break; /* the top-level frame itself has no handler */
-    vm_pop_frame(vm);
+  if(!vm_throw_find(vm, payload)) {
+    vm->trap_code = JELLO_TRAP_UNCAUGHT_THROW;
+    vm->thrown = payload;
+    return OP_TRAP;
   }
-  vm->trap_code = JELLO_TRAP_UNCAUGHT_THROW;
-  return OP_TRAP;
+  vm->trap_code = JELLO_TRAP_INTERNAL_UNWIND;
+  if(vm_catch_in_segment(ctx)) return OP_CONTINUE;
+  return OP_TRAP_LOCATED;
 }

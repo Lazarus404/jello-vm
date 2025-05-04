@@ -237,6 +237,23 @@ static frame_segment* segment_above(jello_vm* vm, uint32_t total) {
   return seg;
 }
 
+int jit_try_grow_push(jello_vm* vm, uint64_t top) {
+  if(!grow_call_frames(vm)) return 0;
+  if(top <= vm->frame_stack_limit) return 1;
+  if(top <= vm->frame_stack_max) return grow_frame_stack(vm, top);
+  uint32_t total = (uint32_t)(top - vm->frame_stack_top);
+  frame_segment* seg = segment_above(vm, total);
+  if(!seg) return 0;
+  save_segment(vm);
+  load_segment(vm, seg);
+  if(total > vm->frame_stack_limit && !grow_frame_stack(vm, total)) {
+    load_segment(vm, seg->below);
+    return 0;
+  }
+  vm->call_frames[vm->call_frames_len].starts_segment = 1;
+  return 1;
+}
+
 void vm_frame_segments_free(jello_vm* vm) {
   free_segments(vm, vm->first_segment.above);
   vm->first_segment.above = NULL;
@@ -391,7 +408,38 @@ void vm_pop_frame(jello_vm* vm) {
   fr->spill_slots = NULL;
   fr->spill_cap = 0;
   vm->frame_stack_top -= fr->rf.size;
+  if(fr->pop_work) {
+    vm->live_try_scopes -= fr->try_stack_len;
+    if(fr->starts_segment) {
+      save_segment(vm);
+      load_segment(vm, vm->segment->below);
+    }
+    fr->pop_work = 0;
+  }
   vm->call_frames_len--;
+}
+
+void vm_trace_frames(jello_vm* vm, uint32_t stop) {
+  jello_trap_trace* t = &vm->trap_trace;
+  uint32_t site = t->site;
+  t->site = 0;
+  if(vm->trap_code == JELLO_TRAP_INTERNAL_UNWIND || t->full) return;
+  for(uint32_t i = vm->call_frames_len; i > stop; i--) {
+    const call_frame* fr = &vm->call_frames[i - 1u];
+    uint32_t after = i == vm->call_frames_len ? site : fr->pc;
+    if(after == 0) continue;
+    uint32_t last = t->len - 1u;
+    if(t->len && t->func_index[last] == fr->func_index && t->pc[last] == after - 1u) {
+      t->repeated[last] = 1;
+    } else if(t->len < JELLO_TRAP_CALLERS_MAX) {
+      t->func_index[t->len] = fr->func_index;
+      t->repeated[t->len] = 0;
+      t->pc[t->len++] = after - 1u;
+    } else {
+      t->full = 1;
+      return;
+    }
+  }
 }
 
 void vm_frame_unwind(jello_vm* vm) {

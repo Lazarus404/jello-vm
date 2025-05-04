@@ -77,6 +77,19 @@ static void* ptr_arg(exec_ctx* ctx, call_frame* fr, uint32_t r) {
   return p;
 }
 
+static jello_bytes* bytes_arg(exec_ctx* ctx, call_frame* fr, uint32_t r) {
+  return (jello_bytes*)ptr_arg(ctx, fr, r);
+}
+
+static jello_bytes* buffer_arg(exec_ctx* ctx, call_frame* fr, uint32_t r) {
+  jello_bytes* b = bytes_arg(ctx, fr, r);
+  if(b && !vm_bytes_is_buffer(b)) {
+    ctx->vm->trap_code = JELLO_TRAP_TYPE_MISMATCH;
+    return NULL;
+  }
+  return b;
+}
+
 op_result op_bytes_set_u8(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   void* p = NULL;
@@ -100,17 +113,6 @@ op_result op_bytes_set_u8(exec_ctx* ctx, const jello_insn* ins) {
   return OP_CONTINUE;
 }
 
-/* -- Memory-layout Bytes opcodes -- */
-
-static jello_bytes* bytes_arg(exec_ctx* ctx, call_frame* fr, uint32_t r) {
-  void* p = vm_load_ptr(&fr->rf, r);
-  if(!p) {
-    ctx->vm->trap_code = JELLO_TRAP_NULL_DEREF;
-    return NULL;
-  }
-  return (jello_bytes*)p;
-}
-
 static int bytes_access_in_range(const jello_bytes* b, uint32_t offset, uint32_t width) {
   return (uint64_t)offset + (uint64_t)width <= (uint64_t)b->length;
 }
@@ -129,6 +131,24 @@ op_result op_bytes_concat2(exec_ctx* ctx, const jello_insn* ins) {
   jello_bytes* dst = jello_bytes_new(ctx->vm, (uint32_t)total);
   memcpy(dst->data, b->data, b->length);
   memcpy(dst->data + b->length, c->data, c->length);
+  vm_store_ptr(&fr->rf, ins->a, dst);
+  return OP_CONTINUE;
+}
+
+op_result op_bytes_join(exec_ctx* ctx, const jello_insn* ins) {
+  call_frame* fr = current_frame(ctx);
+  jello_array* array = (jello_array*)ptr_arg(ctx, fr, ins->b);
+  jello_bytes* separator = array ? bytes_arg(ctx, fr, ins->c) : NULL;
+  if(!separator) return OP_TRAP;
+  jello_bytes* const* parts = (jello_bytes* const*)array->data;
+  for(uint32_t i = 0; i < array->length; i++) {
+    if(!parts[i]) {
+      ctx->vm->trap_code = JELLO_TRAP_NULL_DEREF;
+      return OP_TRAP;
+    }
+  }
+  jello_bytes* dst = jello_bytes_join(ctx->vm, parts, array->length, separator);
+  if(!dst) return OP_TRAP;
   vm_store_ptr(&fr->rf, ins->a, dst);
   return OP_CONTINUE;
 }
@@ -363,6 +383,20 @@ op_result op_bits_read(exec_ctx* ctx, const jello_insn* ins) {
   return OP_CONTINUE;
 }
 
+op_result op_bytes_slice(exec_ctx* ctx, const jello_insn* ins) {
+  call_frame* fr = current_frame(ctx);
+  jello_bytes* src = bytes_arg(ctx, fr, ins->b);
+  if(!src) return OP_TRAP;
+  uint32_t start = vm_load_u32(&fr->rf, ins->c);
+  uint32_t length = vm_load_u32(&fr->rf, (uint32_t)ins->c + 1u);
+  if((uint64_t)start + (uint64_t)length > (uint64_t)src->length) {
+    ctx->vm->trap_code = JELLO_TRAP_BOUNDS;
+    return OP_TRAP;
+  }
+  vm_store_ptr(&fr->rf, ins->a, jello_bytes_slice(ctx->vm, src, start, length));
+  return OP_CONTINUE;
+}
+
 op_result op_bytes_blit(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   jello_bytes* dst = bytes_arg(ctx, fr, ins->a);
@@ -375,5 +409,12 @@ op_result op_bytes_blit(exec_ctx* ctx, const jello_insn* ins) {
     return OP_TRAP;
   }
   memmove(dst->data + off, src->data, src->length);
+  return OP_CONTINUE;
+}
+
+op_result op_bytes_freeze(exec_ctx* ctx, const jello_insn* ins) {
+  jello_bytes* b = bytes_arg(ctx, current_frame(ctx), ins->a);
+  if(!b) return OP_TRAP;
+  if(vm_bytes_is_buffer(b)) b->h.type_id = 0;
   return OP_CONTINUE;
 }

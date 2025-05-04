@@ -72,17 +72,12 @@ jello_exec_status vm_exec_loop(exec_ctx* ctx) {
         break;
 
       case JOP_JMP_IF:
-        if(vm_load_u32(rf, ins->a) != 0u) {
-          if((int32_t)ins->imm < 0) {
-            vm_safepoint_check(vm);
-            if(vm_fuel_charge(vm) != 0) {
-              vm->trap_func_index = fr->func_index;
-              vm->trap_pc = fr->pc - 1u;
-              return JELLO_EXEC_TRAP;
-            }
-          }
-          fr->pc = (uint32_t)((int32_t)fr->pc + (int32_t)ins->imm);
+        if((int32_t)ins->imm < 0 && vm_poll_and_charge(vm) != 0) {
+          vm->trap_func_index = fr->func_index;
+          vm->trap_pc = fr->pc - 1u;
+          return JELLO_EXEC_TRAP;
         }
+        if(vm_load_u32(rf, ins->a) != 0u) fr->pc = (uint32_t)((int32_t)fr->pc + (int32_t)ins->imm);
         break;
 
       case JOP_MOV: {
@@ -103,6 +98,14 @@ jello_exec_status vm_exec_loop(exec_ctx* ctx) {
           vm->trap_pc = fr->pc - 1u;
           return JELLO_EXEC_TRAP;
         }
+#if defined(JELLO_ENABLE_JIT) && (defined(__x86_64__) || defined(__aarch64__))
+        /* Run a compiled callee as JIT code. Its trap, already located, ends
+         * this loop unless a TRY in this loop's frames catches it. */
+        if(vm->active_jit && jello_jit_enter_pushed_frame(vm) == 2 && !vm_catch_in_segment(ctx)) {
+          vm->trap_trace.site = vm->call_frames[vm->call_frames_len - 1u].pc;
+          return JELLO_EXEC_TRAP;
+        }
+#endif
         break;
       }
 
@@ -259,6 +262,23 @@ jello_exec_status vm_exec_loop(exec_ctx* ctx) {
   }
 }
 
+static jello_exec_status exec_top(jello_vm* vm, const jello_bc_module* m, jello_jit_module* jm,
+                                  jello_numeric_result* out) {
+  uint32_t base = vm->call_frames_len - 1u;
+  jello_exec_status st = JELLO_EXEC_OK;
+  int ran = 0;
+#if defined(JELLO_ENABLE_JIT) && (defined(__x86_64__) || defined(__aarch64__))
+  ran = jm && jello_jit_try_enter(vm, jm, out, &st);
+#endif
+  if(!ran) {
+    exec_ctx ctx = {vm, m, out, 0};
+    st = vm_exec_loop(&ctx);
+  }
+  assert(vm->trap_code != JELLO_TRAP_INTERNAL_UNWIND && "a caught throw escaped its catcher");
+  if(st == JELLO_EXEC_TRAP) vm_trace_frames(vm, base);
+  return st;
+}
+
 static jello_exec_status vm_exec_numeric_impl(jello_vm* vm, const jello_bc_module* m,
     jello_numeric_result* out, jello_jit_module* persistent_jm) {
   vm_safepoint_check(vm);
@@ -307,6 +327,22 @@ static jello_exec_status vm_exec_numeric_impl(jello_vm* vm, const jello_bc_modul
   ctx.out = out;
   jello_exec_status st = vm_exec_loop(&ctx);
   atomic_store(&vm->in_exec, 0);
+  return st;
+}
+
+jello_exec_status vm_exec_function(jello_vm* vm, const jello_function* fn, const uint64_t* args,
+                                   uint32_t nargs, jello_numeric_result* out) {
+  const jello_bc_module* m = vm->running_module;
+  out->kind = JELLO_NUM_VOID;
+  vm_clear_trap(vm);
+  if(!vm_push_frame_raw(vm, m, fn->func_index, 0, 0, args, nargs, fn->captures, fn->ncaps)) {
+    vm->trap_func_index = fn->func_index;
+    vm->trap_pc = 0;
+    return JELLO_EXEC_TRAP;
+  }
+  int in_exec = atomic_exchange(&vm->in_exec, 1);
+  jello_exec_status st = exec_top(vm, m, vm->active_jit, out);
+  atomic_store(&vm->in_exec, in_exec);
   return st;
 }
 

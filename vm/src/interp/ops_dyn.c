@@ -138,17 +138,13 @@ op_result op_callr(exec_ctx* ctx, const jello_insn* ins) {
     ctx->vm->trap_code = jello_is_null(v) ? JELLO_TRAP_NULL_DEREF : JELLO_TRAP_TYPE_MISMATCH;
     return OP_TRAP;
   }
-  void* p = jello_as_ptr(v);
-  if(!p) { ctx->vm->trap_code = JELLO_TRAP_NULL_DEREF; return OP_TRAP; }
-  jello_function* fn = (jello_function*)p;
-  if(fn->h.kind != (uint8_t)JELLO_OBJ_FUNCTION) {
-    ctx->vm->trap_code = JELLO_TRAP_TYPE_MISMATCH;
-    return OP_TRAP;
+#if defined(JELLO_ENABLE_JIT) && (defined(__x86_64__) || defined(__aarch64__))
+  if(ctx->vm->active_jit && jello_jit_enter_pushed_frame(ctx->vm) == 2 &&
+     !vm_catch_in_segment(ctx)) {
+    ctx->vm->trap_trace.site = current_frame(ctx)->pc;
+    return OP_TRAP_LOCATED;
   }
-  uint32_t arg_count = (uint32_t)ins->c;
-  uint32_t arg_first = (uint32_t)ins->imm;
-  if(!vm_push_frame(ctx->vm, ctx->m, fn->func_index, ins->a, arg_first, arg_count, 1)) return OP_TRAP;
-  vm_copy_captures_into_top(ctx->vm, fn);
+#endif
   return OP_CONTINUE;
 }
 

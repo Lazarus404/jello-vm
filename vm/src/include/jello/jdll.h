@@ -46,6 +46,9 @@ const uint8_t* jdl_arg_bytes_data(jdlo_ctx* c, int index);
 /** A Bytes argument's length; 0 for a null Bytes. */
 uint32_t jdl_arg_bytes_len(jdlo_ctx* c, int index);
 jello_value jdl_arg_value(jdlo_ctx* c, int index); /* Dynamic-kind argument, already boxed */
+/** The name of atom `atom_id` in the calling module, NUL-terminated; NULL when it has no such
+ * atom. */
+const char* jdl_atom_name(jdlo_ctx* c, uint32_t atom_id);
 /** @} */
 
 /* -- returns -- */
@@ -106,6 +109,32 @@ static inline int jdl_release(void* payload) {
 }
 #endif
 
+/** The payload of the handle in Dynamic argument `index`, or NULL for null.
+ * Any other value, including a handle of another class, fails the call and returns NULL. */
+void* jdl_arg_handle(jdlo_ctx* c, int index, const jello_jdll_handle_class* cls);
+/** Returns, as a Dynamic, a handle of class `cls` that owns `payload`. `native_bytes` estimates the
+ * payload's size, which counts towards the heap's collection threshold. If the call fails or
+ * returns the wrong kind, `payload` is finalised at once. */
+void jdl_return_handle(jdlo_ctx* c, const jello_jdll_handle_class* cls, void* payload,
+                       uint32_t native_bytes);
+void jdl_return_null(jdlo_ctx* c);
+
+/** @name Objects
+ * The fields of an Object that reached the export in a Dynamic; none of these allocates.
+ * @{ */
+/** `o`'s own value for `atom_id`, or null when absent. */
+jello_value jdl_object_get(const jello_object* o, uint32_t atom_id);
+/** Sets `o`'s `atom_id` to `v` and seals the slot, as jello_object_seal does. */
+void jdl_object_seal(jello_object* o, uint32_t atom_id, jello_value v);
+/** Writes `o`'s own keys to `out`, as jello_object_keys does; how many it wrote. */
+uint32_t jdl_object_keys(const jello_object* o, int skip_proto, uint32_t* out);
+/** @} */
+
+/** How many arguments the host gave the program; for jello, those after the module path. */
+int32_t jdl_program_arg_count(jdlo_ctx* c);
+/** Program argument `index`, owned by the host; NULL when `index` is out of range. */
+const char* jdl_program_arg(jdlo_ctx* c, int32_t index);
+
 /* -- errors -- */
 void jdl_fail(jdlo_ctx* c, const char* msg);
 
@@ -132,7 +161,25 @@ typedef struct jello_jdll_export {
  * encoding jello.h gives libraries; any change to one is a new version. */
 #define JELLO_JDLL_ABI_VERSION 4u
 
+/** The VM's functions a library calls, each declared above; X(f) for each. */
+#define JELLO_JDLL_API(X)                                                                          \
+  X(jdl_arg_i8)                                                                                    \
+  X(jdl_arg_i16) X(jdl_arg_i32) X(jdl_arg_i64) X(jdl_arg_f16) X(jdl_arg_f32) X(jdl_arg_f64)        \
+      X(jdl_arg_bool) X(jdl_arg_atom) X(jdl_arg_bytes_data) X(jdl_arg_bytes_len) X(jdl_arg_value)  \
+          X(jdl_atom_name) X(jdl_return_i8) X(jdl_return_i16) X(jdl_return_i32) X(jdl_return_i64)  \
+              X(jdl_return_f16) X(jdl_return_f32) X(jdl_return_f64) X(jdl_return_bool)             \
+                  X(jdl_return_atom) X(jdl_return_bytes_copy) X(jdl_return_value)                  \
+                      X(jdl_return_void) X(jdl_arg_handle) X(jdl_return_handle) X(jdl_return_null) \
+                          X(jdl_object_get) X(jdl_object_seal) X(jdl_object_keys)                  \
+                              X(jdl_program_arg_count) X(jdl_program_arg) X(jdl_fail)
+
 #define JELLO_JDLL_API_MEMBER(f) __typeof__(f)* f;
+/** The VM's functions as a library calls them, a member named for each; the loader hands a
+ * library this table before any of its exports runs. Later ABI versions only add members at the
+ * end. */
+typedef struct jello_jdll_api {
+  JELLO_JDLL_API(JELLO_JDLL_API_MEMBER)
+} jello_jdll_api;
 #undef JELLO_JDLL_API_MEMBER
 
 /** What a `.jdll` exports, as the data symbol `jello_jdll_manifest_<library>`; JELLO_JDLL_LIBRARY
@@ -145,6 +192,7 @@ typedef struct jello_jdll_manifest {
   const char* library_name;
   const jello_jdll_export* exports;
   uint32_t nexports;
+  const jello_jdll_api** api;
 } jello_jdll_manifest;
 
 #if defined(_WIN32)
@@ -154,6 +202,57 @@ typedef struct jello_jdll_manifest {
 #endif
 
 #ifndef JELLO_JDLL_HOST
+/** The VM's table, which the loader sets when it loads the library; every jdl_* call in a library
+ * goes through it, so none may run before that, as from a constructor. */
+extern JELLO_JDLL_HIDDEN const jello_jdll_api* jdl_api;
+
+/** Defines library `name`'s manifest over `exports`, an array of jello_jdll_export, and the
+ * table its calls go through. Use it once per library, at file scope. */
+#define JELLO_JDLL_LIBRARY(name, exports)                                                          \
+  const jello_jdll_api* jdl_api;                                                                   \
+  JELLO_JDLL_EXPORT const jello_jdll_manifest jello_jdll_manifest_##name = {                       \
+      JELLO_JDLL_MANIFEST_MAGIC,                                                                   \
+      JELLO_JDLL_ABI_VERSION,                                                                      \
+      #name,                                                                                       \
+      (exports),                                                                                   \
+      (uint32_t)(sizeof(exports) / sizeof((exports)[0])),                                          \
+      &jdl_api}
+
+/* Each name is its member of the table; a macro does not expand within itself. */
+#define jdl_arg_i8 (jdl_api->jdl_arg_i8)
+#define jdl_arg_i16 (jdl_api->jdl_arg_i16)
+#define jdl_arg_i32 (jdl_api->jdl_arg_i32)
+#define jdl_arg_i64 (jdl_api->jdl_arg_i64)
+#define jdl_arg_f16 (jdl_api->jdl_arg_f16)
+#define jdl_arg_f32 (jdl_api->jdl_arg_f32)
+#define jdl_arg_f64 (jdl_api->jdl_arg_f64)
+#define jdl_arg_bool (jdl_api->jdl_arg_bool)
+#define jdl_arg_atom (jdl_api->jdl_arg_atom)
+#define jdl_arg_bytes_data (jdl_api->jdl_arg_bytes_data)
+#define jdl_arg_bytes_len (jdl_api->jdl_arg_bytes_len)
+#define jdl_arg_value (jdl_api->jdl_arg_value)
+#define jdl_atom_name (jdl_api->jdl_atom_name)
+#define jdl_return_i8 (jdl_api->jdl_return_i8)
+#define jdl_return_i16 (jdl_api->jdl_return_i16)
+#define jdl_return_i32 (jdl_api->jdl_return_i32)
+#define jdl_return_i64 (jdl_api->jdl_return_i64)
+#define jdl_return_f16 (jdl_api->jdl_return_f16)
+#define jdl_return_f32 (jdl_api->jdl_return_f32)
+#define jdl_return_f64 (jdl_api->jdl_return_f64)
+#define jdl_return_bool (jdl_api->jdl_return_bool)
+#define jdl_return_atom (jdl_api->jdl_return_atom)
+#define jdl_return_bytes_copy (jdl_api->jdl_return_bytes_copy)
+#define jdl_return_value (jdl_api->jdl_return_value)
+#define jdl_return_void (jdl_api->jdl_return_void)
+#define jdl_arg_handle (jdl_api->jdl_arg_handle)
+#define jdl_return_handle (jdl_api->jdl_return_handle)
+#define jdl_return_null (jdl_api->jdl_return_null)
+#define jdl_object_get (jdl_api->jdl_object_get)
+#define jdl_object_seal (jdl_api->jdl_object_seal)
+#define jdl_object_keys (jdl_api->jdl_object_keys)
+#define jdl_program_arg_count (jdl_api->jdl_program_arg_count)
+#define jdl_program_arg (jdl_api->jdl_program_arg)
+#define jdl_fail (jdl_api->jdl_fail)
 #endif
 
 #ifdef __cplusplus

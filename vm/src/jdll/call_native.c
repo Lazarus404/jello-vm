@@ -27,17 +27,39 @@ op_result op_call_native(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = &vm->call_frames[vm->call_frames_len - 1u];
   jdlo_ctx jctx = {.vm = vm, .m = m, .caller_rf = &fr->rf, .ins = ins, .sig = sig};
 
-  vm_go_quiescent(vm);
-  exp->fn(&jctx);
-  vm_leave_quiescent(vm);
+  int builtin = vm_builtin_export(exp);
+  if(builtin) {
+    exp->fn(&jctx);
+  } else if(exp->flags & JELLO_JDLL_BLOCKING) {
+    jello_trap_code stopped = proc_call_blocking(vm, exp->fn, &jctx);
+    if(stopped) {
+      jdl_release_ret(&jctx);
+      vm->trap_code = stopped;
+      return OP_TRAP;
+    }
+  } else {
+    proc_call_quiescent(vm, exp->fn, &jctx);
+  }
 
-  if(jctx.failed) {
-    vm->trap_code = JELLO_TRAP_TYPE_MISMATCH;
+  jello_type_kind declared = (jello_type_kind)sig->ret_kind;
+  if(!jctx.returned && declared == JELLO_T_VOID) jdl_return_void(&jctx);
+  int ok = !jctx.failed && jctx.returned &&
+           (jctx.ret_kind_given == declared ||
+            (declared == JELLO_T_DYNAMIC && jctx.ret_kind_given == JELLO_T_BYTES));
+  if(!ok) {
+    jdl_release_ret(&jctx);
+    vm->trap_code = jctx.failed && jctx.trap ? jctx.trap : JELLO_TRAP_TYPE_MISMATCH;
+    if(!jctx.fail_said) {
+      const char* what = jctx.failed     ? "failed"
+                         : jctx.returned ? "returned the wrong kind of value"
+                                         : "returned nothing";
+      snprintf(vm->trap_detail, sizeof vm->trap_detail, "native %s %s", exp->name, what);
+    }
     return OP_TRAP;
   }
-  if(!jctx.returned || jctx.ret_kind_given != (jello_type_kind)sig->ret_kind) {
-    vm->trap_code = JELLO_TRAP_TYPE_MISMATCH;
-    return OP_TRAP;
+  if(jctx.handle_class) {
+    jctx.ret.dyn = jello_from_ptr(
+        jello_handle_new(vm, jctx.handle_class, jctx.handle_payload, jctx.handle_bytes));
   }
 
   reg_frame* rf = &fr->rf;
@@ -66,10 +88,11 @@ op_result op_call_native(exec_ctx* ctx, const jello_insn* ins) {
       vm_store_val(rf, ins->a, jctx.ret.dyn);
       break;
     case JELLO_T_BYTES: {
-      jello_bytes* b = jello_bytes_new(vm, jctx.ret.bytes.len);
-      if(jctx.ret.bytes.len) memcpy(b->data, jctx.ret.bytes.data, jctx.ret.bytes.len);
-      free((void*)jctx.ret.bytes.data); /* jdl_return_bytes_copy's own malloc'd copy */
-      vm_store_ptr(rf, ins->a, b);
+      jello_bytes* b = jello_bytes_new(vm, jctx.ret_bytes_len);
+      if(jctx.ret_bytes_len) memcpy(b->data, jctx.ret_bytes, jctx.ret_bytes_len);
+      free(jctx.ret_bytes);
+      if(declared == JELLO_T_DYNAMIC) vm_store_val(rf, ins->a, jello_from_ptr(b));
+      else vm_store_ptr(rf, ins->a, b);
       break;
     }
     default:
