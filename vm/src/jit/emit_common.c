@@ -544,3 +544,58 @@ int jello_jit_emit_function_into(const jello_bc_module* m, uint32_t fi, jit_exec
   out_fc->size = buf->len - blob_start;
   return 1;
 }
+
+static size_t emit_buf_cap(uint32_t ninsns) {
+  size_t cap = 256u + (size_t)ninsns * JIT_EMIT_PER_INSN_BUDGET + 512u;
+  if(cap < JIT_EMIT_BUF_MIN_CAP) cap = JIT_EMIT_BUF_MIN_CAP;
+  return cap;
+}
+
+int jello_jit_compile_function(const jello_bc_module* m, uint32_t fi, jello_jit_code* out_code) {
+  memset(&out_code->buf, 0, sizeof out_code->buf);
+  out_code->entry_off = 0;
+  out_code->body_off = 0;
+  out_code->loop_anchor_pcs = NULL;
+  out_code->loop_anchor_offs = NULL;
+  out_code->nloop_anchors = 0;
+
+  if(fi >= m->nfuncs) return 0;
+  jello_jit_ir_function* ir = jello_jit_ir_build(m, fi);
+  if(!ir) return 0;
+  uint32_t ninsns = ir->ninsns;
+  jello_jit_ir_free(ir);
+
+  jit_exec_buf buf = jit_alloc_exec_buf(emit_buf_cap(ninsns));
+  if(!buf.mem) return 0;
+
+  jello_jit_func_code fc;
+  memset(&fc, 0, sizeof(fc));
+  if(!jello_jit_emit_function_into(m, fi, &buf, &fc, NULL)) {
+    jit_free_exec_buf(&buf);
+    return 0;
+  }
+
+  if(!jit_finalize_exec_buf(&buf)) {
+    free(fc.loop_anchor_pcs);
+    free(fc.loop_anchor_offs);
+    jit_free_exec_buf(&buf);
+    return 0;
+  }
+
+  out_code->buf = buf;
+  out_code->entry_off = fc.entry_off;
+  out_code->body_off = fc.body_off;
+  out_code->loop_anchor_pcs = fc.loop_anchor_pcs;
+  out_code->loop_anchor_offs = fc.loop_anchor_offs;
+  out_code->nloop_anchors = fc.nloop_anchors;
+  return 1;
+}
+
+void jello_jit_code_free(jello_jit_code* code) {
+  free(code->loop_anchor_pcs);
+  free(code->loop_anchor_offs);
+  code->loop_anchor_pcs = NULL;
+  code->loop_anchor_offs = NULL;
+  code->nloop_anchors = 0;
+  jit_free_exec_buf(&code->buf);
+}
