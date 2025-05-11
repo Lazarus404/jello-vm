@@ -96,6 +96,21 @@ static const net_tls_ops* tls_library(const jello_bc_module* m) {
   return NULL;
 }
 
+static void free_socket(void* payload) {
+  if(!jdl_release(payload)) return;
+  proc_socket* k = (proc_socket*)payload;
+  pthread_mutex_lock(&net_lock);
+  jello_process* owner = k->owner;
+  if(owner) disown(k);
+  pthread_mutex_unlock(&net_lock);
+  if(k->tls) k->tls_ops->close(k->tls, 0);
+  if(k->fd >= 0) jello_sock_close(k->fd);
+  if(owner) proc_release(owner);
+  free(k);
+}
+
+const jello_jdll_handle_class proc_socket_class = {"socket", free_socket, jdl_retain};
+
 int proc_socket_note(struct proc_socket_list** list, void* payload) {
   struct proc_socket_list* l = *list;
   if(!l || l->len == l->cap) {
@@ -113,12 +128,83 @@ int proc_socket_note(struct proc_socket_list** list, void* payload) {
   return 1;
 }
 
+void proc_sockets_pack(const jello_vm* vm, struct proc_socket_list** list) {
+  struct proc_socket_list* l = *list;
+  jello_process* from = vm ? vm->proc : NULL;
+  uint32_t kept = 0;
+  pthread_mutex_lock(&net_lock);
+  for(uint32_t i = 0; from && i < l->len; i++) {
+    proc_socket* k = l->at[i];
+    if(k->owner != from || k->fd < 0) continue;
+    disown(k);
+    jdl_retain(k);
+    l->at[kept++] = k;
+  }
+  pthread_mutex_unlock(&net_lock);
+  for(uint32_t i = 0; i < kept; i++) proc_release(from);
+  l->len = kept;
+  if(!kept) {
+    free(l);
+    *list = NULL;
+  }
+}
+
+void proc_sockets_take(jello_process* p, struct proc_socket_list** list) {
+  struct proc_socket_list* chain = __atomic_exchange_n(list, NULL, __ATOMIC_ACQ_REL);
+  if(!chain) return;
+  if(p) {
+    pthread_mutex_lock(&net_lock);
+    for(struct proc_socket_list* l = chain; l; l = l->next) {
+      for(uint32_t i = 0; i < l->len; i++) {
+        if(l->at[i]->fd >= 0) adopt(l->at[i], p);
+      }
+    }
+    pthread_mutex_unlock(&net_lock);
+  }
+  while(chain) {
+    struct proc_socket_list* l = chain;
+    chain = l->next;
+    for(uint32_t i = 0; i < l->len; i++) {
+      proc_socket* k = l->at[i];
+      if(!p && k->fd >= 0) {
+        jello_sock_close(k->fd);
+        k->fd = -1;
+      }
+      free_socket(k);
+    }
+    free(l);
+  }
+}
+
 void proc_sockets_join(struct proc_socket_list** into, struct proc_socket_list** from) {
   struct proc_socket_list* last = *from;
   while(last->next) last = last->next;
   last->next = *into;
   *into = *from;
   *from = NULL;
+}
+
+static void close_locked(proc_socket* k, jello_process* p) {
+  disown(k);
+  int fd = k->fd;
+  net_tls* tls = k->tls;
+  const net_tls_ops* ops = k->tls_ops;
+  k->fd = -1;
+  k->tls = NULL;
+  pthread_mutex_unlock(&net_lock);
+  if(tls) ops->close(tls, 1);
+  proc_poll_close(p->vm, fd);
+  jello_sock_close(fd);
+  proc_release(p);
+}
+
+void proc_sockets_end(jello_process* p) {
+  for(;;) {
+    pthread_mutex_lock(&net_lock);
+    if(!p->sockets) break;
+    close_locked(p->sockets, p);
+  }
+  pthread_mutex_unlock(&net_lock);
 }
 
 static void failed(jdlo_ctx* c, int32_t err) { c->vm->net_error = err; }

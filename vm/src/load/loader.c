@@ -753,19 +753,84 @@ jello_bc_result jello_bc_read(const uint8_t* data, size_t size, jello_bc_module*
         *out = NULL;
         return rr;
       }
-      if((rr = rd_bytes(&r, bytes_data + used, len)).err) { free(bytes_data); jello_bc_free(m); *out = NULL; return rr; }
-      ((uint32_t*)lens)[i] = len;
-      ((uint32_t*)offs)[i] = (uint32_t)used;
-      used += len;
+      if(!rd_need(&scan, len)) {
+        jello_bc_free(m);
+        *out = NULL;
+        return err(JELLO_BC_EOF, "truncated const_bytes", scan.off);
+      }
+      scan.off += len;
+      total += vm_bytes_immortal_size(len);
     }
-    m->const_bytes_data = bytes_data;
+    uint8_t* block = (uint8_t*)calloc(1, total);
+    if(!block) {
+      jello_bc_free(m);
+      *out = NULL;
+      return err(JELLO_BC_OUT_OF_MEMORY, "oom const_bytes", r.off);
+    }
+    jello_bytes** values = (jello_bytes**)block;
+    m->const_bytes_values = values;
+    size_t at = 0;
+    for(uint32_t i = 0; i < m->nconst_bytes; i++) {
+      uint32_t len = 0;
+      if((rr = rd_u32(&r, &len)).err) {
+        jello_bc_free(m);
+        *out = NULL;
+        return rr;
+      }
+      values[i] = vm_bytes_immortal_at(block + table + at, len);
+      if((rr = rd_bytes(&r, values[i]->storage, len)).err) {
+        jello_bc_free(m);
+        *out = NULL;
+        return rr;
+      }
+      at += vm_bytes_immortal_size(len);
+    }
   }
 
-  // --- functions
+  if(m->nglobals > 0) {
+    if(!rd_need(&r, (size_t)m->nglobals * 4u)) {
+      jello_bc_free(m);
+      *out = NULL;
+      return err(JELLO_BC_EOF, "truncated globals", r.off);
+    }
+    jello_type_id* types = (jello_type_id*)calloc(m->nglobals, sizeof(jello_type_id));
+    uint64_t* slots = (uint64_t*)calloc(m->nglobals, sizeof(uint64_t));
+    uint32_t* ptrs = (uint32_t*)malloc(sizeof(uint32_t) * m->nglobals);
+    m->global_types = types;
+    m->globals = slots;
+    m->ptr_globals = ptrs;
+    if(!types || !slots || !ptrs) {
+      jello_bc_free(m);
+      *out = NULL;
+      return err(JELLO_BC_OUT_OF_MEMORY, "oom globals", r.off);
+    }
+    for(uint32_t i = 0; i < m->nglobals; i++) {
+      uint32_t t = 0;
+      if((rr = rd_u32(&r, &t)).err) {
+        jello_bc_free(m);
+        *out = NULL;
+        return rr;
+      }
+      if(t >= m->ntypes) {
+        jello_bc_free(m);
+        *out = NULL;
+        return err(JELLO_BC_BAD_FORMAT, "global type out of range", r.off - 4);
+      }
+      types[i] = t;
+      if(m->types[t].kind == JELLO_T_DYNAMIC) slots[i] = (uint64_t)jello_make_null();
+      if(vm_kind_needs_gc_scan(m->types[t].kind)) ptrs[m->nptr_globals++] = i;
+    }
+  }
+
   if(m->nfuncs > 0) {
     jello_bc_function* funcs = (jello_bc_function*)calloc(m->nfuncs, sizeof(jello_bc_function));
-    if(!funcs) { jello_bc_free(m); *out = NULL; return err(JELLO_BC_OUT_OF_MEMORY, "oom funcs", r.off); }
     m->funcs = funcs;
+    m->const_funs = (_Atomic(struct jello_function*)*)calloc(m->nfuncs, sizeof(*m->const_funs));
+    if(!funcs || !m->const_funs) {
+      jello_bc_free(m);
+      *out = NULL;
+      return err(JELLO_BC_OUT_OF_MEMORY, "oom funcs", r.off);
+    }
     for(uint32_t i = 0; i < m->nfuncs; i++) {
       uint32_t name_atom = JELLO_BC_NO_NAME, nregs = 0, cap_start = 0, ninsns = 0;
       if((rr = rd_u32(&r, &name_atom)).err) { jello_bc_free(m); *out = NULL; return rr; }
@@ -838,10 +903,39 @@ jello_bc_result jello_bc_read(const uint8_t* data, size_t size, jello_bc_module*
                               f->insns[f->ninsns - 1u].op != (uint8_t)JOP_TAILCALLR)) {
           jello_bc_free(m);
           *out = NULL;
-          return err(JELLO_BC_BAD_FORMAT, "function does not end in a terminator (RET or JMP)", r.off);
+          return err(JELLO_BC_BAD_FORMAT, "function does not end in a terminator", r.off);
+        }
+      }
+      {
+        jello_bc_result vr = jello_bc_validate_results(m);
+        if(vr.err) {
+          jello_bc_free(m);
+          *out = NULL;
+          return vr;
+        }
+        vr = jello_bc_validate_try_regions(m);
+        if(vr.err) {
+          jello_bc_free(m);
+          *out = NULL;
+          return vr;
         }
       }
     }
+  }
+
+  if(m->features & (uint32_t)JELLO_BC_FEAT_LINE_TABLE) {
+    rr = read_line_table(&r, m);
+    if(rr.err) {
+      jello_bc_free(m);
+      *out = NULL;
+      return rr;
+    }
+  }
+
+  if(r.off != r.n) {
+    jello_bc_free(m);
+    *out = NULL;
+    return err(JELLO_BC_BAD_FORMAT, "trailing bytes after functions", r.off);
   }
 
   return ok();

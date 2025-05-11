@@ -84,10 +84,64 @@ void proc_poller_close(proc_poller* pl) { close(pl->fd); }
 
 #endif
 
+static void* poll_main(void* arg) {
+  proc_sched* s = (proc_sched*)arg;
+  proc_poll_event evs[PROC_POLL_BATCH];
+  for(;;) {
+    uint32_t n = proc_poller_wait(&s->poller, evs);
+    for(uint32_t i = 0; i < n; i++) {
+      if(!evs[i].token) return NULL;
+      proc_poll_ready(s, evs[i]);
+    }
+  }
+}
+
+static int poll_start(proc_sched* s) {
+  if(s->polling) return 1;
+  if(proc_poller_open(&s->poller) != 0) return 0;
+  if(pthread_create(&s->poll_thread, NULL, poll_main, s) != 0) {
+    proc_poller_close(&s->poller);
+    return 0;
+  }
+  s->polling = 1;
+  return 1;
+}
+
 proc_poll_desc* proc_polls_find(proc_sched* s, int fd) {
   int32_t at = proc_poll_index(fd);
   if(at < 0) return NULL;
   proc_poll_desc* chunk =
       atomic_load_explicit(&s->poll_chunks[(uint32_t)at / PROC_POLL_CHUNK], memory_order_acquire);
   return chunk ? &chunk[(uint32_t)at % PROC_POLL_CHUNK] : NULL;
+}
+
+proc_poll_desc* proc_polls_make(proc_sched* s, int fd) {
+  proc_poll_desc* d = proc_polls_find(s, fd);
+  int32_t at = proc_poll_index(fd);
+  if(d || at < 0) return d;
+  pthread_mutex_lock(&s->poll_lock);
+  uint32_t c = (uint32_t)at / PROC_POLL_CHUNK;
+  int started = poll_start(s);
+  proc_poll_desc* chunk = started ? atomic_load(&s->poll_chunks[c]) : NULL;
+  if(started && !chunk && (chunk = (proc_poll_desc*)calloc(PROC_POLL_CHUNK, sizeof *chunk))) {
+    for(uint32_t i = 0; i < PROC_POLL_CHUNK; i++)
+      if(pthread_mutex_init(&chunk[i].mu, NULL) != 0) abort();
+    atomic_store_explicit(&s->poll_chunks[c], chunk, memory_order_release);
+  }
+  pthread_mutex_unlock(&s->poll_lock);
+  return chunk ? &chunk[(uint32_t)at % PROC_POLL_CHUNK] : NULL;
+}
+
+void proc_polls_end(proc_sched* s) {
+  if(s->polling) {
+    proc_poller_wake(&s->poller);
+    pthread_join(s->poll_thread, NULL);
+    proc_poller_close(&s->poller);
+  }
+  for(uint32_t c = 0; c < PROC_POLL_CHUNKS; c++) {
+    proc_poll_desc* chunk = atomic_load(&s->poll_chunks[c]);
+    if(!chunk) continue;
+    for(uint32_t i = 0; i < PROC_POLL_CHUNK; i++) pthread_mutex_destroy(&chunk[i].mu);
+    free(chunk);
+  }
 }
