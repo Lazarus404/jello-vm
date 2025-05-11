@@ -131,6 +131,46 @@ static jello_jir_bin bytes_bitop_operator(jello_op op) {
   }
 }
 
+int jello_jit_ir_slow_runs_handler(jello_op op) {
+  switch(op) {
+    case JOP_CALL_NATIVE:
+    case JOP_CONST_FUN:
+    case JOP_CLOSURE:
+    case JOP_CONST_BYTES:
+    case JOP_LIST_NIL:
+    case JOP_LIST_CONS:
+    case JOP_LIST_HEAD:
+    case JOP_LIST_TAIL:
+    case JOP_LIST_IS_NIL:
+    case JOP_ARRAY_NEW:
+    case JOP_ARRAY_LEN:
+    case JOP_ARRAY_GET:
+    case JOP_ARRAY_SET:
+    case JOP_ARRAY_CONCAT2:
+    case JOP_ARRAY_RESIZE:
+    case JOP_ENUM_NEW:
+    case JOP_DIV_U32:
+    case JOP_MOD_U32:
+    case JOP_DIV_U64:
+    case JOP_MOD_U64:
+    case JOP_LT_U32:
+    case JOP_LT_U64:
+    case JOP_ZEXT_I64:
+    case JOP_FMA_F64:
+    case JOP_LDEXP_F64:
+    case JOP_COPYSIGN_F64:
+    case JOP_GLOBAL_GET:
+    case JOP_GLOBAL_SET:
+    case JOP_BYTES_SLICE:
+    case JOP_BYTES_CONCAT_MANY:
+    case JOP_BYTES_JOIN:
+    case JOP_OBJ_KEYS:
+    case JOP_SPILL_PUSH:
+    case JOP_SPILL_POP: return 1;
+    default: return 0;
+  }
+}
+
 unsigned jello_jit_ir_op_reg_mask(jello_jit_ir_op op) {
   switch(op) {
     case JIR_NOP: case JIR_SAFEPOINT: case JIR_JMP: case JIR_CONST_NULL: case JIR_SLOW:

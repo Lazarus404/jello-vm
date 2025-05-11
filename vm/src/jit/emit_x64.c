@@ -3669,3 +3669,25 @@ int jit_emit_insn(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
   }
   return 1;
 }
+
+int jello_jit_emit_mixed_stubs(jit_exec_buf* buf, size_t* enter_off, size_t* bridge_off,
+                               size_t* lazy_off) {
+  *enter_off = buf->len;
+  size_t unused;
+  jit_emit_prologue(buf, &unused, 0);
+  emit_call_jit_code(buf, X64_RCX);
+  emit_restore_callee_saved(buf, 0);
+  emit_ret(buf);
+
+  *bridge_off = buf->len;
+  emit_mov64(buf, X64_RDI, (unsigned)JIT_REG_VM);
+  emit_call_fn(buf, (uintptr_t)jit_run_interp_top);
+  emit_reload_jit_reg_base(buf);
+  emit_ret(buf);
+
+  *lazy_off = buf->len;
+  emit_mov64(buf, X64_RDI, (unsigned)JIT_REG_VM);
+  emit_call_fn(buf, (uintptr_t)jit_lazy_target);
+  emit_jmp_r64(buf, X64_RAX);
+  return !buf->overflowed;
+}

@@ -203,9 +203,16 @@ void jello_bc_free(jello_bc_module* m) {
   free((void*)m->atoms);
   free((void*)m->const_i64);
   free((void*)m->const_f64);
-  free((void*)m->const_bytes_len);
-  free((void*)m->const_bytes_off);
-  free((void*)m->const_bytes_data);
+  free((void*)m->const_bytes_values);
+  free((void*)m->global_types);
+  free(m->globals);
+  free((void*)m->ptr_globals);
+  for(uint32_t i = 0; m->const_funs && i < m->nfuncs; i++) vm_immortal_free(m->const_funs[i]);
+  free((void*)m->const_funs);
+  for(uint32_t i = 0; m->const_enums && i < m->nconst_enums; i++)
+    vm_immortal_free(m->const_enums[i]);
+  free((void*)m->const_enums);
+  free((void*)m->const_enum_base);
   if(m->funcs) {
     for(uint32_t i = 0; i < m->nfuncs; i++) {
       free((void*)m->funcs[i].reg_types);
@@ -219,6 +226,90 @@ void jello_bc_free(jello_bc_module* m) {
     free((void*)m->source_files);
   }
   free(m);
+}
+
+static jello_bc_result rd_leb(rd* r, int is_signed, int64_t* out) {
+  size_t at = r->off;
+  uint64_t v = 0;
+  for(unsigned shift = 0;; shift += 7u) {
+    if(shift == 35u) return err(JELLO_BC_BAD_FORMAT, "varint longer than 5 bytes", at);
+    if(!rd_need(r, 1)) return err(JELLO_BC_EOF, "unexpected EOF", r->off);
+    uint8_t b = r->p[r->off++];
+    v |= (uint64_t)(b & 0x7fu) << shift;
+    if(b & 0x80u) continue;
+    if(is_signed) {
+      if(b & 0x40u) v |= ~(uint64_t)0 << (shift + 7u);
+      int64_t sv = (int64_t)v;
+      if(sv < INT32_MIN || sv > INT32_MAX)
+        return err(JELLO_BC_BAD_FORMAT, "varint out of range", at);
+      *out = sv;
+    } else {
+      if(v > UINT32_MAX) return err(JELLO_BC_BAD_FORMAT, "varint out of range", at);
+      *out = (int64_t)v;
+    }
+    return ok();
+  }
+}
+
+static jello_bc_result read_line_table(rd* r, jello_bc_module* m) {
+  jello_bc_result rr;
+  uint32_t nfiles = 0;
+  if((rr = rd_u32(r, &nfiles)).err) return rr;
+  if(nfiles > (uint32_t)((r->n - r->off) / 4u))
+    return err(JELLO_BC_BAD_FORMAT, "line table file count too large", r->off - 4);
+  char** files = nfiles ? (char**)calloc(nfiles, sizeof(char*)) : NULL;
+  if(nfiles && !files) return err(JELLO_BC_OUT_OF_MEMORY, "oom source files", r->off);
+  m->source_files = (const char* const*)files;
+  m->nsource_files = nfiles;
+  for(uint32_t i = 0; i < nfiles; i++) {
+    uint32_t len = 0;
+    if((rr = rd_u32(r, &len)).err) return rr;
+    if(len == 0 || len > r->n - r->off)
+      return err(JELLO_BC_BAD_FORMAT, "line table path length out of range", r->off - 4);
+    if(memchr(r->p + r->off, 0, len))
+      return err(JELLO_BC_BAD_FORMAT, "line table path contains NUL", r->off);
+    files[i] = (char*)malloc((size_t)len + 1u);
+    if(!files[i]) return err(JELLO_BC_OUT_OF_MEMORY, "oom source file", r->off);
+    memcpy(files[i], r->p + r->off, len);
+    files[i][len] = 0;
+    r->off += len;
+  }
+  for(uint32_t fi = 0; fi < m->nfuncs; fi++) {
+    jello_bc_function* f = (jello_bc_function*)&m->funcs[fi];
+    int64_t nlocs = 0;
+    size_t at = r->off;
+    if((rr = rd_leb(r, 0, &nlocs)).err) return rr;
+    if(nlocs > (int64_t)f->ninsns)
+      return err(JELLO_BC_BAD_FORMAT, "line table has more runs than instructions", at);
+    if(nlocs == 0) continue;
+    jello_bc_location* locs = (jello_bc_location*)calloc((size_t)nlocs, sizeof(jello_bc_location));
+    if(!locs) return err(JELLO_BC_OUT_OF_MEMORY, "oom line table", r->off);
+    f->locs = locs;
+    f->nlocs = (uint32_t)nlocs;
+    int64_t pc = 0, line = 0;
+    for(uint32_t j = 0; j < f->nlocs; j++) {
+      jello_bc_location* l = &locs[j];
+      int64_t dpc = 0, file = 0, dline = 0, col = 0;
+      at = r->off;
+      if((rr = rd_leb(r, 0, &dpc)).err || (rr = rd_leb(r, 0, &file)).err ||
+         (rr = rd_leb(r, 1, &dline)).err || (rr = rd_leb(r, 0, &col)).err)
+        return rr;
+      if(j > 0 && dpc == 0) return err(JELLO_BC_BAD_FORMAT, "line table pcs not increasing", at);
+      pc += dpc;
+      line += dline;
+      if(pc >= (int64_t)f->ninsns)
+        return err(JELLO_BC_BAD_FORMAT, "line table pc out of range", at);
+      if(file >= (int64_t)nfiles)
+        return err(JELLO_BC_BAD_FORMAT, "line table file out of range", at);
+      if(line < 1 || line > UINT32_MAX || col == 0)
+        return err(JELLO_BC_BAD_FORMAT, "line table line or column out of range", at);
+      l->pc = (uint32_t)pc;
+      l->file = (uint32_t)file;
+      l->line = (uint32_t)line;
+      l->col = (uint32_t)col;
+    }
+  }
+  return ok();
 }
 
 uint32_t jello_bc_get_entry(const jello_bc_module* m) {
@@ -241,15 +332,58 @@ jello_bc_result jello_bc_read(const uint8_t* data, size_t size, jello_bc_module*
   if((rr = rd_u32(&r, &m->version)).err) { jello_bc_free(m); *out = NULL; return rr; }
   if(m->version != JELLO_JLO_VERSION) { jello_bc_free(m); *out = NULL; return err(JELLO_BC_UNSUPPORTED_VERSION, "unsupported version", r.off - 4); }
 
-  if((rr = rd_u32(&r, &m->features)).err) { jello_bc_free(m); *out = NULL; return rr; }
-  if((rr = rd_u32(&r, &m->ntypes)).err) { jello_bc_free(m); *out = NULL; return rr; }
-  if((rr = rd_u32(&r, &m->nsigs)).err) { jello_bc_free(m); *out = NULL; return rr; }
-  if((rr = rd_u32(&r, &m->nstruct_sigs)).err) { jello_bc_free(m); *out = NULL; return rr; }
-  if((rr = rd_u32(&r, &m->natoms)).err) { jello_bc_free(m); *out = NULL; return rr; }
-  if((rr = rd_u32(&r, &m->nfuncs)).err) { jello_bc_free(m); *out = NULL; return rr; }
-  if((rr = rd_u32(&r, &m->entry)).err) { jello_bc_free(m); *out = NULL; return rr; }
-  if(m->entry >= m->nfuncs) { jello_bc_free(m); *out = NULL; return err(JELLO_BC_BAD_FORMAT, "entry out of range", r.off - 4); }
-  if((rr = rd_u32(&r, &m->nimports)).err) { jello_bc_free(m); *out = NULL; return rr; }
+  if((rr = rd_u32(&r, &m->features)).err) {
+    jello_bc_free(m);
+    *out = NULL;
+    return rr;
+  }
+  if((rr = rd_u32(&r, &m->ntypes)).err) {
+    jello_bc_free(m);
+    *out = NULL;
+    return rr;
+  }
+  if((rr = rd_u32(&r, &m->nsigs)).err) {
+    jello_bc_free(m);
+    *out = NULL;
+    return rr;
+  }
+  if((rr = rd_u32(&r, &m->nstruct_sigs)).err) {
+    jello_bc_free(m);
+    *out = NULL;
+    return rr;
+  }
+  if((rr = rd_u32(&r, &m->natoms)).err) {
+    jello_bc_free(m);
+    *out = NULL;
+    return rr;
+  }
+  if((rr = rd_u32(&r, &m->nfuncs)).err) {
+    jello_bc_free(m);
+    *out = NULL;
+    return rr;
+  }
+  if((rr = rd_u32(&r, &m->entry)).err) {
+    jello_bc_free(m);
+    *out = NULL;
+    return rr;
+  }
+  if(m->entry >= m->nfuncs) {
+    jello_bc_free(m);
+    *out = NULL;
+    return err(JELLO_BC_BAD_FORMAT, "entry out of range", r.off - 4);
+  }
+  if((rr = rd_u32(&r, &m->nimports)).err) {
+    jello_bc_free(m);
+    *out = NULL;
+    return rr;
+  }
+  if(m->features & (uint32_t)JELLO_BC_FEAT_ENUM_SCHEMA) {
+    if((rr = rd_u32(&r, &m->nenum_sigs)).err) {
+      jello_bc_free(m);
+      *out = NULL;
+      return rr;
+    }
+  }
 
   if(m->features & (uint32_t)JELLO_BC_FEAT_CONST64) {
     if((rr = rd_u32(&r, &m->nconst_i64)).err) { jello_bc_free(m); *out = NULL; return rr; }
@@ -305,8 +439,17 @@ jello_bc_result jello_bc_read(const uint8_t* data, size_t size, jello_bc_module*
         case JELLO_T_ABSTRACT:
           types[i].as.abs.abstract_id = p0; /* raw identifier, no table to be in range against */
           break;
-        default:
+        case JELLO_T_ENUM:
+          if(m->features & (uint32_t)JELLO_BC_FEAT_ENUM_SCHEMA) {
+            if(p0 >= m->nenum_sigs) {
+              jello_bc_free(m);
+              *out = NULL;
+              return err(JELLO_BC_BAD_FORMAT, "enum sig id out of range", r.off - 8);
+            }
+            types[i].as.enm.enum_sig_id = p0;
+          }
           break;
+        default: break;
       }
     }
   }
@@ -391,7 +534,90 @@ jello_bc_result jello_bc_read(const uint8_t* data, size_t size, jello_bc_module*
     }
   }
 
-  // --- atoms
+  if(m->nenum_sigs > 0) {
+    jello_enum_sig* sigs = (jello_enum_sig*)calloc(m->nenum_sigs, sizeof(jello_enum_sig));
+    if(!sigs) {
+      jello_bc_free(m);
+      *out = NULL;
+      return err(JELLO_BC_OUT_OF_MEMORY, "oom enum_sigs", r.off);
+    }
+    m->enum_sigs = sigs;
+    for(uint32_t i = 0; i < m->nenum_sigs; i++) {
+      uint16_t nvariants = 0;
+      if((rr = rd_u16(&r, &nvariants)).err) {
+        jello_bc_free(m);
+        *out = NULL;
+        return rr;
+      }
+      sigs[i].nvariants = nvariants;
+      jello_enum_variant_sig* variants =
+          nvariants ? (jello_enum_variant_sig*)calloc(nvariants, sizeof(*variants)) : NULL;
+      if(nvariants && !variants) {
+        jello_bc_free(m);
+        *out = NULL;
+        return err(JELLO_BC_OUT_OF_MEMORY, "oom enum variants", r.off);
+      }
+      sigs[i].variants = variants;
+      for(uint16_t j = 0; j < nvariants; j++) {
+        uint16_t nfields = 0;
+        if((rr = rd_u16(&r, &nfields)).err) {
+          jello_bc_free(m);
+          *out = NULL;
+          return rr;
+        }
+        variants[j].nfields = nfields;
+        jello_type_id* fields = nfields ? (jello_type_id*)calloc(nfields, sizeof(*fields)) : NULL;
+        if(nfields && !fields) {
+          jello_bc_free(m);
+          *out = NULL;
+          return err(JELLO_BC_OUT_OF_MEMORY, "oom enum fields", r.off);
+        }
+        variants[j].field_type = fields;
+        for(uint16_t k = 0; k < nfields; k++) {
+          uint32_t tid = 0;
+          if((rr = rd_u32(&r, &tid)).err) {
+            jello_bc_free(m);
+            *out = NULL;
+            return rr;
+          }
+          if(tid >= m->ntypes) {
+            jello_bc_free(m);
+            *out = NULL;
+            return err(JELLO_BC_BAD_FORMAT, "enum field type out of range", r.off - 4);
+          }
+          fields[k] = tid;
+        }
+      }
+    }
+
+    uint32_t* base = (uint32_t*)calloc(m->ntypes ? m->ntypes : 1, sizeof(uint32_t));
+    if(!base) {
+      jello_bc_free(m);
+      *out = NULL;
+      return err(JELLO_BC_OUT_OF_MEMORY, "oom const_enum_base", r.off);
+    }
+    m->const_enum_base = base;
+    uint64_t slots = 0;
+    for(uint32_t t = 0; t < m->ntypes; t++) {
+      if(m->types[t].kind != JELLO_T_ENUM) continue;
+      base[t] = (uint32_t)slots;
+      slots += sigs[m->types[t].as.enm.enum_sig_id].nvariants;
+    }
+    if(slots > UINT32_MAX) {
+      jello_bc_free(m);
+      *out = NULL;
+      return err(JELLO_BC_BAD_FORMAT, "too many enum variants", r.off);
+    }
+    m->nconst_enums = (uint32_t)slots;
+    m->const_enums =
+        (_Atomic(struct jello_enum*)*)calloc(slots ? slots : 1, sizeof(*m->const_enums));
+    if(!m->const_enums) {
+      jello_bc_free(m);
+      *out = NULL;
+      return err(JELLO_BC_OUT_OF_MEMORY, "oom const_enums", r.off);
+    }
+  }
+
   if(m->natoms > 0) {
     uint32_t* atom_offsets = (uint32_t*)calloc(m->natoms, sizeof(uint32_t));
     if(!atom_offsets) { jello_bc_free(m); *out = NULL; return err(JELLO_BC_OUT_OF_MEMORY, "oom atom offsets", r.off); }
@@ -458,22 +684,34 @@ jello_bc_result jello_bc_read(const uint8_t* data, size_t size, jello_bc_module*
       const char* export_name = m->atoms[exp_atom];
       jello_jdll_handle* h = jello_jdll_load(library_name);
       if(!h) {
-        jello_bc_free(m); *out = NULL;
-        return err(JELLO_BC_BAD_FORMAT, "import: .jdll not found or ABI mismatch", r.off);
+        jello_bc_free(m);
+        *out = NULL;
+        return err(JELLO_BC_BAD_FORMAT, jello_jdll_last_error(), r.off);
       }
       handles[i] = h;
       m->njdll_handles = i + 1u;
 
       const jello_jdll_export* exp = jello_jdll_find_export(h, export_name);
       if(!exp) {
-        jello_bc_free(m); *out = NULL;
-        return err(JELLO_BC_BAD_FORMAT, "import: export not found in .jdll", r.off);
+        snprintf(g_validate_err, sizeof g_validate_err, "%s.jdll exports no function %s",
+                 library_name, export_name);
+        jello_bc_free(m);
+        *out = NULL;
+        return err(JELLO_BC_BAD_FORMAT, g_validate_err, r.off);
       }
       int sig_matches = (exp->ret_kind == ret_kind) && (exp->arity == arity);
       for(uint8_t j = 0; sig_matches && j < arity; j++) sig_matches = (exp->arg_kinds[j] == imports[i].arg_kinds[j]);
       if(!sig_matches) {
-        jello_bc_free(m); *out = NULL;
-        return err(JELLO_BC_BAD_FORMAT, "import: declared signature does not match .jdll export", r.off);
+        snprintf(g_validate_err, sizeof g_validate_err, "native %s from %s is bound as ",
+                 export_name, library_name);
+        append_signature(g_validate_err, sizeof g_validate_err, ret_kind, arity,
+                         imports[i].arg_kinds);
+        append_text(g_validate_err, sizeof g_validate_err, ", but the library exports ");
+        append_signature(g_validate_err, sizeof g_validate_err, exp->ret_kind, exp->arity,
+                         exp->arg_kinds);
+        jello_bc_free(m);
+        *out = NULL;
+        return err(JELLO_BC_BAD_FORMAT, g_validate_err, r.off);
       }
       ((jello_import_sig*)imports)[i].resolved = exp;
     }
@@ -506,22 +744,14 @@ jello_bc_result jello_bc_read(const uint8_t* data, size_t size, jello_bc_module*
     }
   }
   if(m->nconst_bytes > 0) {
-    uint32_t* lens = (uint32_t*)calloc(m->nconst_bytes, sizeof(uint32_t));
-    uint32_t* offs = (uint32_t*)calloc(m->nconst_bytes, sizeof(uint32_t));
-    if(!lens || !offs) { free(lens); free(offs); jello_bc_free(m); *out = NULL; return err(JELLO_BC_OUT_OF_MEMORY, "oom const_bytes index", r.off); }
-    m->const_bytes_len = lens;
-    m->const_bytes_off = offs;
-    size_t cap = 256, used = 0;
-    uint8_t* bytes_data = (uint8_t*)malloc(cap);
-    if(!bytes_data) { jello_bc_free(m); *out = NULL; return err(JELLO_BC_OUT_OF_MEMORY, "oom const_bytes data", r.off); }
+    size_t table = sizeof(jello_bytes*) * m->nconst_bytes, total = table;
+    rd scan = r;
     for(uint32_t i = 0; i < m->nconst_bytes; i++) {
       uint32_t len = 0;
-      if((rr = rd_u32(&r, &len)).err) { free(bytes_data); jello_bc_free(m); *out = NULL; return rr; }
-      if(used + len > cap) {
-        while(used + len > cap) cap *= 2;
-        uint8_t* grown = (uint8_t*)realloc(bytes_data, cap);
-        if(!grown) { free(bytes_data); jello_bc_free(m); *out = NULL; return err(JELLO_BC_OUT_OF_MEMORY, "oom const_bytes grow", r.off); }
-        bytes_data = grown;
+      if((rr = rd_u32(&scan, &len)).err) {
+        jello_bc_free(m);
+        *out = NULL;
+        return rr;
       }
       if((rr = rd_bytes(&r, bytes_data + used, len)).err) { free(bytes_data); jello_bc_free(m); *out = NULL; return rr; }
       ((uint32_t*)lens)[i] = len;

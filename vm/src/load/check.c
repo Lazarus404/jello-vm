@@ -53,9 +53,15 @@ static jello_type_kind reg_kind(const jello_bc_module* m, const jello_type_id* r
   return m->types[reg_types[r]].kind;
 }
 
-static int rk_ne(const jello_bc_module* m, const jello_type_id* reg_types, uint32_t r, jello_type_kind want) {
-  jello_type_kind k = reg_kind(m, reg_types, r);
-  return k != want && k != JELLO_T_DYNAMIC;
+static int rk_ne(const jello_bc_module* m, const jello_type_id* reg_types, uint32_t r,
+                 jello_type_kind want) {
+  return reg_kind(m, reg_types, r) != want;
+}
+
+static int rk_array_of(const jello_bc_module* m, const jello_type_id* reg_types, uint32_t r,
+                       jello_type_kind want) {
+  return !rk_ne(m, reg_types, r, JELLO_T_ARRAY) &&
+         m->types[m->types[reg_types[r]].as.unary.elem].kind == want;
 }
 
 static int is_narrow_int_kind(jello_type_kind k) {
@@ -241,33 +247,19 @@ jello_bc_result jello_bc_validate_insn(
       if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "mov reg out of range", 0);
       return validate_mov(m, reg_types, ins);
 
-    case JOP_JMP: {
-      int32_t d = (int32_t)ins->imm;
-      int32_t tgt = (int32_t)(pc + 1u) + d;
-      if(tgt < 0 || tgt >= (int32_t)ninsns) return err(JELLO_BC_BAD_FORMAT, "jmp target out of range", 0);
-      return ok();
-    }
+    case JOP_JMP:
+      return check_target(ins, pc, (int64_t)pc + 1 + (int32_t)ins->imm, 0, ninsns,
+                          "jmp target out of range");
 
     case JOP_JMP_IF: {
       if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "jmp_if cond reg out of range", 0);
-      if(rk_ne(m, reg_types, ins->a, JELLO_T_BOOL)) return err(JELLO_BC_BAD_FORMAT, "jmp_if cond must be bool", 0);
-      int32_t d = (int32_t)ins->imm;
-      int32_t tgt = (int32_t)(pc + 1u) + d;
-      if(tgt < 0 || tgt >= (int32_t)ninsns) return err(JELLO_BC_BAD_FORMAT, "jmp_if target out of range", 0);
-      return ok();
+      if(rk_ne(m, reg_types, ins->a, JELLO_T_BOOL))
+        return err(JELLO_BC_BAD_FORMAT, "jmp_if cond must be bool", 0);
+      return check_target(ins, pc, (int64_t)pc + 1 + (int32_t)ins->imm, 0, ninsns,
+                          "jmp_if target out of range");
     }
 
-    case JOP_ASSERT:
-      if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "assert cond reg out of range", 0);
-      if(reg_kind(m, reg_types, ins->a) != JELLO_T_BOOL) return err(JELLO_BC_BAD_FORMAT, "assert cond must be bool", 0);
-      if(ins->c > 1) return err(JELLO_BC_BAD_FORMAT, "assert c must be 0/1", 0);
-      if(ins->c == 1u) {
-        if(ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "assert msg reg out of range", 0);
-        if(reg_kind(m, reg_types, ins->b) != JELLO_T_BYTES) return err(JELLO_BC_BAD_FORMAT, "assert msg must be Bytes", 0);
-      } else if(ins->b != 0u) {
-        return err(JELLO_BC_BAD_FORMAT, "assert b must be 0 when c is 0", 0);
-      }
-      return ok();
+    case JOP_ASSERT: return err(JELLO_BC_BAD_FORMAT, "assert opcode not implemented", 0);
 
     case JOP_CALL:
       return validate_direct_call(m, reg_types, ins, nregs, nfuncs, 1);
@@ -325,7 +317,55 @@ jello_bc_result jello_bc_validate_insn(
       if(ins->imm > 1) return err(JELLO_BC_BAD_FORMAT, "const_bool imm must be 0/1", 0);
       return validate_const(m, reg_types, ins, nregs, JELLO_T_BOOL);
     case JOP_CONST_NULL:
-      return validate_const(m, reg_types, ins, nregs, JELLO_T_DYNAMIC);
+    case JOP_NULL_CHECK:
+      if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "null op reg out of range", 0);
+      if(!vm_kind_needs_gc_scan(reg_kind(m, reg_types, ins->a)))
+        return err(JELLO_BC_BAD_FORMAT, "null op register must be Dynamic or a reference", 0);
+      return ok();
+    case JOP_IS_NULL:
+      if(ins->a >= nregs || ins->b >= nregs)
+        return err(JELLO_BC_BAD_FORMAT, "is_null reg out of range", 0);
+      if(rk_ne(m, reg_types, ins->a, JELLO_T_BOOL))
+        return err(JELLO_BC_BAD_FORMAT, "is_null dst must be Bool", 0);
+      if(!vm_kind_needs_gc_scan(reg_kind(m, reg_types, ins->b)))
+        return err(JELLO_BC_BAD_FORMAT, "null op register must be Dynamic or a reference", 0);
+      return ok();
+    case JOP_IS_ENUM:
+      if(ins->a >= nregs || ins->b >= nregs)
+        return err(JELLO_BC_BAD_FORMAT, "is_enum reg out of range", 0);
+      if(rk_ne(m, reg_types, ins->a, JELLO_T_BOOL))
+        return err(JELLO_BC_BAD_FORMAT, "is_enum dst must be Bool", 0);
+      if(reg_kind(m, reg_types, ins->b) != JELLO_T_DYNAMIC)
+        return err(JELLO_BC_BAD_FORMAT, "is_enum src must be Dynamic", 0);
+      if(ins->imm >= m->ntypes || m->types[ins->imm].kind != JELLO_T_ENUM)
+        return err(JELLO_BC_BAD_FORMAT, "is_enum type must be an enum", 0);
+      return ok();
+    case JOP_BYTES_SLICE:
+      if(ins->a >= nregs || ins->b >= nregs || (uint64_t)ins->c + 1u >= (uint64_t)nregs) {
+        return err(JELLO_BC_BAD_FORMAT, "bytes_slice reg out of range", 0);
+      }
+      if(rk_ne(m, reg_types, ins->a, JELLO_T_BYTES) || rk_ne(m, reg_types, ins->b, JELLO_T_BYTES)) {
+        return err(JELLO_BC_BAD_FORMAT, "bytes_slice operands must be Bytes", 0);
+      }
+      if(rk_ne(m, reg_types, ins->c, JELLO_T_I32) ||
+         rk_ne(m, reg_types, ins->c + 1u, JELLO_T_I32)) {
+        return err(JELLO_BC_BAD_FORMAT, "bytes_slice start and length must be I32", 0);
+      }
+      return ok();
+    case JOP_GLOBAL_GET:
+    case JOP_GLOBAL_SET:
+      if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "global reg out of range", 0);
+      if(ins->imm >= m->nglobals) return err(JELLO_BC_BAD_FORMAT, "global index out of range", 0);
+      if(!type_ids_compatible(m, reg_types[ins->a], m->global_types[ins->imm])) {
+        return err(JELLO_BC_BAD_FORMAT, "global type mismatch", 0);
+      }
+      return ok();
+    case JOP_CONST_BYTES: {
+      jello_bc_result r = validate_const(m, reg_types, ins, nregs, JELLO_T_BYTES);
+      if(!r.err && ins->imm >= m->nconst_bytes)
+        return err(JELLO_BC_BAD_FORMAT, "const_bytes index out of range", 0);
+      return r;
+    }
     case JOP_CONST_ATOM:
       if(ins->imm >= m->natoms) return err(JELLO_BC_BAD_FORMAT, "const_atom atom id out of range", 0);
       return validate_const(m, reg_types, ins, nregs, JELLO_T_ATOM);
@@ -380,12 +420,31 @@ jello_bc_result jello_bc_validate_insn(
     case JOP_ADD_F64:
     case JOP_SUB_F64:
     case JOP_MUL_F64:
-    case JOP_DIV_F64:
-      return validate_bin(m, reg_types, ins, nregs, JELLO_T_F64, 0);
-    case JOP_NEG_F64:
-      return validate_un(m, reg_types, ins, nregs, JELLO_T_F64, 0);
-    case JOP_NOT_BOOL:
-      return validate_un(m, reg_types, ins, nregs, JELLO_T_BOOL, 0);
+    case JOP_DIV_F64: return validate_bin(m, reg_types, ins, nregs, JELLO_T_F64, 0);
+    case JOP_NEG_F64: return validate_un(m, reg_types, ins, nregs, JELLO_T_F64, 0);
+    case JOP_FMA_F64: {
+      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs || ins->imm >= nregs) {
+        return err(JELLO_BC_BAD_FORMAT, "fma_f64 reg out of range", 0);
+      }
+      if(!rk_is(m, reg_types, ins->a, JELLO_T_F64) || !rk_is(m, reg_types, ins->b, JELLO_T_F64) ||
+         !rk_is(m, reg_types, ins->c, JELLO_T_F64) ||
+         !rk_is(m, reg_types, (uint8_t)ins->imm, JELLO_T_F64)) {
+        return err(JELLO_BC_BAD_FORMAT, "fma_f64 operand wrong kind", 0);
+      }
+      return ok();
+    }
+    case JOP_LDEXP_F64: {
+      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) {
+        return err(JELLO_BC_BAD_FORMAT, "ldexp_f64 reg out of range", 0);
+      }
+      if(!rk_is(m, reg_types, ins->a, JELLO_T_F64) || !rk_is(m, reg_types, ins->b, JELLO_T_F64) ||
+         !rk_is(m, reg_types, ins->c, JELLO_T_I32)) {
+        return err(JELLO_BC_BAD_FORMAT, "ldexp_f64 operand wrong kind", 0);
+      }
+      return ok();
+    }
+    case JOP_COPYSIGN_F64: return validate_bin(m, reg_types, ins, nregs, JELLO_T_F64, 0);
+    case JOP_NOT_BOOL: return validate_un(m, reg_types, ins, nregs, JELLO_T_BOOL, 0);
 
     case JOP_EQ_I32:
     case JOP_LT_I32:
@@ -457,20 +516,8 @@ jello_bc_result jello_bc_validate_insn(
       if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "from_dyn_ptr reg out of range", 0);
       if(reg_kind(m, reg_types, ins->b) != JELLO_T_DYNAMIC) return err(JELLO_BC_BAD_FORMAT, "from_dyn_ptr src must be Dynamic", 0);
       jello_type_kind dk = reg_kind(m, reg_types, ins->a);
-      switch(dk) {
-        case JELLO_T_BYTES:
-        case JELLO_T_FUNCTION:
-        case JELLO_T_LIST:
-        case JELLO_T_ARRAY:
-        case JELLO_T_OBJECT:
-        case JELLO_T_ABSTRACT:
-        case JELLO_T_ENUM:
-        case JELLO_T_STRUCT:
-        case JELLO_T_DYNAMIC:
-          return ok();
-        default:
-          return err(JELLO_BC_BAD_FORMAT, "from_dyn_ptr dst must be a pointer kind", 0);
-      }
+      if(vm_kind_is_gc_pointer(dk)) return ok();
+      return err(JELLO_BC_BAD_FORMAT, "from_dyn_ptr dst must be a pointer kind", 0);
     }
     case JOP_KINDOF:
       if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "kindof reg out of range", 0);
@@ -489,9 +536,10 @@ jello_bc_result jello_bc_validate_insn(
 
     case JOP_STRUCT_GET:
     case JOP_STRUCT_SET: {
-      if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "struct reg out of range", 0);
-      if(rk_ne(m, reg_types, ins->b, JELLO_T_STRUCT)) return err(JELLO_BC_BAD_FORMAT, "struct op target must be Struct", 0);
-      if(reg_kind(m, reg_types, ins->b) == JELLO_T_DYNAMIC) return ok();
+      if(ins->a >= nregs || ins->b >= nregs)
+        return err(JELLO_BC_BAD_FORMAT, "struct reg out of range", 0);
+      if(rk_ne(m, reg_types, ins->b, JELLO_T_STRUCT))
+        return err(JELLO_BC_BAD_FORMAT, "struct op target must be Struct", 0);
       uint32_t sig_id = m->types[reg_types[ins->b]].as.strct.struct_sig_id;
       if(sig_id >= m->nstruct_sigs) return err(JELLO_BC_BAD_FORMAT, "struct sig id out of range", 0);
       const jello_struct_sig* sig = &m->struct_sigs[sig_id];
@@ -510,30 +558,46 @@ jello_bc_result jello_bc_validate_insn(
       if(rk_ne(m, reg_types, ins->a, JELLO_T_OBJECT)) return err(JELLO_BC_BAD_FORMAT, "obj_new dst must be Object", 0);
       return ok();
     case JOP_OBJ_HAS_ATOM:
-      if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "obj_has_atom reg out of range", 0);
-      if(rk_ne(m, reg_types, ins->a, JELLO_T_BOOL)) return err(JELLO_BC_BAD_FORMAT, "obj_has_atom dst must be Bool", 0);
-      if(reg_kind(m, reg_types, ins->b) != JELLO_T_OBJECT && reg_kind(m, reg_types, ins->b) != JELLO_T_DYNAMIC) return err(JELLO_BC_BAD_FORMAT, "obj_has_atom src must be Object", 0);
-      if(ins->imm >= m->natoms) return err(JELLO_BC_BAD_FORMAT, "obj_has_atom atom id out of range", 0);
+      if(ins->a >= nregs || ins->b >= nregs)
+        return err(JELLO_BC_BAD_FORMAT, "obj_has_atom reg out of range", 0);
+      if(rk_ne(m, reg_types, ins->a, JELLO_T_BOOL))
+        return err(JELLO_BC_BAD_FORMAT, "obj_has_atom dst must be Bool", 0);
+      if(reg_kind(m, reg_types, ins->b) != JELLO_T_OBJECT)
+        return err(JELLO_BC_BAD_FORMAT, "obj_has_atom src must be Object", 0);
+      if(ins->imm >= m->natoms)
+        return err(JELLO_BC_BAD_FORMAT, "obj_has_atom atom id out of range", 0);
       return ok();
     case JOP_OBJ_GET_ATOM:
-      if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "obj_get_atom reg out of range", 0);
-      if(reg_kind(m, reg_types, ins->b) != JELLO_T_OBJECT && reg_kind(m, reg_types, ins->b) != JELLO_T_DYNAMIC) return err(JELLO_BC_BAD_FORMAT, "obj_get_atom src must be Object", 0);
-      if(ins->imm >= m->natoms) return err(JELLO_BC_BAD_FORMAT, "obj_get_atom atom id out of range", 0);
+      if(ins->a >= nregs || ins->b >= nregs)
+        return err(JELLO_BC_BAD_FORMAT, "obj_get_atom reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->b) != JELLO_T_OBJECT)
+        return err(JELLO_BC_BAD_FORMAT, "obj_get_atom src must be Object", 0);
+      if(ins->imm >= m->natoms)
+        return err(JELLO_BC_BAD_FORMAT, "obj_get_atom atom id out of range", 0);
       return ok();
     case JOP_OBJ_SET_ATOM:
-      if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "obj_set_atom reg out of range", 0);
-      if(reg_kind(m, reg_types, ins->b) != JELLO_T_OBJECT && reg_kind(m, reg_types, ins->b) != JELLO_T_DYNAMIC) return err(JELLO_BC_BAD_FORMAT, "obj_set_atom dst must be Object", 0);
-      if(ins->imm >= m->natoms) return err(JELLO_BC_BAD_FORMAT, "obj_set_atom atom id out of range", 0);
+      if(ins->a >= nregs || ins->b >= nregs)
+        return err(JELLO_BC_BAD_FORMAT, "obj_set_atom reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->b) != JELLO_T_OBJECT)
+        return err(JELLO_BC_BAD_FORMAT, "obj_set_atom dst must be Object", 0);
+      if(ins->imm >= m->natoms)
+        return err(JELLO_BC_BAD_FORMAT, "obj_set_atom atom id out of range", 0);
       return ok();
     case JOP_OBJ_GET:
-      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) return err(JELLO_BC_BAD_FORMAT, "obj_get reg out of range", 0);
-      if(reg_kind(m, reg_types, ins->b) != JELLO_T_OBJECT && reg_kind(m, reg_types, ins->b) != JELLO_T_DYNAMIC) return err(JELLO_BC_BAD_FORMAT, "obj_get src must be Object", 0);
-      if(rk_ne(m, reg_types, ins->c, JELLO_T_ATOM)) return err(JELLO_BC_BAD_FORMAT, "obj_get key must be Atom", 0);
+      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs)
+        return err(JELLO_BC_BAD_FORMAT, "obj_get reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->b) != JELLO_T_OBJECT)
+        return err(JELLO_BC_BAD_FORMAT, "obj_get src must be Object", 0);
+      if(rk_ne(m, reg_types, ins->c, JELLO_T_ATOM))
+        return err(JELLO_BC_BAD_FORMAT, "obj_get key must be Atom", 0);
       return ok();
     case JOP_OBJ_SET:
-      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) return err(JELLO_BC_BAD_FORMAT, "obj_set reg out of range", 0);
-      if(reg_kind(m, reg_types, ins->b) != JELLO_T_OBJECT && reg_kind(m, reg_types, ins->b) != JELLO_T_DYNAMIC) return err(JELLO_BC_BAD_FORMAT, "obj_set dst must be Object", 0);
-      if(rk_ne(m, reg_types, ins->c, JELLO_T_ATOM)) return err(JELLO_BC_BAD_FORMAT, "obj_set key must be Atom", 0);
+      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs)
+        return err(JELLO_BC_BAD_FORMAT, "obj_set reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->b) != JELLO_T_OBJECT)
+        return err(JELLO_BC_BAD_FORMAT, "obj_set dst must be Object", 0);
+      if(rk_ne(m, reg_types, ins->c, JELLO_T_ATOM))
+        return err(JELLO_BC_BAD_FORMAT, "obj_set key must be Atom", 0);
       return ok();
     case JOP_OBJ_HAS:
       if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) return err(JELLO_BC_BAD_FORMAT, "obj_has reg out of range", 0);
@@ -556,10 +620,26 @@ jello_bc_result jello_bc_validate_insn(
       if(rk_ne(m, reg_types, ins->a, JELLO_T_OBJECT)) return err(JELLO_BC_BAD_FORMAT, "obj_copy dst must be Object", 0);
       if(rk_ne(m, reg_types, ins->b, JELLO_T_OBJECT)) return err(JELLO_BC_BAD_FORMAT, "obj_copy src must be Object", 0);
       return ok();
+    case JOP_OBJ_KEYS:
+      if(ins->a >= nregs || ins->b >= nregs)
+        return err(JELLO_BC_BAD_FORMAT, "obj_keys reg out of range", 0);
+      if(!rk_array_of(m, reg_types, ins->a, JELLO_T_ATOM)) {
+        return err(JELLO_BC_BAD_FORMAT, "obj_keys dst must be Array<Atom>", 0);
+      }
+      if(rk_ne(m, reg_types, ins->b, JELLO_T_OBJECT))
+        return err(JELLO_BC_BAD_FORMAT, "obj_keys src must be Object", 0);
+      return ok();
+
     case JOP_BYTES_NEW:
       if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "bytes_new reg out of range", 0);
       if(rk_ne(m, reg_types, ins->a, JELLO_T_BYTES) || rk_ne(m, reg_types, ins->b, JELLO_T_I32)) {
         return err(JELLO_BC_BAD_FORMAT, "bytes_new types required", 0);
+      }
+      return ok();
+    case JOP_BYTES_FREEZE:
+      if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "bytes_freeze reg out of range", 0);
+      if(rk_ne(m, reg_types, ins->a, JELLO_T_BYTES)) {
+        return err(JELLO_BC_BAD_FORMAT, "bytes_freeze types required", 0);
       }
       return ok();
     case JOP_BYTES_LEN:
@@ -588,6 +668,26 @@ jello_bc_result jello_bc_validate_insn(
       if(rk_ne(m, reg_types, ins->a, JELLO_T_BYTES) || rk_ne(m, reg_types, ins->b, JELLO_T_BYTES) ||
          rk_ne(m, reg_types, ins->c, JELLO_T_BYTES)) {
         return err(JELLO_BC_BAD_FORMAT, "bytes_concat2 types required", 0);
+      }
+      return ok();
+    case JOP_BYTES_CONCAT_MANY:
+      if(ins->a >= nregs || (uint64_t)ins->b + (uint64_t)ins->c > (uint64_t)nregs) {
+        return err(JELLO_BC_BAD_FORMAT, "bytes_concat_many reg out of range", 0);
+      }
+      if(rk_ne(m, reg_types, ins->a, JELLO_T_BYTES))
+        return err(JELLO_BC_BAD_FORMAT, "bytes_concat_many dest must be Bytes", 0);
+      for(uint32_t i = 0; i < ins->c; i++) {
+        if(rk_ne(m, reg_types, ins->b + i, JELLO_T_BYTES))
+          return err(JELLO_BC_BAD_FORMAT, "bytes_concat_many part must be Bytes", 0);
+      }
+      return ok();
+    case JOP_BYTES_JOIN:
+      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs)
+        return err(JELLO_BC_BAD_FORMAT, "bytes_join reg out of range", 0);
+      if(rk_ne(m, reg_types, ins->a, JELLO_T_BYTES) ||
+         !rk_array_of(m, reg_types, ins->b, JELLO_T_BYTES) ||
+         rk_ne(m, reg_types, ins->c, JELLO_T_BYTES)) {
+        return err(JELLO_BC_BAD_FORMAT, "bytes_join types required", 0);
       }
       return ok();
     case JOP_BYTES_EQ:
@@ -699,12 +799,11 @@ jello_bc_result jello_bc_validate_insn(
           return err(JELLO_BC_BAD_FORMAT, "call_native arg type mismatch", 0);
         }
       }
-      if((jello_type_kind)sig->ret_kind != JELLO_T_VOID) {
-        if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "call_native dest reg out of range", 0);
-        jello_type_kind dk = reg_kind(m, reg_types, ins->a);
-        if(dk != (jello_type_kind)sig->ret_kind && dk != JELLO_T_DYNAMIC) {
-          return err(JELLO_BC_BAD_FORMAT, "call_native dest wrong kind", 0);
-        }
+      if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "call_native dest reg out of range", 0);
+      jello_type_kind want = (jello_type_kind)sig->ret_kind;
+      if(want == JELLO_T_VOID) want = JELLO_T_DYNAMIC;
+      if(reg_kind(m, reg_types, ins->a) != want) {
+        return err(JELLO_BC_BAD_FORMAT, "call_native dest wrong kind", 0);
       }
       return ok();
     }
@@ -720,30 +819,49 @@ jello_bc_result jello_bc_validate_insn(
       return ok();
     }
 
-    case JOP_TRY:
+    case JOP_TRY: {
       if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "try reg out of range", 0);
       if(reg_kind(m, reg_types, ins->a) != JELLO_T_DYNAMIC) {
         return err(JELLO_BC_BAD_FORMAT, "try dest must be Dynamic", 0);
       }
-      return ok();
+      return check_target(ins, pc, (int64_t)pc + 1 + (int32_t)ins->imm, 0, ninsns,
+                          "try handler out of range");
+    }
 
     case JOP_ENDTRY:
       return ok();
 
     case JOP_THROW:
       if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "throw reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_DYNAMIC) {
+        return err(JELLO_BC_BAD_FORMAT, "throw payload must be Dynamic", 0);
+      }
       return ok();
 
-    case JOP_SWITCH_KIND:
+    case JOP_SWITCH_KIND: {
       if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "switch_kind reg out of range", 0);
       if(reg_kind(m, reg_types, ins->a) != JELLO_T_DYNAMIC) {
         return err(JELLO_BC_BAD_FORMAT, "switch_kind subject must be Dynamic", 0);
       }
-      return ok();
+      int64_t after = (int64_t)pc + 1 + ins->b;
+      if(after > (int64_t)ninsns)
+        return err(JELLO_BC_BAD_FORMAT, "switch_kind table out of range", 0);
+      for(uint32_t i = 1; i <= ins->b; i++) {
+        if(ins[i].op != (uint8_t)JOP_CASE_KIND)
+          return err(JELLO_BC_BAD_FORMAT, "switch_kind row must be CASE_KIND", 0);
+        jello_bc_result r = check_target(ins, pc, after + (int32_t)ins[i].imm, after, ninsns,
+                                         "switch_kind case target out of range");
+        if(r.err) return r;
+      }
+      return check_target(ins, pc, after + (int32_t)ins->imm, after, ninsns,
+                          "switch_kind default target out of range");
+    }
 
     case JOP_SPILL_PUSH:
     case JOP_SPILL_POP:
       if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "spill reg out of range", 0);
+      if(ins->imm >= JELLO_SPILL_SLOTS_MAX)
+        return err(JELLO_BC_BAD_FORMAT, "spill slot out of range", 0);
       return ok();
 
     case JOP_ARRAY_NEW:
@@ -763,21 +881,50 @@ jello_bc_result jello_bc_validate_insn(
       if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) {
         return err(JELLO_BC_BAD_FORMAT, "array_get/set reg out of range", 0);
       }
-      if(rk_ne(m, reg_types, ins->b, JELLO_T_ARRAY)) return err(JELLO_BC_BAD_FORMAT, "array_get/set src must be Array", 0);
-      if(rk_ne(m, reg_types, ins->c, JELLO_T_I32)) return err(JELLO_BC_BAD_FORMAT, "array_get/set index must be I32", 0);
+      if(rk_ne(m, reg_types, ins->b, JELLO_T_ARRAY))
+        return err(JELLO_BC_BAD_FORMAT, "array_get/set src must be Array", 0);
+      if(rk_ne(m, reg_types, ins->c, JELLO_T_I32))
+        return err(JELLO_BC_BAD_FORMAT, "array_get/set index must be I32", 0);
+      if(reg_types[ins->a] != m->types[reg_types[ins->b]].as.unary.elem) {
+        return err(JELLO_BC_BAD_FORMAT, "array_get/set element type mismatch", 0);
+      }
+      return ok();
+
+    case JOP_ARRAY_RESIZE:
+      if(ins->b >= nregs || ins->c >= nregs)
+        return err(JELLO_BC_BAD_FORMAT, "array_resize reg out of range", 0);
+      if(rk_ne(m, reg_types, ins->b, JELLO_T_ARRAY))
+        return err(JELLO_BC_BAD_FORMAT, "array_resize target must be Array", 0);
+      if(rk_ne(m, reg_types, ins->c, JELLO_T_I32))
+        return err(JELLO_BC_BAD_FORMAT, "array_resize length must be I32", 0);
+      return ok();
+
+    case JOP_ARRAY_CONCAT2:
+      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) {
+        return err(JELLO_BC_BAD_FORMAT, "array_concat2 reg out of range", 0);
+      }
+      if(rk_ne(m, reg_types, ins->a, JELLO_T_ARRAY))
+        return err(JELLO_BC_BAD_FORMAT, "array_concat2 dst must be Array", 0);
+      if(reg_types[ins->b] != reg_types[ins->a] || reg_types[ins->c] != reg_types[ins->a]) {
+        return err(JELLO_BC_BAD_FORMAT, "array_concat2 operands must have the result's array type",
+                   0);
+      }
       return ok();
 
     case JOP_LIST_NIL:
       if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "list_nil reg out of range", 0);
-      if(reg_kind(m, reg_types, ins->a) != JELLO_T_LIST) return err(JELLO_BC_BAD_FORMAT, "list_nil dst must be List", 0);
+      if(rk_ne(m, reg_types, ins->a, JELLO_T_LIST))
+        return err(JELLO_BC_BAD_FORMAT, "list_nil dst must be List", 0);
       return ok();
 
     case JOP_LIST_CONS:
       if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs) {
         return err(JELLO_BC_BAD_FORMAT, "list_cons reg out of range", 0);
       }
-      if(reg_kind(m, reg_types, ins->a) != JELLO_T_LIST) return err(JELLO_BC_BAD_FORMAT, "list_cons dst must be List", 0);
-      if(reg_kind(m, reg_types, ins->c) != JELLO_T_LIST) return err(JELLO_BC_BAD_FORMAT, "list_cons tail must be List", 0);
+      if(rk_ne(m, reg_types, ins->a, JELLO_T_LIST))
+        return err(JELLO_BC_BAD_FORMAT, "list_cons dst must be List", 0);
+      if(rk_ne(m, reg_types, ins->c, JELLO_T_LIST))
+        return err(JELLO_BC_BAD_FORMAT, "list_cons tail must be List", 0);
       if(reg_types[ins->a] != reg_types[ins->c]) {
         return err(JELLO_BC_BAD_FORMAT, "list_cons list type mismatch", 0);
       }
@@ -787,38 +934,77 @@ jello_bc_result jello_bc_validate_insn(
       return ok();
 
     case JOP_LIST_HEAD:
-      if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "list_head reg out of range", 0);
-      if(reg_kind(m, reg_types, ins->b) != JELLO_T_LIST) return err(JELLO_BC_BAD_FORMAT, "list_head src must be List", 0);
+      if(ins->a >= nregs || ins->b >= nregs)
+        return err(JELLO_BC_BAD_FORMAT, "list_head reg out of range", 0);
+      if(rk_ne(m, reg_types, ins->b, JELLO_T_LIST))
+        return err(JELLO_BC_BAD_FORMAT, "list_head src must be List", 0);
       if(m->types[reg_types[ins->b]].as.unary.elem != reg_types[ins->a]) {
         return err(JELLO_BC_BAD_FORMAT, "list_head dst type mismatch", 0);
       }
       return ok();
 
     case JOP_LIST_TAIL:
-      if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "list_tail reg out of range", 0);
-      if(reg_kind(m, reg_types, ins->a) != JELLO_T_LIST) return err(JELLO_BC_BAD_FORMAT, "list_tail dst must be List", 0);
-      if(reg_kind(m, reg_types, ins->b) != JELLO_T_LIST) return err(JELLO_BC_BAD_FORMAT, "list_tail src must be List", 0);
+      if(ins->a >= nregs || ins->b >= nregs)
+        return err(JELLO_BC_BAD_FORMAT, "list_tail reg out of range", 0);
+      if(rk_ne(m, reg_types, ins->a, JELLO_T_LIST))
+        return err(JELLO_BC_BAD_FORMAT, "list_tail dst must be List", 0);
+      if(rk_ne(m, reg_types, ins->b, JELLO_T_LIST))
+        return err(JELLO_BC_BAD_FORMAT, "list_tail src must be List", 0);
       if(reg_types[ins->a] != reg_types[ins->b]) {
         return err(JELLO_BC_BAD_FORMAT, "list_tail list type mismatch", 0);
       }
       return ok();
 
     case JOP_LIST_IS_NIL:
-      if(ins->a >= nregs || ins->b >= nregs) return err(JELLO_BC_BAD_FORMAT, "list_is_nil reg out of range", 0);
-      if(rk_ne(m, reg_types, ins->a, JELLO_T_BOOL)) return err(JELLO_BC_BAD_FORMAT, "list_is_nil dst must be Bool", 0);
-      if(reg_kind(m, reg_types, ins->b) != JELLO_T_LIST) return err(JELLO_BC_BAD_FORMAT, "list_is_nil src must be List", 0);
+      if(ins->a >= nregs || ins->b >= nregs)
+        return err(JELLO_BC_BAD_FORMAT, "list_is_nil reg out of range", 0);
+      if(rk_ne(m, reg_types, ins->a, JELLO_T_BOOL))
+        return err(JELLO_BC_BAD_FORMAT, "list_is_nil dst must be Bool", 0);
+      if(rk_ne(m, reg_types, ins->b, JELLO_T_LIST))
+        return err(JELLO_BC_BAD_FORMAT, "list_is_nil src must be List", 0);
       return ok();
 
     case JOP_ENUM_NEW:
-    case JOP_ENUM_TAG:
-    case JOP_ENUM_GET:
-    case JOP_OBJ_KEYS:
-    case JOP_BIND_THIS:
-    case JOP_BYTES_CONCAT_MANY:
-      return err(JELLO_BC_BAD_FORMAT, "opcode not implemented", 0);
-
-    default:
+      if(ins->a >= nregs) return err(JELLO_BC_BAD_FORMAT, "enum_new dest reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_ENUM)
+        return err(JELLO_BC_BAD_FORMAT, "enum_new dest must be Enum", 0);
+      if((uint64_t)ins->b + (uint64_t)ins->c > (uint64_t)nregs) {
+        return err(JELLO_BC_BAD_FORMAT, "enum_new payload regs out of range", 0);
+      }
+      if(m->features & (uint32_t)JELLO_BC_FEAT_ENUM_SCHEMA) {
+        const jello_enum_sig* sig = &m->enum_sigs[m->types[reg_types[ins->a]].as.enm.enum_sig_id];
+        if(ins->imm >= sig->nvariants)
+          return err(JELLO_BC_BAD_FORMAT, "enum_new tag out of range", 0);
+        const jello_enum_variant_sig* variant = &sig->variants[ins->imm];
+        if(ins->c != variant->nfields)
+          return err(JELLO_BC_BAD_FORMAT, "enum_new field count mismatch", 0);
+        for(uint16_t i = 0; i < variant->nfields; i++) {
+          if(reg_types[(uint32_t)ins->b + i] != variant->field_type[i])
+            return err(JELLO_BC_BAD_FORMAT, "enum_new field type mismatch", 0);
+        }
+      }
       return ok();
+    case JOP_ENUM_TAG:
+      if(ins->a >= nregs || ins->b >= nregs)
+        return err(JELLO_BC_BAD_FORMAT, "enum_tag reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->a) != JELLO_T_I32)
+        return err(JELLO_BC_BAD_FORMAT, "enum_tag dest must be I32", 0);
+      if(reg_kind(m, reg_types, ins->b) != JELLO_T_ENUM)
+        return err(JELLO_BC_BAD_FORMAT, "enum_tag src must be Enum", 0);
+      return ok();
+    case JOP_ENUM_GET:
+      if(ins->a >= nregs || ins->b >= nregs || ins->c >= nregs)
+        return err(JELLO_BC_BAD_FORMAT, "enum_get reg out of range", 0);
+      if(reg_kind(m, reg_types, ins->b) != JELLO_T_ENUM)
+        return err(JELLO_BC_BAD_FORMAT, "enum_get src must be Enum", 0);
+      if(reg_kind(m, reg_types, ins->c) != JELLO_T_I32)
+        return err(JELLO_BC_BAD_FORMAT, "enum_get index must be I32", 0);
+      return ok();
+    case JOP_BIND_THIS: return err(JELLO_BC_BAD_FORMAT, "opcode not implemented", 0);
+
+    case JOP_CASE_KIND: return err(JELLO_BC_BAD_FORMAT, "case_kind outside a switch_kind table", 0);
+
+    default: return ok();
   }
 }
 
@@ -830,6 +1016,101 @@ static int result_ok(const jello_bc_module* m, jello_type_id expected, jello_typ
 
 static const jello_fun_sig* fun_sig_of(const jello_bc_module* m, jello_type_id tid) {
   return &m->sigs[m->types[tid].as.fun.sig_id];
+}
+
+static jello_bc_result validate_function_value(const jello_bc_module* m,
+                                               const jello_type_id* results,
+                                               const jello_bc_function* f, const jello_insn* ins) {
+  const jello_bc_function* callee = &m->funcs[ins->imm];
+  if(rk_ne(m, f->reg_types, ins->a, JELLO_T_FUNCTION))
+    return err(JELLO_BC_BAD_FORMAT, "function value dest must be Function", 0);
+  const jello_fun_sig* sig = fun_sig_of(m, f->reg_types[ins->a]);
+  if(sig->nargs != callee->nargs)
+    return err(JELLO_BC_BAD_FORMAT, "function value arg count mismatch", 0);
+  for(uint32_t a = 0; a < sig->nargs; a++) {
+    if(!type_ids_compatible(m, sig->args[a], callee->reg_types[a]))
+      return err(JELLO_BC_BAD_FORMAT, "function value arg type mismatch", 0);
+  }
+  if(m->types[sig->ret].kind != JELLO_T_VOID && !result_ok(m, results[ins->imm], sig->ret)) {
+    return err(JELLO_BC_BAD_FORMAT, "function value result type mismatch", 0);
+  }
+  if(ins->c > 0 && callee->cap_start < callee->nargs)
+    return err(JELLO_BC_BAD_FORMAT, "closure captures overlap the callee's arguments", 0);
+  for(uint32_t i = 0; i < ins->c; i++) {
+    if(rk_ne(m, callee->reg_types, callee->cap_start + i, JELLO_T_DYNAMIC)) {
+      return err(JELLO_BC_BAD_FORMAT, "closure capture register in the callee must be Dynamic", 0);
+    }
+  }
+  return ok();
+}
+
+jello_bc_result jello_bc_validate_results(const jello_bc_module* m) {
+  jello_type_id* results =
+      (jello_type_id*)malloc((m->nfuncs ? m->nfuncs : 1u) * sizeof(jello_type_id));
+  if(!results) return err(JELLO_BC_OUT_OF_MEMORY, "oom result types", 0);
+  jello_bc_result r = ok();
+  for(uint32_t i = 0; i < m->nfuncs && !r.err; i++) {
+    const jello_bc_function* f = &m->funcs[i];
+    results[i] = NO_RESULT;
+    for(uint32_t pc = 0; pc < f->ninsns; pc++) {
+      if(f->insns[pc].op != (uint8_t)JOP_RET) continue;
+      jello_type_id t = f->reg_types[f->insns[pc].a];
+      if(!result_ok(m, results[i], t)) {
+        r = err(JELLO_BC_BAD_FORMAT, "inconsistent return types", 0);
+        break;
+      }
+      results[i] = t;
+    }
+  }
+  for(int changed = 1; changed && !r.err;) {
+    changed = 0;
+    for(uint32_t i = 0; i < m->nfuncs; i++) {
+      const jello_bc_function* f = &m->funcs[i];
+      for(uint32_t pc = 0; pc < f->ninsns && results[i] == NO_RESULT; pc++) {
+        const jello_insn* ins = &f->insns[pc];
+        if(ins->op == (uint8_t)JOP_TAILCALL && results[ins->imm] != NO_RESULT) {
+          results[i] = results[ins->imm];
+          changed = 1;
+        }
+        if(ins->op == (uint8_t)JOP_TAILCALLR) {
+          results[i] = fun_sig_of(m, f->reg_types[ins->b])->ret;
+          changed = 1;
+        }
+      }
+    }
+  }
+  for(uint32_t i = 0; i < m->nfuncs && !r.err; i++) {
+    const jello_bc_function* f = &m->funcs[i];
+    for(uint32_t pc = 0; pc < f->ninsns && !r.err; pc++) {
+      const jello_insn* ins = &f->insns[pc];
+      switch((jello_op)ins->op) {
+        case JOP_CALL:
+          if(!result_ok(m, results[ins->imm], f->reg_types[ins->a]))
+            r = err(JELLO_BC_BAD_FORMAT, "call result type mismatch", 0);
+          break;
+        case JOP_TAILCALL:
+          if(!result_ok(m, results[ins->imm], results[i]))
+            r = err(JELLO_BC_BAD_FORMAT, "tailcall result type mismatch", 0);
+          break;
+        case JOP_CALLR:
+          if(!type_ids_compatible(m, fun_sig_of(m, f->reg_types[ins->b])->ret,
+                                  f->reg_types[ins->a])) {
+            r = err(JELLO_BC_BAD_FORMAT, "callr result type mismatch", 0);
+          }
+          break;
+        case JOP_TAILCALLR:
+          if(!type_ids_compatible(m, fun_sig_of(m, f->reg_types[ins->b])->ret, results[i])) {
+            r = err(JELLO_BC_BAD_FORMAT, "tailcallr result type mismatch", 0);
+          }
+          break;
+        case JOP_CONST_FUN:
+        case JOP_CLOSURE: r = validate_function_value(m, results, f, ins); break;
+        default: break;
+      }
+    }
+  }
+  free(results);
+  return r;
 }
 
 static int region_visit(int32_t* depth, uint32_t* work, uint32_t* nwork, int64_t pc,

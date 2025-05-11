@@ -81,3 +81,53 @@ uint32_t jit_bits_read(const jello_bytes* b, uint32_t width, uint32_t bit_off) {
   }
   return value;
 }
+
+int jit_run_handler(jello_vm* vm, const jello_bc_module* m, uint32_t fi, uint32_t pc) {
+  exec_ctx ctx = {vm, m, NULL, 0};
+  if(op_dispatch(&ctx, &m->funcs[fi].insns[pc]) != OP_TRAP) return 0;
+  vm->trap_func_index = fi;
+  vm->trap_pc = pc;
+  return 1;
+}
+
+const void* jit_callr_push(jello_vm* vm, uint32_t dst, uint32_t callee_reg, uint32_t arg_first,
+                           uint32_t nargs) {
+  call_frame* fr = &vm->call_frames[vm->call_frames_len - 1u];
+  const jello_function* fn = vm_push_callr_frame(
+      vm, vm->running_module, vm_load_val(&fr->rf, callee_reg), dst, arg_first, nargs);
+  return fn ? vm->active_jit->entries[fn->func_index] : NULL;
+}
+
+void jit_throw(jello_vm* vm, uint32_t payload_reg, uint32_t fi, uint32_t pc) {
+  call_frame* fr = &vm->call_frames[vm->call_frames_len - 1u];
+  jello_value payload = vm_load_val(&fr->rf, payload_reg);
+  if(vm_throw_find(vm, payload)) {
+    vm->trap_code = JELLO_TRAP_INTERNAL_UNWIND;
+    return;
+  }
+  vm->trap_code = JELLO_TRAP_UNCAUGHT_THROW;
+  vm->thrown = payload;
+  vm->trap_func_index = fi;
+  vm->trap_pc = pc;
+}
+
+void jit_unwind_lost(jello_vm* vm) {
+  call_frame* fr = &vm->call_frames[vm->call_frames_len - 1u];
+  fprintf(stderr, "jello: internal error: unwind reached function %u at pc %u, not a handler\n",
+          fr->func_index, fr->pc);
+  abort();
+}
+
+void jit_trap_pop_frame(jello_vm* vm) {
+  vm_trace_frames(vm, vm->call_frames_len - 1u);
+  vm_pop_frame(vm);
+}
+
+void jit_run_interp_top(jello_vm* vm) {
+  uint32_t stop = vm->call_frames_len - 1u;
+  exec_ctx ctx = {vm, vm->running_module, NULL, stop};
+  vm->jit_bridges++;
+  if(vm_exec_loop(&ctx) == JELLO_EXEC_OK) return;
+  vm_trace_frames(vm, stop);
+  while(vm->call_frames_len > stop) vm_pop_frame(vm);
+}
