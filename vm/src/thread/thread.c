@@ -28,8 +28,9 @@ static jello_heap* heap_new(void) {
   return heap;
 }
 
-static void heap_register(jello_heap* heap, jello_vm* vm) {
-  pthread_mutex_lock(&heap->alloc_lock);
+static void heap_register(jello_heap* heap, jello_vm* vm, jello_vm* by) {
+  if(by) vm_heap_lock(by);
+  else pthread_mutex_lock(&heap->alloc_lock);
   if(heap->threads_len == heap->threads_cap) {
     uint32_t ncap = heap->threads_cap ? heap->threads_cap * 2u : 4u;
     jello_vm** nt = (jello_vm**)realloc(heap->threads, sizeof(jello_vm*) * (size_t)ncap);
@@ -62,22 +63,36 @@ jello_vm* jello_vm_create(void) {
   jello_vm* vm = (jello_vm*)calloc(1, sizeof(jello_vm));
   if(!vm) return NULL;
   vm->heap = heap_new();
-  heap_register(vm->heap, vm);
+  vm->space = &vm->heap->space;
+  heap_register(vm->heap, vm, NULL);
   jello_gc_init(vm);
+  return vm;
+}
+
+jello_vm* vm_create_attached(jello_vm* existing, uint8_t* mem, uint32_t bytes, uint32_t call_frames,
+                             int own_space) {
+  if(!existing || !existing->heap) return NULL;
+  jello_vm* vm = (jello_vm*)calloc(1, sizeof(jello_vm));
+  if(!vm) return NULL;
+  vm->heap = existing->heap;
+  vm->space = own_space ? (jello_space*)calloc(1, sizeof(jello_space)) : &vm->heap->space;
+  if(!vm->space) {
+    free(vm);
+    return NULL;
+  }
+  vm_frame_stack_attach(vm, mem, bytes, call_frames);
+  heap_register(vm->heap, vm, existing);
+  jello_gc_init(vm); /* Keeps a shared space's existing threshold. */
   return vm;
 }
 
 jello_vm* jello_vm_create_joined(jello_vm* existing) {
   if(!existing || !existing->heap) return NULL;
-  jello_vm* vm = (jello_vm*)calloc(1, sizeof(jello_vm));
-  if(!vm) return NULL;
-  jello_heap* heap = existing->heap;
-  pthread_mutex_lock(&heap->alloc_lock);
-  heap->refcount++;
-  pthread_mutex_unlock(&heap->alloc_lock);
-  vm->heap = heap;
-  heap_register(heap, vm);
-  jello_gc_init(vm); /* idempotent: gc_next_collect is already nonzero on a shared heap */
+  uint8_t* mem = frame_stack_reserve();
+  if(!mem) return NULL;
+  jello_vm* vm =
+      vm_create_attached(existing, mem, VM_DEFAULT_FRAME_STACK_BYTES, VM_DEFAULT_CALL_FRAMES, 0);
+  if(!vm) jello_pages_unmap(mem, VM_DEFAULT_FRAME_STACK_BYTES);
   return vm;
 }
 
@@ -100,6 +115,34 @@ void jello_vm_destroy(jello_vm* vm) {
   if(vm->frame_stack) munmap(vm->frame_stack, vm->frame_stack_cap);
   free(vm->call_frames);
   vm_free_layouts(vm);
+  free(vm);
+}
+
+void vm_destroy_attached(jello_vm* vm) {
+  vm_frame_reset(vm);
+  vm_frame_segments_free(vm);
+  jello_heap* heap = vm->heap;
+  if(heap) {
+    jello_space* own = vm_owns_space(vm) ? vm->space : NULL;
+    int last = heap_unregister(heap, vm);
+    if(own) {
+      vm_space_free(own); /* Nothing else reaches its objects once it has finished. */
+      free(own);
+    }
+    if(last) {
+      vm_space_free(&heap->space); /* Frees objects and free lists, not the heap itself. */
+      pthread_mutex_destroy(&heap->alloc_lock);
+      pthread_mutex_destroy(&heap->stw_lock);
+      pthread_cond_destroy(&heap->stw_resume_cv);
+      pthread_mutex_destroy(&heap->proc_lock);
+      free(heap->threads);
+      free(heap);
+    }
+  }
+  if(vm->owns_globals) free(vm->globals);
+  free(vm->call_frames);
+  free(vm->try_scopes);
+  free(vm->gc_roots);
   free(vm);
 }
 
@@ -174,6 +217,12 @@ static int reductions_settle(jello_vm* vm) {
   }
   vm->fuel_remaining -= used;
   return 0;
+}
+
+int vm_reductions_out(jello_vm* vm) {
+  int trapped = reductions_settle(vm);
+  reductions_refill(vm);
+  return vm->proc ? proc_window_end(vm, trapped) : trapped;
 }
 
 void jello_vm_set_fuel(jello_vm* vm, uint64_t fuel) {

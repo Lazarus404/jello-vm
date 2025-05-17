@@ -137,7 +137,12 @@ function(jello_jdll target name)
   install(TARGETS ${target} LIBRARY DESTINATION lib/jdll)
 endfunction()
 
-add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../jdll-std" jdll-std)
+set(JELLO_STD_SOURCES
+  std/std.c
+  std/io.c
+  std/regexp.c
+  std/text.c)
+jello_jdll(jello_std_jdll std ${JELLO_STD_SOURCES})
 
 file(GLOB JELLO_MBEDTLS_SOURCES "${CMAKE_CURRENT_LIST_DIR}/third_party/mbedtls-3.5.1/library/*.c")
 add_library(jello_mbedtls STATIC ${JELLO_MBEDTLS_SOURCES})

@@ -1075,3 +1075,141 @@ jello_trap_code proc_call_blocking(jello_vm* vm, jdll_export_fn fn, jdlo_ctx* ct
   if(park(s, vm, PROC_PARK_NATIVE, 0) == JELLO_TRAP_DEADLOCK) abort(); /* Not while it counts. */
   return native_end(p);
 }
+
+static void poll_signal(proc_sched* s, proc_poll_desc* d, uint32_t found) {
+  for(uint32_t dir = 0; dir < 2; dir++) {
+    jello_process* p = d->waiters[dir];
+    uint32_t bit = 1u << dir;
+    if(!(found & (bit | PROC_FD_CLOSED))) continue;
+    if(!p) {
+      d->ready |= (uint8_t)(found & bit);
+      continue;
+    }
+    for(uint32_t i = 0; i < 2; i++)
+      if(d->waiters[i] == p) d->waiters[i] = NULL;
+    pthread_mutex_lock(&p->mu);
+    p->polled |= (uint8_t)(found & (bit | PROC_FD_CLOSED));
+    int queue = unpark(p);
+    pthread_mutex_unlock(&p->mu);
+    if(queue) make_ready(s, p);
+  }
+}
+
+static void poll_rearm(proc_sched* s, proc_poll_desc* d) {
+  uint32_t events = (d->waiters[0] ? PROC_FD_READ : 0u) | (d->waiters[1] ? PROC_FD_WRITE : 0u);
+  if(!d->always) proc_poller_rearm(&s->poller, d->fd, d, events);
+}
+
+void proc_poll_ready(proc_sched* s, proc_poll_event e) {
+  proc_poll_desc* d = (proc_poll_desc*)e.token;
+  pthread_mutex_lock(&d->mu);
+  if(d->open) {
+    poll_signal(s, d, e.ready);
+    poll_rearm(s, d);
+  }
+  pthread_mutex_unlock(&d->mu);
+}
+
+static void poll_unwatch(proc_sched* s, proc_poll_desc* d, int fd) {
+  if(!d->always) proc_poller_unwatch(&s->poller, fd);
+  poll_signal(s, d, PROC_FD_CLOSED);
+  d->open = 0;
+}
+
+jello_trap_code proc_poll_open(jello_vm* vm, int fd, int* watched) {
+  proc_sched* s = running(vm)->sched;
+  *watched = 0;
+  if(proc_poll_index(fd) < 0) return JELLO_TRAP_TYPE_MISMATCH;
+  proc_poll_desc* d = proc_polls_make(s, fd);
+  if(!d) return JELLO_TRAP_NONE;
+  pthread_mutex_lock(&d->mu);
+  if(d->open) poll_unwatch(s, d, fd);
+  int w = proc_poller_watch(&s->poller, fd, d);
+  if(w >= 0) {
+    d->open = 1;
+    d->always = w == 1;
+    d->ready = 0;
+    d->fd = fd;
+    *watched = 1;
+  }
+  pthread_mutex_unlock(&d->mu);
+  return JELLO_TRAP_NONE;
+}
+
+jello_trap_code proc_poll_close(jello_vm* vm, int fd) {
+  proc_sched* s = running(vm)->sched;
+  proc_poll_desc* d = proc_polls_find(s, fd);
+  if(!d) return JELLO_TRAP_TYPE_MISMATCH;
+  pthread_mutex_lock(&d->mu);
+  int open = d->open;
+  if(open) poll_unwatch(s, d, fd);
+  pthread_mutex_unlock(&d->mu);
+  return open ? JELLO_TRAP_NONE : JELLO_TRAP_TYPE_MISMATCH;
+}
+
+void proc_wait_all(jello_vm* vm) {
+  proc_sched* s = main_sched(vm);
+  if(!s) return;
+  lock(s);
+  if(s->live) {
+    pthread_mutex_lock(&s->main->mu);
+    park(s, vm, PROC_PARK_ALL, 1);
+  } else {
+    unlock(s);
+  }
+}
+
+static void main_cleanups(jello_vm* vm, jello_process* m) {
+  jello_trap_code trap = vm->trap_code;
+  uint32_t func_index = vm->trap_func_index;
+  uint32_t pc = vm->trap_pc;
+  jello_trap_trace trace = vm->trap_trace;
+  run_cleanups(m);
+  vm->trap_code = trap;
+  vm->trap_func_index = func_index;
+  vm->trap_pc = pc;
+  vm->trap_trace = trace;
+  vm->thrown = m->exit_value;
+}
+
+void proc_end_all(jello_vm* vm) {
+  proc_sched* s = main_sched(vm);
+  if(!s) return;
+  jello_process* m = s->main;
+  m->exit_value = vm->trap_code == JELLO_TRAP_UNCAUGHT_THROW ? vm->thrown : jello_make_null();
+  if(m->ncleanups) main_cleanups(vm, m);
+  if(m->sockets) proc_sockets_end(m);
+  lock(s);
+  s->ending = 1;
+  vm_parcel dropped = vm_parcel_empty();
+  while(m->sends) timer_cancel(s, m->sends, &dropped);
+  for(jello_process* p = s->live; p; p = p->live_next) stop(s, p, PROC_STOPPED);
+  unlock(s);
+  proc_wait_all(vm);
+  atomic_store(&s->shutdown, 1);
+  for(uint32_t i = 1; i < s->started; i++) unpark_worker(&s->workers[i]);
+  for(uint32_t i = 1; i < s->started; i++) pthread_join(s->workers[i].thread, NULL);
+  natives_end(s);
+  proc_polls_end(s);
+  if(this_sched == s) this_sched = NULL;
+  inbox_free(m, &dropped);
+  vm_parcel_free(&dropped);
+  m->vm = NULL;
+  atomic_store_explicit(&m->done, 1, memory_order_release);
+  proc_release(m);
+  proc_pool_free(&s->pool);
+  for(uint32_t i = 0; i < s->nworkers; i++) {
+    pthread_mutex_destroy(&s->workers[i].park_mu);
+    pthread_cond_destroy(&s->workers[i].park_cv);
+  }
+  pthread_cond_destroy(&s->main_cv);
+  pthread_mutex_destroy(&s->idle_lock);
+  pthread_mutex_destroy(&s->pool_lock);
+  pthread_cond_destroy(&s->native_cv);
+  pthread_mutex_destroy(&s->native_lock);
+  pthread_mutex_destroy(&s->poll_lock);
+  free(s->timers);
+  jello_aligned_free(s->workers);
+  vm->proc = NULL;
+  free(s);
+}
