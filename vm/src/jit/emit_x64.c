@@ -859,6 +859,49 @@ static void emit_add_r32_r32(jit_exec_buf* buf, unsigned dst, unsigned src) {
   bytes[n++] = (uint8_t)(0xC0u | ((src & 7u) << 3) | (dst & 7u));
   jit_exec_buf_write(buf, bytes, n);
 }
+void* jit_sysv_memcpy(void* dst, const void* src, size_t n) { return memcpy(dst, src, n); }
+void* jit_sysv_memmove(void* dst, const void* src, size_t n) { return memmove(dst, src, n); }
+int jit_sysv_memcmp(const void* a, const void* b, size_t n) { return memcmp(a, b, n); }
+jello_box_f64* jit_sysv_jello_box_f64_new(jello_vm* vm, double v) {
+  return jello_box_f64_new(vm, v);
+}
+jello_object* jit_sysv_jello_object_new(jello_vm* vm, uint32_t type_id) {
+  return jello_object_new(vm, type_id);
+}
+jello_object* jit_sysv_jello_object_copy(jello_vm* vm, const jello_object* src) {
+  return jello_object_copy(vm, src);
+}
+int jit_sysv_jello_object_has(const jello_object* o, uint32_t atom_id) {
+  return jello_object_has(o, atom_id);
+}
+jello_struct* jit_sysv_jello_struct_new(jello_vm* vm, const jello_bc_module* m,
+                                        uint32_t struct_sig_id) {
+  return jello_struct_new(vm, m, struct_sig_id);
+}
+jello_value jit_sysv_vm_box_from_typed(jello_vm* vm, const jello_bc_module* m,
+                                       const jello_bc_function* f, reg_frame* rf, uint32_t r) {
+  return vm_box_from_typed(vm, m, f, rf, r);
+}
+int jit_sysv_vm_store_from_boxed(jello_vm* vm, const jello_bc_module* m, const jello_bc_function* f,
+                                 reg_frame* rf, uint32_t dst, jello_value v) {
+  return vm_store_from_boxed(vm, m, f, rf, dst, v);
+}
+jello_bytes* jit_sysv_vm_buffer_new(jello_vm* vm, uint32_t length) {
+  return vm_buffer_new(vm, length);
+}
+uint32_t jit_sysv_vm_dynamic_is_enum(jello_value v, jello_type_id type) {
+  return vm_dynamic_is_enum(v, type);
+}
+uint32_t jit_sysv_vm_kindof_dynamic(jello_value v) { return vm_kindof_dynamic(v); }
+float jit_sysv_vm_f16_to_f32(uint16_t bits) { return vm_f16_to_f32(bits); }
+uint16_t jit_sysv_vm_f32_to_f16(float f) { return vm_f32_to_f16(f); }
+void jit_sysv_vm_pop_frame(jello_vm* vm) { vm_pop_frame(vm); }
+int jit_sysv_vm_try_push(jello_vm* vm, uint32_t catch_pc, uint32_t payload_reg) {
+  return vm_try_push(vm, catch_pc, payload_reg);
+}
+void jit_sysv_vm_try_pop(jello_vm* vm) { vm_try_pop(vm); }
+void jit_sysv_vm_safepoint_check(jello_vm* vm) { vm_safepoint_check(vm); }
+int jit_sysv_vm_reductions_out(jello_vm* vm) { return vm_reductions_out(vm); }
 
 static void emit_load_vm64(jit_exec_buf* buf, unsigned dst, uint32_t disp) {
   x64_rm(buf, 0, X64_W, 0x8B, dst, (unsigned)JIT_REG_VM, disp);

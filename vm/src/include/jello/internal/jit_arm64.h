@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * Instruction encoders for the arm64 JIT; each returns one instruction word. Register
+ * arguments are register numbers, where 31 is sp or zr as the instruction defines. Branch offsets
+ * are signed and counted in instructions. */
+
 #ifndef JELLO_JIT_ARM64_H
 #define JELLO_JIT_ARM64_H
 
@@ -59,10 +64,16 @@ typedef enum a64_cond {
   A64_NE = 0x1,
   A64_HS = 0x2,
   A64_LO = 0x3,
+  A64_MI = 0x4,
+  A64_PL = 0x5,
+  A64_VS = 0x6,
+  A64_VC = 0x7,
   A64_HI = 0x8,
   A64_LS = 0x9,
+  A64_GE = 0xA,
   A64_LT = 0xB,
   A64_GT = 0xC,
+  A64_LE = 0xD,
 } a64_cond;
 
 static inline uint32_t a64_b_cond(a64_cond cond, int32_t off_insns) {
@@ -249,16 +260,6 @@ static inline uint32_t a64_asrv_w(uint8_t rd, uint8_t rn, uint8_t rm) {
 
 static inline uint32_t a64_asrv_x(uint8_t rd, uint8_t rn, uint8_t rm) {
   return 0x9AC02800u | ((uint32_t)rm << 16) | ((uint32_t)rn << 5) | (uint32_t)rd;
-}
-
-static inline uint32_t a64_b_lo(int32_t off_insns) {
-  uint32_t imm19 = ((uint32_t)off_insns & 0x7FFFFu) << 5;
-  return 0x54000000u | imm19 | 0x3u;
-}
-
-static inline uint32_t a64_b_ls(int32_t off_insns) {
-  uint32_t imm19 = ((uint32_t)off_insns & 0x7FFFFu) << 5;
-  return 0x54000000u | imm19 | 0x9u;
 }
 
 static inline uint32_t a64_fmov_x_d(uint8_t xn, uint8_t dn) {
@@ -450,11 +451,13 @@ static inline uint32_t a64_strb_w_uimm(uint8_t rt, uint8_t rn, uint32_t byte_off
 }
 
 static inline uint32_t a64_ldrh_w_uimm(uint8_t rt, uint8_t rn, uint32_t byte_off) {
-  return 0x79400000u | ((byte_off & 0xFFFu) << 10) | ((uint32_t)rn << 5) | (uint32_t)rt;
+  uint32_t imm12 = byte_off / 2u;
+  return 0x79400000u | (imm12 << 10) | ((uint32_t)rn << 5) | (uint32_t)rt;
 }
 
 static inline uint32_t a64_strh_w_uimm(uint8_t rt, uint8_t rn, uint32_t byte_off) {
-  return 0x79000000u | ((byte_off & 0xFFFu) << 10) | ((uint32_t)rn << 5) | (uint32_t)rt;
+  uint32_t imm12 = byte_off / 2u;
+  return 0x79000000u | (imm12 << 10) | ((uint32_t)rn << 5) | (uint32_t)rt;
 }
 
 static inline uint32_t a64_eor_w_rr(uint8_t rd, uint8_t rn, uint8_t rm) {
@@ -468,46 +471,6 @@ static inline uint32_t a64_eor_x_rr(uint8_t rd, uint8_t rn, uint8_t rm) {
 static inline uint32_t a64_cbnz_x(uint8_t rt, int32_t off_insns) {
   uint32_t imm19 = ((uint32_t)off_insns & 0x7FFFFu) << 5;
   return 0xB5000000u | imm19 | (uint32_t)rt;
-}
-
-static inline uint32_t a64_b_eq(int32_t off_insns) {
-  uint32_t imm19 = ((uint32_t)off_insns & 0x7FFFFu) << 5;
-  return 0x54000000u | imm19 | 0x0u;
-}
-
-static inline uint32_t a64_b_ne(int32_t off_insns) {
-  uint32_t imm19 = ((uint32_t)off_insns & 0x7FFFFu) << 5;
-  return 0x54000000u | imm19 | 0x1u;
-}
-
-static inline uint32_t a64_b_hs(int32_t off_insns) {
-  uint32_t imm19 = ((uint32_t)off_insns & 0x7FFFFu) << 5;
-  return 0x54000000u | imm19 | 0x2u;
-}
-
-static inline uint32_t a64_b_hi(int32_t off_insns) {
-  uint32_t imm19 = ((uint32_t)off_insns & 0x7FFFFu) << 5;
-  return 0x54000000u | imm19 | 0x8u;
-}
-
-static inline uint32_t a64_b_lt(int32_t off_insns) {
-  uint32_t imm19 = ((uint32_t)off_insns & 0x7FFFFu) << 5;
-  return 0x54000000u | imm19 | 0xBu;
-}
-
-static inline uint32_t a64_b_le(int32_t off_insns) {
-  uint32_t imm19 = ((uint32_t)off_insns & 0x7FFFFu) << 5;
-  return 0x54000000u | imm19 | 0xAu;
-}
-
-static inline uint32_t a64_b_ge(int32_t off_insns) {
-  uint32_t imm19 = ((uint32_t)off_insns & 0x7FFFFu) << 5;
-  return 0x54000000u | imm19 | 0xAu;
-}
-
-static inline uint32_t a64_b_gt(int32_t off_insns) {
-  uint32_t imm19 = ((uint32_t)off_insns & 0x7FFFFu) << 5;
-  return 0x54000000u | imm19 | 0xCu;
 }
 
 static inline uint32_t a64_ret(void) {

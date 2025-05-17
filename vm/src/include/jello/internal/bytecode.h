@@ -117,10 +117,6 @@ typedef struct jello_op_info {
   OP(JOP_TRY, "TRY", REG, POLY, IMM_RAW, 0, UNUSED, 0, IMM_JUMP, JELLO_OPF_IS_BRANCH, op_try) \
   OP(JOP_ENDTRY, "ENDTRY", UNUSED, 0, UNUSED, 0, UNUSED, 0, IMM_NONE, JELLO_OPF_NONE, op_endtry) \
   OP(JOP_THROW, "THROW", REG, POLY, UNUSED, 0, UNUSED, 0, IMM_NONE, JELLO_OPF_CAN_TRAP, op_throw) \
-  OP(JOP_BYTES_CONCAT_MANY, "BYTES_CONCAT_MANY", REG, T_BYTES, REG, POLY, IMM_RAW, 0, IMM_NONE, JELLO_OPF_UNIMPLEMENTED | JELLO_OPF_CAN_ALLOC, op_unimplemented) \
-  OP(JOP_ENUM_NEW, "ENUM_NEW", REG, T_ENUM, REG, POLY, IMM_RAW, 0, IMM_RAW, JELLO_OPF_UNIMPLEMENTED | JELLO_OPF_CAN_ALLOC, op_unimplemented) \
-  OP(JOP_ENUM_TAG, "ENUM_TAG", REG, T_I32, REG, T_ENUM, UNUSED, 0, IMM_NONE, JELLO_OPF_UNIMPLEMENTED, op_unimplemented) \
-  OP(JOP_ENUM_GET, "ENUM_GET", REG, POLY, REG, T_ENUM, REG, T_I32, IMM_NONE, JELLO_OPF_UNIMPLEMENTED, op_unimplemented) \
   OP(JOP_ASSERT, "ASSERT", REG, T_BOOL, REG, T_BYTES, IMM_RAW, 0, IMM_NONE,                        \
      JELLO_OPF_UNIMPLEMENTED | JELLO_OPF_CAN_TRAP, op_unimplemented)                               \
   OP(JOP_SWITCH_KIND, "SWITCH_KIND", REG, T_DYNAMIC, IMM_RAW, 0, UNUSED, 0, IMM_JUMP,              \
@@ -358,6 +354,8 @@ typedef struct jello_op_info {
      JELLO_OPF_CAN_TRAP, op_bytes_set_u8)                                                          \
   OP(JOP_BYTES_CONCAT2, "BYTES_CONCAT2", REG, T_BYTES, REG, T_BYTES, REG, T_BYTES, IMM_NONE,       \
      JELLO_OPF_CAN_TRAP | JELLO_OPF_CAN_ALLOC, op_bytes_concat2)                                   \
+  OP(JOP_BYTES_CONCAT_MANY, "BYTES_CONCAT_MANY", REG, T_BYTES, REG, POLY, IMM_RAW, 0, IMM_NONE,    \
+     JELLO_OPF_CAN_TRAP | JELLO_OPF_CAN_ALLOC, op_bytes_concat_many)                               \
   OP(JOP_BYTES_EQ, "BYTES_EQ", REG, T_BOOL, REG, T_BYTES, REG, T_BYTES, IMM_NONE, JELLO_OPF_NONE,  \
      op_bytes_eq)                                                                                  \
   OP(JOP_BYTES_BITAND2, "BYTES_BITAND2", REG, T_BYTES, REG, T_BYTES, REG, T_BYTES, IMM_NONE,       \
@@ -430,6 +428,12 @@ typedef struct jello_op_info {
      JELLO_OPF_TOUCHES_DYNAMIC | JELLO_OPF_CAN_ALLOC, op_obj_copy)                                 \
   OP(JOP_OBJ_KEYS, "OBJ_KEYS", REG, T_ARRAY, REG, T_OBJECT, UNUSED, 0, IMM_NONE,                   \
      JELLO_OPF_TOUCHES_DYNAMIC | JELLO_OPF_CAN_ALLOC, op_obj_keys)                                 \
+  OP(JOP_ENUM_NEW, "ENUM_NEW", REG, T_ENUM, REG, POLY, IMM_RAW, 0, IMM_RAW, JELLO_OPF_CAN_ALLOC,   \
+     op_enum_new)                                                                                  \
+  OP(JOP_ENUM_TAG, "ENUM_TAG", REG, T_I32, REG, T_ENUM, UNUSED, 0, IMM_NONE, JELLO_OPF_NONE,       \
+     op_enum_tag)                                                                                  \
+  OP(JOP_ENUM_GET, "ENUM_GET", REG, POLY, REG, T_ENUM, REG, T_I32, IMM_NONE, JELLO_OPF_CAN_TRAP,   \
+     op_enum_get)                                                                                  \
   OP(JOP_CALL_NATIVE, "CALL_NATIVE", REG, POLY, REG, POLY, IMM_RAW, 0, IMM_POOL,                   \
      JELLO_OPF_CAN_CALL | JELLO_OPF_CAN_ALLOC | JELLO_OPF_CAN_TRAP, op_call_native)                \
   OP(JOP_BYTES_READ_I64_LE, "BYTES_READ_I64_LE", REG, T_I64, REG, T_BYTES, REG, T_I32, IMM_NONE,   \

@@ -279,6 +279,17 @@ static jello_exec_status exec_top(jello_vm* vm, const jello_bc_module* m, jello_
   return st;
 }
 
+void vm_end_kept(jello_vm* vm) {
+  proc_end_all(vm);
+#if defined(JELLO_ENABLE_JIT) && (defined(__x86_64__) || defined(__aarch64__))
+  if(vm->kept_jit) {
+    jello_jit_module_free(vm->kept_jit);
+    free(vm->kept_jit);
+    vm->kept_jit = NULL;
+  }
+#endif
+}
+
 static jello_exec_status vm_exec_numeric_impl(jello_vm* vm, const jello_bc_module* m,
     jello_numeric_result* out, jello_jit_module* persistent_jm) {
   vm_safepoint_check(vm);

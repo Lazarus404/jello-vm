@@ -312,6 +312,24 @@ static jello_bc_result read_line_table(rd* r, jello_bc_module* m) {
   return ok();
 }
 
+int jello_bc_source_location(const jello_bc_module* m, uint32_t fi, uint32_t pc, const char** file,
+                             uint32_t* line, uint32_t* col) {
+  if(!m || fi >= m->nfuncs) return 0;
+  const jello_bc_function* f = &m->funcs[fi];
+  if(f->nlocs == 0 || pc < f->locs[0].pc) return 0;
+  /* The last run starting at or before pc. */
+  uint32_t lo = 0, hi = f->nlocs - 1u;
+  while(lo < hi) {
+    uint32_t mid = lo + (hi - lo + 1u) / 2u;
+    if(f->locs[mid].pc <= pc) lo = mid;
+    else hi = mid - 1u;
+  }
+  *file = m->source_files[f->locs[lo].file];
+  *line = f->locs[lo].line;
+  *col = f->locs[lo].col;
+  return 1;
+}
+
 uint32_t jello_bc_get_entry(const jello_bc_module* m) {
   return m ? m->entry : 0u;
 }

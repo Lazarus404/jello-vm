@@ -33,8 +33,6 @@ static int size_class_index(uint32_t total) {
   return -1;
 }
 
-#define GC_INITIAL_THRESHOLD (1024u * 1024u) /* 1MB: a round, generous first-collection budget */
-
 typedef struct shared_head {
   jdl_refs refs;
   jello_gc_hdr hdr;
@@ -68,6 +66,14 @@ static void shared_release(jello_bytes* bin) {
   if(__atomic_load_n(&s->refs, __ATOMIC_ACQUIRE) != 1u && !jdl_release(s)) return;
   atomic_fetch_sub_explicit(&shared_live, 1u, memory_order_relaxed);
   free(s);
+}
+
+/** What object `oh` counts live beyond its block: a handle's native bytes, or the shared binary a
+ * Bytes holds. */
+static uint32_t native_of(const jello_obj_header* oh) {
+  if(oh->kind == (uint8_t)JELLO_OBJ_HANDLE) return ((const jello_handle*)oh)->native_bytes;
+  const jello_bytes* b = (const jello_bytes*)oh;
+  return oh->kind == (uint8_t)JELLO_OBJ_BYTES && b->shared ? shared_native(b->owner) : 0;
 }
 
 /** Live bytes before the first collection, and the least the threshold ever falls to. */
@@ -313,7 +319,7 @@ static void mark_ptr(mark_stack* ms, void* p) {
 static void trace_object(mark_stack* ms, const jello_bc_module* m, void* p) {
   const jello_obj_header* oh = (const jello_obj_header*)p;
   switch((jello_obj_kind)oh->kind) {
-    case JELLO_OBJ_BYTES:
+    case JELLO_OBJ_BYTES: mark_ptr(ms, ((const jello_bytes*)p)->owner); return;
     case JELLO_OBJ_BOX_I64:
     case JELLO_OBJ_BOX_F64:
     case JELLO_OBJ_BOX_F32:
@@ -500,7 +506,8 @@ void jello_gc_collect(jello_vm* vm) {
       }
     } else {
       h->marked = 0;
-      live_bytes += h->total_size;
+      ms.marked--;
+      live_bytes += (uint64_t)h->total_size + native_of((const jello_obj_header*)obj_of(h));
       prev = &h->next;
     }
     h = next;

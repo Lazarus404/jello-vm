@@ -281,8 +281,21 @@ struct proc_sched {
   pthread_mutex_t pool_lock; /**< Guards every pool its processes' slots come from. */
 };
 
+static inline uint64_t proc_switches(const proc_sched* s) {
+  uint64_t n = 0;
+  for(uint32_t i = 0; i < s->nworkers; i++) n += s->workers[i].switches;
+  return n;
+}
+
 static inline int proc_finished(const jello_process* p) {
   return atomic_load_explicit(&p->done, memory_order_acquire);
+}
+
+static inline proc_exit proc_exit_of(const jello_process* p) {
+  if(!proc_finished(p)) return PROC_RUNNING;
+  if(p->trap == JELLO_TRAP_NONE) return PROC_NORMAL;
+  if(p->trap != JELLO_TRAP_STOPPED) return PROC_CRASHED;
+  return p->stopping == PROC_PARENT_EXITED ? PROC_PARENT_EXITED : PROC_STOPPED;
 }
 
 static inline vm_parcel* proc_inbox_at(const jello_process* p, uint32_t i) {
@@ -297,18 +310,32 @@ jello_process* proc_spawn(struct jello_vm* vm, const struct jello_function* body
 int proc_run_for(struct jello_vm* vm, uint32_t ms);
 void proc_leave_to_host(struct jello_vm* vm);
 void proc_trap(struct jdlo_ctx* c, jello_trap_code code);
+void* proc_arg_handle(struct jdlo_ctx* c, int index, const struct jello_jdll_handle_class* cls);
+jello_process* proc_self_or_fail(struct jdlo_ctx* c);
 extern const struct jello_jdll_handle_class proc_socket_class;
 void proc_socket_moved(void* payload, const struct jello_vm* vm);
 void proc_sockets_end(jello_process* p);
+void vm_net_error(struct jdlo_ctx* c);
+void vm_net_error_text(struct jdlo_ctx* c);
 int proc_on_main(const struct jello_vm* vm);
 jello_process* proc_self(struct jello_vm* vm);
 void proc_retain(jello_process* p);
 void proc_release(jello_process* p);
+int proc_stop(jello_process* p, proc_exit why);
+jello_trap_code proc_yield(struct jello_vm* vm);
+int proc_send(jello_process* from, jello_process* p, vm_parcel* msg);
+uint32_t proc_pending(struct jello_vm* vm);
 jello_trap_code proc_receive(struct jello_vm* vm, jello_value* out);
 uint64_t proc_now(void);
 uint64_t proc_deadline(int32_t ms);
+jello_trap_code proc_wait_message(struct jello_vm* vm, uint64_t deadline);
+jello_trap_code proc_sleep(struct jello_vm* vm, uint64_t deadline);
+proc_timer* proc_send_after(struct jello_vm* vm, uint64_t deadline, vm_parcel* msg);
+int proc_timer_cancel(struct jello_vm* vm, proc_timer* t);
 void proc_timer_release(proc_timer* t);
 jello_trap_code proc_poll_open(struct jello_vm* vm, int fd, int* watched);
+jello_trap_code proc_poll_wait(struct jello_vm* vm, int fd, uint32_t events, uint64_t deadline,
+                               uint32_t* ready);
 jello_trap_code proc_poll_close(struct jello_vm* vm, int fd);
 jello_trap_code proc_call_blocking(struct jello_vm* vm, jdll_export_fn fn, jdlo_ctx* ctx);
 

@@ -98,6 +98,8 @@ jello_vm* jello_vm_create_joined(jello_vm* existing) {
 
 void jello_vm_keep_processes(jello_vm* vm, int keep) { vm->keep_processes = keep != 0; }
 
+int jello_run_for(jello_vm* vm, uint32_t ms) { return proc_run_for(vm, ms); }
+
 void jello_vm_destroy(jello_vm* vm) {
   if(!vm) return;
   jello_heap* heap = vm->heap;
@@ -263,6 +265,17 @@ uint32_t jello_vm_last_trap_pc(const jello_vm* vm) {
 uint32_t jello_vm_last_trap_func_index(const jello_vm* vm) {
   return vm ? vm->trap_func_index : 0;
 }
+uint32_t jello_vm_last_trap_callers(const jello_vm* vm, uint32_t* func_indexes, uint32_t* pcs,
+                                    uint8_t* repeated, uint32_t max) {
+  if(!vm) return 0;
+  uint32_t n = vm->trap_trace.len < max ? vm->trap_trace.len : max;
+  for(uint32_t i = 0; i < n; i++) {
+    func_indexes[i] = vm->trap_trace.func_index[i];
+    pcs[i] = vm->trap_trace.pc[i];
+    if(repeated) repeated[i] = vm->trap_trace.repeated[i];
+  }
+  return n;
+}
 
 const char* jello_trap_code_name(jello_trap_code tc) {
   switch(tc) {
@@ -282,6 +295,8 @@ const char* jello_trap_code_name(jello_trap_code tc) {
     default: return "UNKNOWN";
   }
 }
+
+jello_value jello_vm_last_thrown(const jello_vm* vm) { return vm ? vm->thrown : jello_make_null(); }
 
 const char* jello_vm_last_trap_detail(const jello_vm* vm) { return vm ? vm->trap_detail : ""; }
 

@@ -70,6 +70,10 @@ int jello_jit_module_prepare(const jello_bc_module* m, jello_jit_module* out) {
   return prepare(m, out, 1);
 }
 
+int jello_jit_module_prepare_lazy(const jello_bc_module* m, jello_jit_module* out) {
+  return prepare(m, out, 0);
+}
+
 size_t jit_append_window_bytes;
 
 static int emit_appending(jello_jit_module* jm, uint32_t fi, size_t bound) {
@@ -135,6 +139,16 @@ void jello_jit_module_free(jello_jit_module* jm) {
   jm->entries = NULL;
   jm->ncompiled = 0;
   jit_free_exec_buf(&jm->blob);
+}
+
+jello_jit_module* jit_module_create(const jello_bc_module* m, int eager) {
+  jello_jit_module* jm = (jello_jit_module*)calloc(1, sizeof(jello_jit_module));
+  if(!jm) return NULL;
+  if(!prepare(m, jm, eager)) {
+    free(jm);
+    return NULL;
+  }
+  return jm;
 }
 
 int jello_jit_available(void) { return 1; }

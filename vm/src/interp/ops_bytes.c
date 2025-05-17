@@ -135,6 +135,19 @@ op_result op_bytes_concat2(exec_ctx* ctx, const jello_insn* ins) {
   return OP_CONTINUE;
 }
 
+op_result op_bytes_concat_many(exec_ctx* ctx, const jello_insn* ins) {
+  call_frame* fr = current_frame(ctx);
+  jello_bytes* parts[UINT8_MAX];
+  for(uint32_t i = 0; i < ins->c; i++) {
+    parts[i] = bytes_arg(ctx, fr, ins->b + i);
+    if(!parts[i]) return OP_TRAP;
+  }
+  jello_bytes* dst = jello_bytes_join(ctx->vm, parts, ins->c, NULL);
+  if(!dst) return OP_TRAP;
+  vm_store_ptr(&fr->rf, ins->a, dst);
+  return OP_CONTINUE;
+}
+
 op_result op_bytes_join(exec_ctx* ctx, const jello_insn* ins) {
   call_frame* fr = current_frame(ctx);
   jello_array* array = (jello_array*)ptr_arg(ctx, fr, ins->b);

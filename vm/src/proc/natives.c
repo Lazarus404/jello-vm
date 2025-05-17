@@ -31,6 +31,14 @@ void proc_trap(jdlo_ctx* c, jello_trap_code code) {
   jdl_fail(c, NULL);
 }
 
+void* proc_arg_handle(jdlo_ctx* c, int index, const jello_jdll_handle_class* cls) {
+  if(jello_is_null(jdl_arg_value(c, index))) {
+    proc_trap(c, JELLO_TRAP_NULL_DEREF);
+    return NULL;
+  }
+  return jdl_arg_handle(c, index, cls);
+}
+
 static int arg_body(jdlo_ctx* c) {
   jello_value v = jdl_arg_value(c, 0);
   const jello_function* f = jello_is_ptr(v) ? (const jello_function*)jello_as_ptr(v) : NULL;
@@ -56,6 +64,12 @@ static void spawn(jdlo_ctx* c, unsigned flags) {
 }
 
 static void vm_spawn(jdlo_ctx* c) { spawn(c, 0); }
+
+jello_process* proc_self_or_fail(jdlo_ctx* c) {
+  jello_process* p = proc_self(c->vm);
+  if(!p) jdl_fail(c, "out of memory");
+  return p;
+}
 
 static uint64_t due_in(int32_t ms) { return proc_deadline(ms < 0 ? 0 : ms); }
 

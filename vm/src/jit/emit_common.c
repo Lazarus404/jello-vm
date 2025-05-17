@@ -312,6 +312,21 @@ int jit_decline(jello_jit_func_code* fc, jello_jit_decline why, const jello_bc_f
   return 0;
 }
 
+void jit_bytes_rw_info(jello_jir_bytes_rw rw, uint32_t* width, int* be, int* is_float) {
+  static const struct {
+    uint8_t width, be, is_float;
+  } info[] = {
+      [JIR_BRW_U16_LE] = {2, 0, 0}, [JIR_BRW_U16_BE] = {2, 1, 0}, [JIR_BRW_U32_LE] = {4, 0, 0},
+      [JIR_BRW_U32_BE] = {4, 1, 0}, [JIR_BRW_I32_LE] = {4, 0, 0}, [JIR_BRW_I32_BE] = {4, 1, 0},
+      [JIR_BRW_F32_LE] = {4, 0, 1}, [JIR_BRW_F32_BE] = {4, 1, 1}, [JIR_BRW_I64_LE] = {8, 0, 0},
+      [JIR_BRW_I64_BE] = {8, 1, 0}, [JIR_BRW_F64_LE] = {8, 0, 1}, [JIR_BRW_F64_BE] = {8, 1, 1},
+  };
+  int known = (uint32_t)rw < sizeof info / sizeof info[0];
+  *width = known ? info[rw].width : 4u;
+  *be = known ? info[rw].be : 0;
+  *is_float = known ? info[rw].is_float : 0;
+}
+
 void jit_push_trap_jump(emit_ctx* ctx, size_t at, uint8_t kind) {
   jit_trap_jump t = {at, kind};
   if(!jit_list_push(&ctx->trap_jumps, &ctx->trap_jump_count, &ctx->trap_jump_cap, &t, sizeof(t)))

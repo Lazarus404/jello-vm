@@ -220,3 +220,20 @@ static int32_t port_of(const struct sockaddr_storage* a) {
   if(a->ss_family == AF_INET6) return ntohs(((const struct sockaddr_in6*)a)->sin6_port);
   return -1;
 }
+
+void vm_net_error(jdlo_ctx* c) { jdl_return_i32(c, c->vm->net_error); }
+
+void vm_net_error_text(jdlo_ctx* c) {
+  int32_t code = jdl_arg_i32(c, 0);
+  char tls[256];
+  const net_tls_ops* ops = code >= NET_TLS_ERRORS ? tls_library(c->m) : NULL;
+  if(ops) ops->error_text(code, tls, sizeof tls);
+  else if(code >= NET_TLS_ERRORS) snprintf(tls, sizeof tls, "TLS error %d", NET_TLS_ERRORS - code);
+  const char* text = code == 0                ? "no error"
+                     : code == NET_TIMEOUT    ? "timed out"
+                     : code == NET_CLOSED     ? "socket closed, or another process's"
+                     : code >= NET_TLS_ERRORS ? tls
+                     : code >= NET_GAI        ? gai_strerror(code - NET_GAI)
+                                              : jello_error_text(code);
+  jdl_return_bytes_copy(c, (const uint8_t*)text, (uint32_t)strlen(text));
+}

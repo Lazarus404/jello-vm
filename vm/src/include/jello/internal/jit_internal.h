@@ -56,12 +56,6 @@ typedef struct jello_jit_func_code {
   uint32_t calls;         /**< Calls counted towards JIT_COMPILE_AFTER_CALLS while not tried. */
 } jello_jit_func_code;
 
-typedef struct jello_jit_call_patch {
-  uint32_t caller_fi;
-  uint32_t callee_fi;
-  size_t site_off;
-} jello_jit_call_patch;
-
 #define JIT_COMPILE_AFTER_CALLS 1u
 
 typedef struct jello_jit_module {
@@ -69,8 +63,6 @@ typedef struct jello_jit_module {
   jello_jit_func_code* funcs;
   uint32_t nfuncs;
   int prepared;
-  jello_jit_call_patch* patches;
-  uint32_t npatch;
   uint32_t ncompiled;
   size_t bridge_off, enter_off, lazy_off;
   const void** entries;
@@ -105,6 +97,8 @@ void jello_jit_code_free(jello_jit_code* code);
 extern _Atomic uint32_t jello_jit_module_prepare_count;
 
 int jello_jit_module_prepare(const jello_bc_module* m, jello_jit_module* out);
+int jello_jit_module_prepare_lazy(const jello_bc_module* m, jello_jit_module* out);
+jello_jit_module* jit_module_create(const jello_bc_module* m, int eager);
 void jello_jit_module_free(jello_jit_module* jm);
 int jello_jit_try_enter(jello_vm* vm, jello_jit_module* jm, jello_numeric_result* out, jello_exec_status* out_st);
 
@@ -114,7 +108,6 @@ int jello_jit_emit_function_into(const jello_bc_module* m, uint32_t fi, jit_exec
                                  jello_jit_func_code* out_fc, const void* const* entries);
 
 void jello_jit_patch_call_rel32(jit_exec_buf* buf, size_t at, int32_t rel);
-void jello_jit_patch_call(jit_exec_buf* buf, size_t site_off, size_t callee_off);
 int jit_resolve_target_bc(uint32_t bc_pc, int32_t imm, uint32_t ninsns, uint32_t* out);
 int jit_ir_shape_ok(const jello_jit_ir_function* ir, const jello_bc_module* m,
                     const jello_bc_function* f, uint32_t fi, jello_type_kind* out_ret_kind,
@@ -125,6 +118,7 @@ int jit_scan_targets(const jello_jit_ir_function* ir, uint32_t ninsns, uint8_t* 
 int jit_decline(jello_jit_func_code* fc, jello_jit_decline why, const jello_bc_function* f,
                 uint32_t pc);
 int jit_list_push(void* items_ptr, size_t* count, size_t* cap, const void* item, size_t elem);
+void jit_bytes_rw_info(jello_jir_bytes_rw rw, uint32_t* width, int* be, int* is_float);
 
 typedef enum jello_reload_fn_status {
   JELLO_RELOAD_FN_UNCHANGED,          /* same signature, same body hash -- no-op */

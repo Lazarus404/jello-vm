@@ -389,6 +389,18 @@ jello_value vm_parcel_take(jello_vm* vm, vm_parcel* pc) {
   return v;
 }
 
+jello_value vm_parcel_read(jello_vm* vm, vm_parcel* pc) {
+  copier c;
+  vm_parcel copy;
+  copy_begin(&c, vm, 0, 0, &copy);
+  copy.value = copy_root(&c, pc->value);
+  fix_protos(vm, pc->protos, &c);
+  copy_end(&c, &copy); /* Never refuses: a parcel holds only what may leave. */
+  vm_parcel_splice(vm, vm->space, &copy);
+  proc_sockets_take(vm->proc, &pc->sockets);
+  return copy.value;
+}
+
 jello_trap_code vm_copy_start(jello_vm* vm, jello_space* into, void** root, uint64_t* globals,
                               struct proc_socket_list** sockets) {
   copier c;

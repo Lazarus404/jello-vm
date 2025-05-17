@@ -1,3 +1,10 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) Jahred Love. All rights reserved.
+
+#ifndef JELLO_JIT_EMIT_H
+#define JELLO_JIT_EMIT_H
+
+#include <jello/internal/jit_internal.h>
 
 typedef enum jit_cond {
   JIT_JB = 0x82,
@@ -10,6 +17,8 @@ typedef enum jit_cond {
   JIT_JG = 0x8F,
   JIT_SETE = 0x94,
   JIT_SETNE = 0x95,
+  JIT_SETA = 0x97,
+  JIT_SETP = 0x9B,
   JIT_SETL = 0x9C,
 } jit_cond;
 
@@ -19,6 +28,7 @@ typedef enum jit_alu {
   JIT_ALU_AND = 4,
   JIT_ALU_SUB = 5,
   JIT_ALU_XOR = 6,
+  JIT_ALU_CMP = 7,
 } jit_alu;
 
 typedef struct jit_branch_patch {
@@ -82,3 +92,5 @@ void jit_emit_ok_exit(emit_ctx* ctx);
 void jit_emit_trap_exit(emit_ctx* ctx, uintptr_t trap_fn);
 void jit_emit_catch_dispatch(emit_ctx* ctx);
 void jit_patch_jump(jit_exec_buf* buf, size_t at, size_t target);
+
+#endif /* JELLO_JIT_EMIT_H */

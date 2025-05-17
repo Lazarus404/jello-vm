@@ -223,15 +223,12 @@ typedef struct jit_exec_buf {
   size_t cap;
   size_t len;    /* bytes written so far -- grows as the emitter writes, capped at `cap` */
   int finalized; /* 1 once jit_finalize_exec_buf has mprotect'd this region RX */
-  int patch_open;
   int overflowed; /**< Set when a write did not fit; the emitter declines the function. */
   size_t limit;   /**< Writes stop here; cap, or the end of an open append window. */
   size_t append_from, append_end; /**< The open append window's start and its pages' end. */
 } jit_exec_buf;
 
 jit_exec_buf jit_alloc_exec_buf(size_t cap);
-int jit_exec_buf_begin_patch(jit_exec_buf* buf);
-int jit_exec_buf_end_patch(jit_exec_buf* buf);
 int jit_exec_buf_write(jit_exec_buf* buf, const void* bytes, size_t n);
 int jit_finalize_exec_buf(jit_exec_buf* buf);
 int jit_exec_buf_begin_append(jit_exec_buf* buf, size_t bound);
@@ -250,8 +247,8 @@ typedef struct jit_reg_emit_ctx {
 typedef struct jit_reg_state {
   uint32_t nregs;
   int8_t* current;
-  int8_t gpr_vreg[11];
-  int8_t xmm_vreg[8];
+  int16_t gpr_vreg[11];
+  int16_t xmm_vreg[8];
   uint8_t gpr_pinned[11];
   uint8_t xmm_pinned[8];
   unsigned next_gpr_victim;
@@ -340,6 +337,31 @@ int jello_jit_ir_slow_runs_handler(jello_op op);
 
 #ifdef JELLO_JIT_SYSV_THUNKS
 #define JIT_C(fn) jit_sysv_##fn
+JELLO_JIT_ABI void* jit_sysv_memcpy(void* dst, const void* src, size_t n);
+JELLO_JIT_ABI void* jit_sysv_memmove(void* dst, const void* src, size_t n);
+JELLO_JIT_ABI int jit_sysv_memcmp(const void* a, const void* b, size_t n);
+JELLO_JIT_ABI jello_box_f64* jit_sysv_jello_box_f64_new(jello_vm* vm, double v);
+JELLO_JIT_ABI jello_object* jit_sysv_jello_object_new(jello_vm* vm, uint32_t type_id);
+JELLO_JIT_ABI jello_object* jit_sysv_jello_object_copy(jello_vm* vm, const jello_object* src);
+JELLO_JIT_ABI int jit_sysv_jello_object_has(const jello_object* o, uint32_t atom_id);
+JELLO_JIT_ABI jello_struct* jit_sysv_jello_struct_new(jello_vm* vm, const jello_bc_module* m,
+                                                      uint32_t struct_sig_id);
+JELLO_JIT_ABI jello_value jit_sysv_vm_box_from_typed(jello_vm* vm, const jello_bc_module* m,
+                                                     const jello_bc_function* f, reg_frame* rf,
+                                                     uint32_t r);
+JELLO_JIT_ABI int jit_sysv_vm_store_from_boxed(jello_vm* vm, const jello_bc_module* m,
+                                               const jello_bc_function* f, reg_frame* rf,
+                                               uint32_t dst, jello_value v);
+JELLO_JIT_ABI jello_bytes* jit_sysv_vm_buffer_new(jello_vm* vm, uint32_t length);
+JELLO_JIT_ABI uint32_t jit_sysv_vm_dynamic_is_enum(jello_value v, jello_type_id type);
+JELLO_JIT_ABI uint32_t jit_sysv_vm_kindof_dynamic(jello_value v);
+JELLO_JIT_ABI float jit_sysv_vm_f16_to_f32(uint16_t bits);
+JELLO_JIT_ABI uint16_t jit_sysv_vm_f32_to_f16(float f);
+JELLO_JIT_ABI void jit_sysv_vm_pop_frame(jello_vm* vm);
+JELLO_JIT_ABI int jit_sysv_vm_try_push(jello_vm* vm, uint32_t catch_pc, uint32_t payload_reg);
+JELLO_JIT_ABI void jit_sysv_vm_try_pop(jello_vm* vm);
+JELLO_JIT_ABI void jit_sysv_vm_safepoint_check(jello_vm* vm);
+JELLO_JIT_ABI int jit_sysv_vm_reductions_out(jello_vm* vm);
 #else
 #define JIT_C(fn) fn
 #endif

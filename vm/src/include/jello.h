@@ -132,9 +132,12 @@ void jello_vm_set_max_bytes_len(jello_vm* vm, uint32_t max_len);
 void jello_vm_set_program_args(jello_vm* vm, int32_t argc, const char* const* argv);
 void jello_vm_set_image(jello_vm* vm, const uint8_t* data, size_t size);
 void jello_vm_keep_processes(jello_vm* vm, int keep);
+int jello_run_for(jello_vm* vm, uint32_t ms);
 uint32_t jello_vm_last_trap_pc(const jello_vm* vm);
 uint32_t jello_vm_last_trap_func_index(const jello_vm* vm);
 #define JELLO_TRAP_CALLERS_MAX 16u
+uint32_t jello_vm_last_trap_callers(const jello_vm* vm, uint32_t* func_indexes, uint32_t* pcs,
+                                    uint8_t* repeated, uint32_t max);
 
 typedef uintptr_t jello_value;
 
@@ -188,6 +191,8 @@ static inline void* jello_as_ptr(jello_value v) {
 static inline jello_value jello_from_ptr(const void* p) {
   return (jello_value)(uintptr_t)p;
 }
+
+jello_value jello_vm_last_thrown(const jello_vm* vm);
 
 const char* jello_vm_last_trap_detail(const jello_vm* vm);
 

@@ -869,6 +869,10 @@ jello_process* proc_spawn(jello_vm* vm, const jello_function* body, proc_pool* p
   return p;
 }
 
+int proc_stop(jello_process* p, proc_exit why) {
+  return !proc_finished(p) && stop(p->sched, p, why);
+}
+
 static void yield(proc_sched* s, jello_vm* vm) {
   jello_process* p = vm->proc;
   proc_worker* w = p->worker;
@@ -943,12 +947,38 @@ int proc_on_main(const jello_vm* vm) {
   return !p || p->worker == p->sched->workers;
 }
 
+jello_trap_code proc_yield(jello_vm* vm) {
+  jello_process* p = vm->proc;
+  if(!p) return JELLO_TRAP_NONE;
+  return window_turn(vm, 1) && !p->cleaning ? JELLO_TRAP_STOPPED : JELLO_TRAP_NONE;
+}
+
 static int expired(uint64_t deadline) { return deadline && proc_now() >= deadline; }
 
 static jello_process* running(jello_vm* vm) {
   jello_process* p = proc_self(vm);
   if(!p) abort();
   return p;
+}
+
+int proc_send(jello_process* from, jello_process* p, vm_parcel* msg) {
+  pthread_mutex_lock(&p->mu);
+  int sent = !p->closed && !p->done;
+  int queue = sent && deliver(p, msg);
+  pthread_mutex_unlock(&p->mu);
+  if(!sent && msg->sockets) proc_sockets_take(from, &msg->sockets);
+  if(!sent) vm_parcel_free(msg);
+  if(queue) make_ready_next(p->sched, p);
+  return sent;
+}
+
+uint32_t proc_pending(jello_vm* vm) {
+  jello_process* p = vm->proc;
+  if(!p) return 0;
+  pthread_mutex_lock(&p->mu);
+  uint32_t n = p->inbox_len;
+  pthread_mutex_unlock(&p->mu);
+  return n;
 }
 
 static void deadline_arm(proc_sched* s, jello_process* p, uint64_t deadline) {
@@ -960,6 +990,33 @@ static void deadline_arm(proc_sched* s, jello_process* p, uint64_t deadline) {
 
 static void deadline_disarm(proc_sched* s, jello_process* p) {
   if(p->deadline.at != PROC_TIMER_IDLE) timer_disarm(s, &p->deadline);
+}
+
+static jello_trap_code park_until(proc_sched* s, jello_vm* vm, uint8_t why, uint64_t deadline) {
+  jello_process* p = vm->proc;
+  deadline_arm(s, p, deadline);
+  pthread_mutex_lock(&p->mu);
+  jello_trap_code trap = JELLO_TRAP_NONE;
+  while(!trap && !(why == PROC_PARK_RECEIVE && p->inbox_len) &&
+        !(why == PROC_PARK_POLL && p->polled) && !expired(deadline)) {
+    trap = park(s, vm, why, 0);
+    pthread_mutex_lock(&p->mu);
+  }
+  pthread_mutex_unlock(&p->mu);
+  if(deadline) {
+    lock(s);
+    deadline_disarm(s, p);
+    unlock(s);
+  }
+  return trap;
+}
+
+jello_trap_code proc_wait_message(jello_vm* vm, uint64_t deadline) {
+  return park_until(running(vm)->sched, vm, PROC_PARK_RECEIVE, deadline);
+}
+
+jello_trap_code proc_sleep(jello_vm* vm, uint64_t deadline) {
+  return park_until(running(vm)->sched, vm, PROC_PARK_SLEEP, deadline);
 }
 
 jello_trap_code proc_receive(jello_vm* vm, jello_value* out) {
@@ -976,6 +1033,33 @@ jello_trap_code proc_receive(jello_vm* vm, jello_value* out) {
   pthread_mutex_unlock(&p->mu);
   *out = vm_parcel_take(vm, &msg);
   return JELLO_TRAP_NONE;
+}
+
+proc_timer* proc_send_after(jello_vm* vm, uint64_t deadline, vm_parcel* msg) {
+  jello_process* p = running(vm);
+  proc_timer* t = (proc_timer*)malloc(sizeof(proc_timer));
+  if(!t) return NULL;
+  atomic_init(&t->refs, 2);
+  t->target = p;
+  vm_parcel_move(&t->msg, msg);
+  t->prev = NULL;
+  lock(p->sched);
+  t->next = p->sends;
+  if(p->sends) p->sends->prev = t;
+  p->sends = t;
+  timer_arm(p->sched, t, deadline);
+  unlock(p->sched);
+  return t;
+}
+
+int proc_timer_cancel(jello_vm* vm, proc_timer* t) {
+  proc_sched* s = running(vm)->sched;
+  vm_parcel dropped = vm_parcel_empty();
+  lock(s);
+  int cancelled = timer_cancel(s, t, &dropped);
+  unlock(s);
+  vm_parcel_free(&dropped);
+  return cancelled;
 }
 
 void proc_on_exit(jello_vm* vm, jello_value fn) {
@@ -1134,6 +1218,46 @@ jello_trap_code proc_poll_open(jello_vm* vm, int fd, int* watched) {
   }
   pthread_mutex_unlock(&d->mu);
   return JELLO_TRAP_NONE;
+}
+
+jello_trap_code proc_poll_wait(jello_vm* vm, int fd, uint32_t events, uint64_t deadline,
+                               uint32_t* ready) {
+  jello_process* p = running(vm);
+  proc_sched* s = p->sched;
+  proc_poll_desc* d = proc_polls_find(s, fd);
+  events &= PROC_FD_READ | PROC_FD_WRITE;
+  *ready = 0;
+  if(!d) return JELLO_TRAP_TYPE_MISMATCH;
+  pthread_mutex_lock(&d->mu);
+  int busy = !d->open || ((events & PROC_FD_READ) && d->waiters[0]) ||
+             ((events & PROC_FD_WRITE) && d->waiters[1]);
+  uint8_t got = busy ? 0 : d->always ? (uint8_t)events : d->ready & (uint8_t)events;
+  if(busy || got || !events) {
+    d->ready &= (uint8_t)~got;
+    pthread_mutex_unlock(&d->mu);
+    *ready = got;
+    return busy ? JELLO_TRAP_TYPE_MISMATCH : JELLO_TRAP_NONE;
+  }
+  p->polled = 0;
+  for(uint32_t dir = 0; dir < 2; dir++)
+    if(events & (1u << dir)) d->waiters[dir] = p;
+  poll_rearm(s, d);
+  pthread_mutex_unlock(&d->mu);
+  atomic_fetch_add(&s->outside, 1);
+  jello_trap_code trap = park_until(s, vm, PROC_PARK_POLL, deadline);
+  pthread_mutex_lock(&p->mu);
+  got = p->polled;
+  pthread_mutex_unlock(&p->mu);
+  if(!got) { /* Not handed anything, so still a waiter, unless handed something since. */
+    pthread_mutex_lock(&d->mu);
+    for(uint32_t dir = 0; dir < 2; dir++)
+      if(d->waiters[dir] == p) d->waiters[dir] = NULL;
+    got = p->polled;
+    pthread_mutex_unlock(&d->mu);
+  }
+  atomic_fetch_sub(&s->outside, 1);
+  *ready = got;
+  return trap;
 }
 
 jello_trap_code proc_poll_close(jello_vm* vm, int fd) {

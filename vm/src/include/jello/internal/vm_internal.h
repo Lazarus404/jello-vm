@@ -43,9 +43,6 @@ struct jello_bc_module {
   uint32_t nconst_f64;
   const double* const_f64;
   uint32_t nconst_bytes;
-  const uint32_t* const_bytes_len;
-  const uint32_t* const_bytes_off;
-  const uint8_t* const_bytes_data;
   struct jello_bytes* const* const_bytes_values;
   uint32_t nglobals;
   const jello_type_id* global_types;
@@ -104,6 +101,9 @@ jello_bc_result jello_bc_validate_insn(
 
 jello_bc_result jello_bc_validate_results(const jello_bc_module* m);
 jello_bc_result jello_bc_validate_try_regions(const jello_bc_module* m);
+
+int jello_bc_source_location(const jello_bc_module* m, uint32_t fi, uint32_t pc, const char** file,
+                             uint32_t* line, uint32_t* col);
 
 #define REG_SLOT_BYTES 8u
 
@@ -172,7 +172,6 @@ typedef struct call_frame {
   uint8_t has_caller;
   uint8_t has_pointer;
   uint32_t caller_dst; /* register in the caller's frame that RET writes into */
-  try_scope try_stack[JELLO_TRY_STACK_MAX];
   union {
     struct {
       uint16_t try_stack_len;  /**< Its open try scopes, the top ones of the VM's try_scopes. */
@@ -232,11 +231,7 @@ typedef struct jello_space {
 } jello_space;
 
 typedef struct jello_heap {
-  jello_gc_hdr* gc_objects; /* every live object, singly linked */
-  jello_gc_hdr* gc_free_classes[GC_NUM_SIZE_CLASSES]; /* one free-list head per size class */
-  uint32_t gc_bytes_live;
   uint32_t gc_next_collect;
-  uint32_t gc_collections;
   jello_space space;
 
   pthread_mutex_t alloc_lock;
@@ -503,6 +498,7 @@ static inline void vm_clear_trap(jello_vm* vm) {
 void vm_frame_unwind(jello_vm* vm);
 void vm_frame_segments_free(jello_vm* vm);
 void vm_frame_reset(jello_vm* vm);
+void vm_end_kept(jello_vm* vm);
 void vm_free_layouts(jello_vm* vm);
 void vm_share_layouts(jello_vm* vm, const jello_vm* from);
 
@@ -596,6 +592,7 @@ op_result op_bytes_get_u8(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_set_u8(exec_ctx* ctx, const jello_insn* ins);
 
 op_result op_bytes_concat2(exec_ctx* ctx, const jello_insn* ins);
+op_result op_bytes_concat_many(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_join(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_eq(exec_ctx* ctx, const jello_insn* ins);
 op_result op_bytes_bitand2(exec_ctx* ctx, const jello_insn* ins);
@@ -759,6 +756,7 @@ static inline void vm_parcel_move(vm_parcel* to, vm_parcel* from) {
 
 jello_trap_code vm_parcel_pack(jello_vm* vm, jello_value v, int drop, vm_parcel* out);
 jello_value vm_parcel_take(jello_vm* vm, vm_parcel* pc);
+jello_value vm_parcel_read(jello_vm* vm, vm_parcel* pc);
 void vm_parcel_splice(jello_vm* vm, jello_space* space, vm_parcel* pc);
 void vm_parcel_join(vm_parcel* into, vm_parcel* from);
 void vm_parcel_free(vm_parcel* pc);
