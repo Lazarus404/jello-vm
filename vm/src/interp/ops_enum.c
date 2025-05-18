@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
+/** @file
+ * Interpreter handlers for Enum ops, and jello_enum_new; an enum's fields are boxed values. */
+
 #include <jello/internal.h>
 #include <stddef.h>
-#if defined(_WIN32) || defined(__MINGW32__)
-#  include <malloc.h>
-#  ifndef alloca
-#    define alloca _alloca
-#  endif
-#else
-#  include <alloca.h>
-#endif
+#include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 static call_frame* current_frame(exec_ctx* ctx) {

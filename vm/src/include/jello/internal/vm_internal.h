@@ -332,7 +332,6 @@ struct jello_vm {
 };
 
 #define JIT_FRAME_STACK_MAX (64u * 1024u * 1024u)
-#define JIT_CALL_FRAMES_MAX 200000u
 
 static inline int vm_space_shared(const jello_heap* heap, const jello_space* space) {
   return space == &heap->space;
@@ -382,12 +381,9 @@ static inline void vm_enter_module(jello_vm* vm, const jello_bc_module* m) {
 #endif
 
 void vm_warm_jit_layouts(jello_vm* vm, const jello_bc_module* m);
-int jit_try_grow_call_frames(jello_vm* vm);
-frame_layout* jit_layout_ptr_or_null(jello_vm* vm, uint32_t fi);
 JELLO_JIT_ABI int jit_try_grow_push(jello_vm* vm, uint64_t top);
 int jit_call_push_numeric(jello_vm* vm, uint32_t callee_fi, uint32_t caller_dst,
                           uint32_t arg_first, uint32_t nargs);
-int jit_try_grow_frame_stack(jello_vm* vm, uint32_t need);
 
 JELLO_JIT_ABI uint8_t* jit_current_frame_mem(jello_vm* vm);
 static inline uint32_t vm_load_u32(reg_frame* rf, uint32_t r) {
@@ -481,7 +477,6 @@ int vm_push_frame_raw(jello_vm* vm, const jello_bc_module* m, uint32_t func_inde
                       uint32_t caller_dst, uint8_t has_caller,
                       const uint64_t* argbuf, uint32_t arg_count,
                       const uint64_t* capbuf, uint32_t ncaps);
-void vm_copy_captures_into_top(jello_vm* vm, const jello_function* fn);
 const jello_function* vm_callee_function(jello_vm* vm, jello_value v);
 const jello_function* vm_push_callr_frame(jello_vm* vm, const jello_bc_module* m, jello_value v,
                                           uint32_t caller_dst, uint32_t arg_first,

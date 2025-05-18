@@ -132,10 +132,10 @@ op_result op_closure(exec_ctx* ctx, const jello_insn* ins) {
 }
 
 op_result op_callr(exec_ctx* ctx, const jello_insn* ins) {
+  if(vm_poll_and_charge(ctx->vm) != 0) return OP_TRAP;
   call_frame* fr = current_frame(ctx);
-  jello_value v = vm_load_val(&fr->rf, ins->b);
-  if(jello_is_null(v) || !jello_is_ptr(v)) {
-    ctx->vm->trap_code = jello_is_null(v) ? JELLO_TRAP_NULL_DEREF : JELLO_TRAP_TYPE_MISMATCH;
+  if(!vm_push_callr_frame(ctx->vm, ctx->m, vm_load_val(&fr->rf, ins->b), ins->a, (uint32_t)ins->imm,
+                          (uint32_t)ins->c)) {
     return OP_TRAP;
   }
 #if defined(JELLO_ENABLE_JIT) && (defined(__x86_64__) || defined(__aarch64__))
@@ -150,6 +150,7 @@ op_result op_callr(exec_ctx* ctx, const jello_insn* ins) {
 
 op_result op_tailcall(exec_ctx* ctx, const jello_insn* ins) {
   jello_vm* vm = ctx->vm;
+  if(vm_poll_and_charge(vm) != 0) return OP_TRAP;
   call_frame* fr = &vm->call_frames[vm->call_frames_len - 1u];
   uint32_t arg_count = (uint32_t)ins->c;
   uint64_t argbuf[256];
@@ -166,19 +167,10 @@ op_result op_tailcall(exec_ctx* ctx, const jello_insn* ins) {
 
 op_result op_tailcallr(exec_ctx* ctx, const jello_insn* ins) {
   jello_vm* vm = ctx->vm;
+  if(vm_poll_and_charge(vm) != 0) return OP_TRAP;
   call_frame* fr = &vm->call_frames[vm->call_frames_len - 1u];
-  jello_value v = vm_load_val(&fr->rf, ins->b);
-  if(jello_is_null(v) || !jello_is_ptr(v)) {
-    vm->trap_code = jello_is_null(v) ? JELLO_TRAP_NULL_DEREF : JELLO_TRAP_TYPE_MISMATCH;
-    return OP_TRAP;
-  }
-  void* p = jello_as_ptr(v);
-  if(!p) { vm->trap_code = JELLO_TRAP_NULL_DEREF; return OP_TRAP; }
-  jello_function* fn = (jello_function*)p;
-  if(fn->h.kind != (uint8_t)JELLO_OBJ_FUNCTION) {
-    vm->trap_code = JELLO_TRAP_TYPE_MISMATCH;
-    return OP_TRAP;
-  }
+  const jello_function* fn = vm_callee_function(vm, vm_load_val(&fr->rf, ins->b));
+  if(!fn) return OP_TRAP;
   uint32_t arg_count = (uint32_t)ins->c;
   uint32_t arg_first = (uint32_t)ins->imm;
   uint64_t argbuf[256];

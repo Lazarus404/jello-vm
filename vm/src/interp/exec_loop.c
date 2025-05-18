@@ -56,13 +56,13 @@ jello_exec_status vm_exec_loop(exec_ctx* ctx) {
         uint8_t* dst = vm_reg_ptr(&caller->rf, caller_dst);
         if(is_wide) *(uint64_t*)dst = tmp;
         else *(uint32_t*)dst = (uint32_t)tmp;
+        if(vm->call_frames_len == ctx->stop_len) return JELLO_EXEC_OK;
         break;
       }
 
       case JOP_JMP:
         if((int32_t)ins->imm < 0) {
-          vm_safepoint_check(vm);
-          if(vm_fuel_charge(vm) != 0) {
+          if(vm_poll_and_charge(vm) != 0) {
             vm->trap_func_index = fr->func_index;
             vm->trap_pc = fr->pc - 1u;
             return JELLO_EXEC_TRAP;
@@ -87,8 +87,7 @@ jello_exec_status vm_exec_loop(exec_ctx* ctx) {
       }
 
       case JOP_CALL: {
-        vm_safepoint_check(vm);
-        if(vm_fuel_charge(vm) != 0) {
+        if(vm_poll_and_charge(vm) != 0) {
           vm->trap_func_index = fr->func_index;
           vm->trap_pc = fr->pc - 1u;
           return JELLO_EXEC_TRAP;
@@ -279,6 +278,16 @@ static jello_exec_status exec_top(jello_vm* vm, const jello_bc_module* m, jello_
   return st;
 }
 
+static void end_processes(jello_vm* vm, const jello_numeric_result* out) {
+  if(!vm->proc) return;
+  void* obj = NULL;
+  if(out->kind == JELLO_NUM_PTR) obj = out->as.ptr;
+  if(out->kind == JELLO_NUM_DYN && jello_is_ptr(out->as.dyn)) obj = jello_as_ptr(out->as.dyn);
+  if(obj) jello_gc_push_root(vm, obj);
+  proc_end_all(vm);
+  if(obj) jello_gc_pop_roots(vm, 1);
+}
+
 void vm_end_kept(jello_vm* vm) {
   proc_end_all(vm);
 #if defined(JELLO_ENABLE_JIT) && (defined(__x86_64__) || defined(__aarch64__))
@@ -291,15 +300,16 @@ void vm_end_kept(jello_vm* vm) {
 }
 
 static jello_exec_status vm_exec_numeric_impl(jello_vm* vm, const jello_bc_module* m,
-    jello_numeric_result* out, jello_jit_module* persistent_jm) {
+                                              jello_numeric_result* out,
+                                              jello_jit_module* persistent_jm) {
+  atomic_store(&vm->in_exec, 1);
   vm_safepoint_check(vm);
 
-  atomic_store(&vm->in_exec, 1);
-
+  vm_end_kept(vm); /* Processes spawned outside a run share the layouts reset frees. */
   vm_frame_reset(vm);
   out->kind = JELLO_NUM_VOID;
 
-  vm->running_module = m;
+  vm_enter_module(vm, m);
 
   if(!vm_push_frame(vm, m, jello_bc_get_entry(m), 0, 0, 0, 0)) {
     vm->trap_func_index = jello_bc_get_entry(m);
@@ -308,35 +318,39 @@ static jello_exec_status vm_exec_numeric_impl(jello_vm* vm, const jello_bc_modul
     return JELLO_EXEC_TRAP;
   }
 
+  vm_warm_jit_layouts(vm, m);
+
 #if defined(JELLO_ENABLE_JIT) && (defined(__x86_64__) || defined(__aarch64__))
-  {
-    const char* jit_off = getenv("JELLO_JIT_DISABLE");
-    if(!(jit_off && jit_off[0] != '\0')) {
-      vm_warm_jit_layouts(vm, m);
-      jello_jit_module local_jm;
-      int owns_jm = persistent_jm == NULL;
-      jello_jit_module* jm = persistent_jm;
-      if(owns_jm) {
-        memset(&local_jm, 0, sizeof(local_jm));
-        jm = &local_jm;
-        jello_jit_module_prepare(m, jm);
-      }
-      jello_exec_status jit_st = JELLO_EXEC_OK;
-      if(jello_jit_try_enter(vm, jm, out, &jit_st)) {
-        if(owns_jm) jello_jit_module_free(jm);
-        atomic_store(&vm->in_exec, 0);
-        return jit_st;
-      }
-      if(owns_jm) jello_jit_module_free(jm);
+  const char* jit_off = getenv("JELLO_JIT_DISABLE");
+  if(!(jit_off && jit_off[0] != '\0')) {
+    jello_jit_module local_jm;
+    int owns_jm = persistent_jm == NULL;
+    int keep = vm->keep_processes;
+    jello_jit_module* jm = persistent_jm;
+    if(owns_jm) {
+      jm = keep ? (jello_jit_module*)malloc(sizeof(*jm)) : &local_jm;
+      if(!jm) abort();
+      memset(jm, 0, sizeof(*jm));
+      jello_jit_module_prepare_lazy(m, jm);
     }
+    if(jm->prepared) {
+      vm->active_jit = jm;
+      jit_native_stack_here(vm);
+    }
+    jello_exec_status st = exec_top(vm, m, jm, out);
+    if(keep) proc_leave_to_host(vm);
+    else end_processes(vm, out);
+    vm->active_jit = NULL;
+    if(owns_jm && keep) vm->kept_jit = jm;
+    else if(owns_jm) jello_jit_module_free(jm);
+    atomic_store(&vm->in_exec, 0);
+    return st;
   }
 #endif
 
-  exec_ctx ctx;
-  ctx.vm = vm;
-  ctx.m = m;
-  ctx.out = out;
-  jello_exec_status st = vm_exec_loop(&ctx);
+  jello_exec_status st = exec_top(vm, m, NULL, out);
+  if(!vm->keep_processes) end_processes(vm, out);
+  else proc_leave_to_host(vm);
   atomic_store(&vm->in_exec, 0);
   return st;
 }

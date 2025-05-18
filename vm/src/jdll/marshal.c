@@ -59,14 +59,38 @@ static void set_ret(jdlo_ctx* c, jello_type_kind k) {
   c->returned = 1;
 }
 
-void jdl_return_i8(jdlo_ctx* c, int32_t v) { c->ret.i32 = v; c->ret_kind_given = JELLO_T_I8; c->returned = 1; }
-void jdl_return_i16(jdlo_ctx* c, int32_t v) { c->ret.i32 = v; c->ret_kind_given = JELLO_T_I16; c->returned = 1; }
-void jdl_return_i32(jdlo_ctx* c, int32_t v) { c->ret.i32 = v; c->ret_kind_given = JELLO_T_I32; c->returned = 1; }
-void jdl_return_i64(jdlo_ctx* c, int64_t v) { c->ret.i64 = v; c->ret_kind_given = JELLO_T_I64; c->returned = 1; }
-void jdl_return_f16(jdlo_ctx* c, float v) { c->ret.f32 = v; c->ret_kind_given = JELLO_T_F16; c->returned = 1; }
-void jdl_return_f32(jdlo_ctx* c, float v) { c->ret.f32 = v; c->ret_kind_given = JELLO_T_F32; c->returned = 1; }
-void jdl_return_f64(jdlo_ctx* c, double v) { c->ret.f64 = v; c->ret_kind_given = JELLO_T_F64; c->returned = 1; }
-void jdl_return_bool(jdlo_ctx* c, int v) { c->ret.i32 = v ? 1 : 0; c->ret_kind_given = JELLO_T_BOOL; c->returned = 1; }
+void jdl_return_i8(jdlo_ctx* c, int32_t v) {
+  set_ret(c, JELLO_T_I8);
+  c->ret.i32 = v;
+}
+void jdl_return_i16(jdlo_ctx* c, int32_t v) {
+  set_ret(c, JELLO_T_I16);
+  c->ret.i32 = v;
+}
+void jdl_return_i32(jdlo_ctx* c, int32_t v) {
+  set_ret(c, JELLO_T_I32);
+  c->ret.i32 = v;
+}
+void jdl_return_i64(jdlo_ctx* c, int64_t v) {
+  set_ret(c, JELLO_T_I64);
+  c->ret.i64 = v;
+}
+void jdl_return_f16(jdlo_ctx* c, float v) {
+  set_ret(c, JELLO_T_F16);
+  c->ret.f32 = v;
+}
+void jdl_return_f32(jdlo_ctx* c, float v) {
+  set_ret(c, JELLO_T_F32);
+  c->ret.f32 = v;
+}
+void jdl_return_f64(jdlo_ctx* c, double v) {
+  set_ret(c, JELLO_T_F64);
+  c->ret.f64 = v;
+}
+void jdl_return_bool(jdlo_ctx* c, int v) {
+  set_ret(c, JELLO_T_BOOL);
+  c->ret.i32 = v ? 1 : 0;
+}
 void jdl_return_atom(jdlo_ctx* c, uint32_t atom_id) {
   set_ret(c, JELLO_T_ATOM);
   c->ret.i32 = (int32_t)atom_id;
@@ -86,10 +110,7 @@ void jdl_return_value(jdlo_ctx* c, jello_value v) {
   set_ret(c, JELLO_T_DYNAMIC);
   c->ret.dyn = v;
 }
-void jdl_return_void(jdlo_ctx* c) {
-  c->ret_kind_given = JELLO_T_VOID;
-  c->returned = 1;
-}
+void jdl_return_void(jdlo_ctx* c) { set_ret(c, JELLO_T_VOID); }
 
 void* jdl_arg_handle(jdlo_ctx* c, int index, const jello_jdll_handle_class* cls) {
   jello_value v = vm_load_val(c->caller_rf, arg_reg(c, index));

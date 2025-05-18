@@ -74,6 +74,7 @@ int vm_catch_in_segment(exec_ctx* ctx) {
 
 op_result op_throw(exec_ctx* ctx, const jello_insn* ins) {
   jello_vm* vm = ctx->vm;
+  if(vm_poll_and_charge(vm) != 0) return OP_TRAP;
   call_frame* fr = &vm->call_frames[vm->call_frames_len - 1u];
   jello_value payload = vm_load_val(&fr->rf, ins->a);
   if(!vm_throw_find(vm, payload)) {

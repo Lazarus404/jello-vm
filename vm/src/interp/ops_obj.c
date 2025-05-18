@@ -229,7 +229,9 @@ op_result op_obj_remove(exec_ctx* ctx, const jello_insn* ins) {
     ctx->vm->trap_code = JELLO_TRAP_BOUNDS;
     return OP_TRAP;
   }
-  vm_store_u32(&fr->rf, ins->a, (uint32_t)(jello_object_remove(o, atom_id) != 0));
+  uint32_t removed = jit_obj_remove(ctx->vm, o, atom_id);
+  if(ctx->vm->trap_code != JELLO_TRAP_NONE) return OP_TRAP;
+  vm_store_u32(&fr->rf, ins->a, removed);
   return OP_CONTINUE;
 }
 
@@ -240,8 +242,8 @@ op_result op_obj_clear(exec_ctx* ctx, const jello_insn* ins) {
     ctx->vm->trap_code = JELLO_TRAP_NULL_DEREF;
     return OP_TRAP;
   }
-  jello_object_clear(o);
-  return OP_CONTINUE;
+  jit_obj_clear(ctx->vm, o);
+  return ctx->vm->trap_code != JELLO_TRAP_NONE ? OP_TRAP : OP_CONTINUE;
 }
 
 jello_value jit_obj_chain_get(jello_vm* vm, const jello_bc_module* m, jello_object* o,
