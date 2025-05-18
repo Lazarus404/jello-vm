@@ -28,10 +28,6 @@ struct jdlo_ctx {
     float f32;
     double f64;
     jello_value dyn;
-    struct {
-      const uint8_t* data;
-      uint32_t len;
-    } bytes;
   } ret;
   
   uint8_t* ret_bytes;

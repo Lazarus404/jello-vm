@@ -48,6 +48,7 @@ void jit_spill_load_xmm32(jit_exec_buf* buf, unsigned dst_xmm, uint8_t vreg) {
   uint32_t disp = (uint32_t)vreg * REG_SLOT_BYTES;
   uint8_t bytes[10];
   size_t n = 0;
+  // movss xmm, [r13 + disp32]; the F3 prefix must precede REX.
   bytes[n++] = 0xF3;
   bytes[n++] = (uint8_t)(0x40u | ((dst_xmm >= 8) ? 0x04u : 0) | 0x01u);
   bytes[n++] = 0x0F;

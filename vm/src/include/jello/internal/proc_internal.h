@@ -317,6 +317,7 @@ void proc_socket_moved(void* payload, const struct jello_vm* vm);
 void proc_sockets_end(jello_process* p);
 void vm_net_error(struct jdlo_ctx* c);
 void vm_net_error_text(struct jdlo_ctx* c);
+void vm_image_run(struct jdlo_ctx* c);
 int proc_on_main(const struct jello_vm* vm);
 jello_process* proc_self(struct jello_vm* vm);
 void proc_retain(jello_process* p);
@@ -356,5 +357,6 @@ typedef struct proc_reply {
 } proc_reply;
 
 extern const struct jello_jdll_handle_class proc_handle_class;
+extern const struct jello_jdll_handle_class proc_reply_class;
 
 #endif /* JELLO_PROC_INTERNAL_H */

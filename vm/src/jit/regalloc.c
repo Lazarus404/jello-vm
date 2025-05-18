@@ -37,8 +37,8 @@ void jit_reg_state_init(jit_reg_state* st, uint32_t nregs, jit_reg_emit_ctx emit
   if(st->current) {
     for(uint32_t i = 0; i < nregs; i++) st->current[i] = (int8_t)JIT_PREG_NONE;
   }
-  for(unsigned i = 0; i < jit_gpr_pool_len; i++) st->gpr_vreg[i] = (int8_t)JIT_PREG_NONE;
-  for(unsigned i = 0; i < jit_gpr_pool_len; i++) st->xmm_vreg[i] = (int8_t)JIT_PREG_NONE;
+  for(unsigned i = 0; i < jit_gpr_pool_len; i++) st->gpr_vreg[i] = JIT_PREG_NONE;
+  for(unsigned i = 0; i < jit_xmm_pool_len; i++) st->xmm_vreg[i] = JIT_PREG_NONE;
   memset(st->gpr_pinned, 0, sizeof st->gpr_pinned);
   memset(st->xmm_pinned, 0, sizeof st->xmm_pinned);
   st->next_gpr_victim = 0;
@@ -58,10 +58,10 @@ void jit_reg_state_clobber_call(jit_reg_state* st) {
       int preg = (int)st->current[v];
       if(preg_is_xmm(preg)) {
         int xi = preg_xmm_index(preg);
-        if(xi >= 0 && xi < (int)jit_xmm_pool_len) st->xmm_vreg[xi] = (int8_t)JIT_PREG_NONE;
+        if(xi >= 0 && xi < (int)jit_xmm_pool_len) st->xmm_vreg[xi] = JIT_PREG_NONE;
       } else {
         int gi = preg_to_gpr_pool_index(preg);
-        if(gi >= 0) st->gpr_vreg[gi] = (int8_t)JIT_PREG_NONE;
+        if(gi >= 0) st->gpr_vreg[gi] = JIT_PREG_NONE;
       }
       st->current[v] = (int8_t)JIT_PREG_NONE;
     }
@@ -97,15 +97,15 @@ void jit_reg_unbind_preg(jit_reg_state* st, int preg) {
   if(preg_is_xmm(preg)) {
     int xi = preg_xmm_index(preg);
     if(xi >= 0 && xi < (int)jit_xmm_pool_len) {
-      int8_t v = st->xmm_vreg[xi];
-      st->xmm_vreg[xi] = (int8_t)JIT_PREG_NONE;
+      int16_t v = st->xmm_vreg[xi];
+      st->xmm_vreg[xi] = JIT_PREG_NONE;
       if(v >= 0 && (uint32_t)v < st->nregs) st->current[v] = (int8_t)JIT_PREG_NONE;
     }
   } else {
     int gi = preg_to_gpr_pool_index(preg);
     if(gi >= 0) {
-      int8_t v = st->gpr_vreg[gi];
-      st->gpr_vreg[gi] = (int8_t)JIT_PREG_NONE;
+      int16_t v = st->gpr_vreg[gi];
+      st->gpr_vreg[gi] = JIT_PREG_NONE;
       if(v >= 0 && (uint32_t)v < st->nregs) st->current[v] = (int8_t)JIT_PREG_NONE;
     }
   }
@@ -113,7 +113,6 @@ void jit_reg_unbind_preg(jit_reg_state* st, int preg) {
 
 void jit_reg_unbind_vreg(jit_reg_state* st, uint8_t vreg) {
   if((uint32_t)vreg >= st->nregs) return;
-  if(st->survive_held && st->survive_vreg == vreg) return;
   int preg = (int)st->current[vreg];
   if(preg == JIT_PREG_NONE) return;
   jit_reg_unbind_preg(st, preg);
@@ -158,10 +157,10 @@ void jit_reg_bind(jit_reg_state* st, uint8_t vreg, int preg) {
   st->current[vreg] = (int8_t)preg;
   if(preg_is_xmm(preg)) {
     int xi = preg_xmm_index(preg);
-    if(xi >= 0 && xi < (int)jit_xmm_pool_len) st->xmm_vreg[xi] = (int8_t)vreg;
+    if(xi >= 0 && xi < (int)jit_xmm_pool_len) st->xmm_vreg[xi] = vreg;
   } else {
     int gi = preg_to_gpr_pool_index(preg);
-    if(gi >= 0) st->gpr_vreg[gi] = (int8_t)vreg;
+    if(gi >= 0) st->gpr_vreg[gi] = vreg;
   }
 }
 
@@ -241,6 +240,7 @@ int jit_reg_alloc_xmm(jit_reg_state* st, uint8_t vreg, int and_load, int wide) {
 
 int jit_reg_get_gpr(jit_reg_state* st, uint8_t vreg, int and_load) {
   if((uint32_t)vreg >= st->nregs) return JIT_PREG_NONE;
+  if(st->survive_held && st->survive_vreg == vreg) return (int)JIT_REG_SURVIVE;
   int preg = (int)st->current[vreg];
   if(preg != JIT_PREG_NONE && !preg_is_xmm(preg)) {
     pin_preg(st, preg);

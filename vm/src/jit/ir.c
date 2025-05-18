@@ -173,32 +173,91 @@ int jello_jit_ir_slow_runs_handler(jello_op op) {
 
 unsigned jello_jit_ir_op_reg_mask(jello_jit_ir_op op) {
   switch(op) {
-    case JIR_NOP: case JIR_SAFEPOINT: case JIR_JMP: case JIR_CONST_NULL: case JIR_SLOW:
+    case JIR_NOP:
+    case JIR_SAFEPOINT:
+    case JIR_JMP:
+    case JIR_CONST_NULL:
+    case JIR_SLOW:
+    case JIR_ENDTRY:
       return 0;
-    case JIR_RET: case JIR_JMP_IF: case JIR_CONST_I8_IMM: case JIR_CONST_I32:
-    case JIR_CONST_I64: case JIR_CONST_F16: case JIR_CONST_F32: case JIR_CONST_F64:
-    case JIR_CONST_BOOL: case JIR_CONST_ATOM: case JIR_STRUCT_NEW: case JIR_OBJ_NEW:
-      return JELLO_JIR_REG_A;
-    case JIR_OBJ_CLEAR:
-      return JELLO_JIR_REG_B;
-    case JIR_MOV: case JIR_NEG_I32: case JIR_NEG_I64: case JIR_NEG_F32: case JIR_NEG_F64:
-    case JIR_NOT_BOOL: case JIR_ADD_I32_IMM: case JIR_SUB_I32_IMM: case JIR_MUL_I32_IMM:
-    case JIR_EQ_I32_IMM: case JIR_LT_I32_IMM: case JIR_CONV: case JIR_TO_DYN:
-    case JIR_FROM_DYN: case JIR_KINDOF: case JIR_BYTES_NEW: case JIR_BYTES_LEN:
-    case JIR_STRUCT_GET: case JIR_STRUCT_SET: case JIR_OBJ_HAS_ATOM: case JIR_OBJ_GET_ATOM:
-    case JIR_OBJ_SET_ATOM: case JIR_OBJ_COPY:
-      return JELLO_JIR_REG_A | JELLO_JIR_REG_B;
-    case JIR_BITS_WRITE: case JIR_BITS_READ:
-    case JIR_CALL_SELF: case JIR_CALL_DIRECT: case JIR_CALL_NATIVE:
-      return JELLO_JIR_REG_A | JELLO_JIR_REG_B;
-    case JIR_BIN_I32: case JIR_BIN_I64: case JIR_BIN_F16: case JIR_BIN_F32: case JIR_BIN_F64:
-    case JIR_CMP_I32: case JIR_CMP_I64: case JIR_CMP_F32: case JIR_CMP_F64:
-    case JIR_PHYSEQ: case JIR_BYTES_GET_U8: case JIR_BYTES_SET_U8: case JIR_BYTES_EQ:
-    case JIR_BYTES_CONCAT2: case JIR_BYTES_BITOP: case JIR_BYTES_READ: case JIR_BYTES_WRITE:
-    case JIR_BYTES_BLIT: case JIR_OBJ_GET: case JIR_OBJ_SET: case JIR_OBJ_HAS: case JIR_OBJ_REMOVE:
-      return JELLO_JIR_REG_A | JELLO_JIR_REG_B | JELLO_JIR_REG_C;
-    default:
-      return 0;
+    case JIR_RET:
+    case JIR_JMP_IF:
+    case JIR_CONST_I8_IMM:
+    case JIR_CONST_I32:
+    case JIR_CONST_I64:
+    case JIR_CONST_F16:
+    case JIR_CONST_F32:
+    case JIR_CONST_F64:
+    case JIR_CONST_BOOL:
+    case JIR_CONST_ATOM:
+    case JIR_STRUCT_NEW:
+    case JIR_OBJ_NEW:
+    case JIR_NULL_CHECK:
+    case JIR_BYTES_FREEZE:
+    case JIR_TRY:
+    case JIR_THROW:
+    case JIR_GLOBAL_GET:
+    case JIR_GLOBAL_SET: return JELLO_JIR_REG_A;
+    case JIR_OBJ_CLEAR: return JELLO_JIR_REG_B;
+    case JIR_MOV:
+    case JIR_NEG_I32:
+    case JIR_NEG_I64:
+    case JIR_NEG_F32:
+    case JIR_NEG_F64:
+    case JIR_NOT_BOOL:
+    case JIR_ADD_I32_IMM:
+    case JIR_SUB_I32_IMM:
+    case JIR_MUL_I32_IMM:
+    case JIR_EQ_I32_IMM:
+    case JIR_LT_I32_IMM:
+    case JIR_CONV:
+    case JIR_TO_DYN:
+    case JIR_FROM_DYN:
+    case JIR_KINDOF:
+    case JIR_IS_NULL:
+    case JIR_IS_ENUM:
+    case JIR_BYTES_NEW:
+    case JIR_BYTES_LEN:
+    case JIR_STRUCT_GET:
+    case JIR_STRUCT_SET:
+    case JIR_OBJ_HAS_ATOM:
+    case JIR_OBJ_GET_ATOM:
+    case JIR_OBJ_SET_ATOM:
+    case JIR_OBJ_COPY:
+    case JIR_ARRAY_LEN:
+    case JIR_ENUM_TAG: return JELLO_JIR_REG_A | JELLO_JIR_REG_B;
+    case JIR_BITS_WRITE:
+    case JIR_BITS_READ:
+    case JIR_CALL_SELF:
+    case JIR_CALL_DIRECT:
+    case JIR_CALL_NATIVE:
+    case JIR_CALLR: return JELLO_JIR_REG_A | JELLO_JIR_REG_B;
+    case JIR_BIN_I32:
+    case JIR_BIN_I64:
+    case JIR_BIN_F16:
+    case JIR_BIN_F32:
+    case JIR_BIN_F64:
+    case JIR_CMP_I32:
+    case JIR_CMP_I64:
+    case JIR_CMP_F32:
+    case JIR_CMP_F64:
+    case JIR_PHYSEQ:
+    case JIR_BYTES_GET_U8:
+    case JIR_BYTES_SET_U8:
+    case JIR_BYTES_EQ:
+    case JIR_BYTES_CONCAT2:
+    case JIR_BYTES_BITOP:
+    case JIR_BYTES_READ:
+    case JIR_BYTES_WRITE:
+    case JIR_BYTES_BLIT:
+    case JIR_OBJ_GET:
+    case JIR_OBJ_SET:
+    case JIR_OBJ_HAS:
+    case JIR_OBJ_REMOVE:
+    case JIR_ARRAY_GET:
+    case JIR_ARRAY_SET:
+    case JIR_ENUM_GET: return JELLO_JIR_REG_A | JELLO_JIR_REG_B | JELLO_JIR_REG_C;
+    default: return 0;
   }
 }
 
@@ -218,7 +277,7 @@ jello_jit_ir_function* jello_jit_ir_build(const jello_bc_module* m, uint32_t fi)
     flags_acc |= jello_op_table[op].flags;
 
     int backward_branch = (op == JOP_JMP || op == JOP_JMP_IF) && (int32_t)ins->imm < 0;
-    if(backward_branch || op == JOP_CALL) {
+    if(backward_branch || op == JOP_CALL || op == JOP_CALLR || op == JOP_THROW) {
       ir_push(&b, JIR_SAFEPOINT, 0, 0, 0, 0, pc);
     }
 
@@ -237,6 +296,10 @@ jello_jit_ir_function* jello_jit_ir_build(const jello_bc_module* m, uint32_t fi)
       case JOP_CALL_NATIVE:
         ir_push(&b, JIR_CALL_NATIVE, ins->a, ins->b, ins->c, ins->imm, pc);
         break;
+      case JOP_CALLR: ir_push(&b, JIR_CALLR, ins->a, ins->b, ins->c, ins->imm, pc); break;
+      case JOP_TRY: ir_push(&b, JIR_TRY, ins->a, 0, 0, ins->imm, pc); break;
+      case JOP_ENDTRY: ir_push(&b, JIR_ENDTRY, 0, 0, 0, 0, pc); break;
+      case JOP_THROW: ir_push(&b, JIR_THROW, ins->a, 0, 0, 0, pc); break;
 
       case JOP_CONST_I8_IMM: ir_push(&b, JIR_CONST_I8_IMM, ins->a, 0, 0, ins->imm, pc); break;
       case JOP_CONST_I32: ir_push(&b, JIR_CONST_I32, ins->a, 0, 0, ins->imm, pc); break;
@@ -307,6 +370,9 @@ jello_jit_ir_function* jello_jit_ir_build(const jello_bc_module* m, uint32_t fi)
         break;
       case JOP_KINDOF: ir_push(&b, JIR_KINDOF, ins->a, ins->b, 0, 0, pc); break;
       case JOP_PHYSEQ: ir_push(&b, JIR_PHYSEQ, ins->a, ins->b, ins->c, 0, pc); break;
+      case JOP_IS_NULL: ir_push(&b, JIR_IS_NULL, ins->a, ins->b, 0, 0, pc); break;
+      case JOP_NULL_CHECK: ir_push(&b, JIR_NULL_CHECK, ins->a, 0, 0, 0, pc); break;
+      case JOP_IS_ENUM: ir_push(&b, JIR_IS_ENUM, ins->a, ins->b, 0, ins->imm, pc); break;
 
       case JOP_BYTES_NEW: ir_push(&b, JIR_BYTES_NEW, ins->a, ins->b, 0, 0, pc); break;
       case JOP_BYTES_LEN: ir_push(&b, JIR_BYTES_LEN, ins->a, ins->b, 0, 0, pc); break;
@@ -329,6 +395,7 @@ jello_jit_ir_function* jello_jit_ir_build(const jello_bc_module* m, uint32_t fi)
         break;
       case JOP_BYTES_BLIT: ir_push(&b, JIR_BYTES_BLIT, ins->a, ins->b, ins->c, 0, pc); break;
       case JOP_BITS_WRITE: ir_push(&b, JIR_BITS_WRITE, ins->a, ins->b, ins->c, ins->imm, pc); break;
+      case JOP_BYTES_FREEZE: ir_push(&b, JIR_BYTES_FREEZE, ins->a, 0, 0, 0, pc); break;
       case JOP_BITS_READ: ir_push(&b, JIR_BITS_READ, ins->a, ins->b, ins->c, ins->imm, pc); break;
 
       case JOP_STRUCT_NEW: ir_push(&b, JIR_STRUCT_NEW, ins->a, 0, 0, 0, pc); break;
@@ -346,9 +413,17 @@ jello_jit_ir_function* jello_jit_ir_build(const jello_bc_module* m, uint32_t fi)
       case JOP_OBJ_CLEAR: ir_push(&b, JIR_OBJ_CLEAR, 0, ins->b, 0, 0, pc); break;
       case JOP_OBJ_COPY: ir_push(&b, JIR_OBJ_COPY, ins->a, ins->b, 0, 0, pc); break;
 
-      default:
-        ir_push(&b, JIR_SLOW, ins->a, ins->b, ins->c, ins->imm, pc);
-        break;
+      case JOP_ARRAY_LEN: ir_push(&b, JIR_ARRAY_LEN, ins->a, ins->b, 0, 0, pc); break;
+      case JOP_ARRAY_GET: ir_push(&b, JIR_ARRAY_GET, ins->a, ins->b, ins->c, 0, pc); break;
+      case JOP_ARRAY_SET: ir_push(&b, JIR_ARRAY_SET, ins->a, ins->b, ins->c, 0, pc); break;
+
+      case JOP_ENUM_TAG: ir_push(&b, JIR_ENUM_TAG, ins->a, ins->b, 0, 0, pc); break;
+      case JOP_ENUM_GET: ir_push(&b, JIR_ENUM_GET, ins->a, ins->b, ins->c, 0, pc); break;
+
+      case JOP_GLOBAL_GET: ir_push(&b, JIR_GLOBAL_GET, ins->a, 0, 0, ins->imm, pc); break;
+      case JOP_GLOBAL_SET: ir_push(&b, JIR_GLOBAL_SET, ins->a, 0, 0, ins->imm, pc); break;
+
+      default: ir_push(&b, JIR_SLOW, ins->a, ins->b, ins->c, ins->imm, pc); break;
     }
   }
 
@@ -385,7 +460,14 @@ int jello_jit_ir_verify(const jello_jit_ir_function* f, const jello_bc_function*
       return 0;
     }
     if((mask & JELLO_JIR_REG_C) && ins->c >= f->nregs) return 0;
+    if(op == JIR_CALLR && (uint64_t)ins->imm + ins->c > f->nregs) return 0;
+
     if(ins->bc_pc >= src->ninsns) return 0;
+
+    if(op == JIR_TRY) {
+      int64_t tgt = (int64_t)ins->bc_pc + 1 + (int32_t)ins->imm;
+      if(tgt < 0 || tgt >= (int64_t)src->ninsns) return 0;
+    }
   }
   return 1;
 }

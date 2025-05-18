@@ -305,7 +305,6 @@ typedef struct jit_survive_plan {
 int jit_survive_plan_build(const jello_jit_ir_function* ir, const jello_bc_module* m,
     const jello_bc_function* f, const uint8_t* is_target, jit_survive_plan* out_plan);
 void jit_survive_plan_free(jit_survive_plan* plan);
-void jit_debug_assert_rsp_aligned16(uint64_t rsp);
 
 JELLO_JIT_ABI void jit_trap_arithmetic(jello_vm* vm);
 JELLO_JIT_ABI void jit_trap_stack_overflow(jello_vm* vm);
@@ -328,7 +327,6 @@ enum {
 };
 
 uint8_t* jit_frame_entry_base(jello_vm* vm);
-void jit_frame_zero_and_null_init(uint8_t* mem, uint32_t total, const uint8_t* kind, uint32_t nregs);
 int jello_jit_ir_slow_runs_handler(jello_op op);
 
 #define JIT_TRAP_SITE_OFF                                                                          \

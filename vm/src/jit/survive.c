@@ -16,17 +16,20 @@ static int op_a_is_value_input(jello_jit_ir_op op) {
     case JIR_BYTES_WRITE:
     case JIR_BYTES_BLIT:
     case JIR_BITS_WRITE:
+    case JIR_BYTES_FREEZE:
     case JIR_STRUCT_SET:
     case JIR_OBJ_SET_ATOM:
     case JIR_OBJ_SET:
-      return 1;
-    default:
-      return 0;
+    case JIR_ARRAY_SET:
+    case JIR_GLOBAL_SET:
+    case JIR_THROW: return 1;
+    default: return 0;
   }
 }
 
 static int op_is_branch(jello_jit_ir_op op) {
-  return op == JIR_JMP || op == JIR_JMP_IF;
+  return op == JIR_JMP || op == JIR_JMP_IF || op == JIR_CALLR || op == JIR_TRY ||
+         op == JIR_ENDTRY || op == JIR_THROW;
 }
 
 static int op_is_call(jello_jit_ir_op op) {

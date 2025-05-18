@@ -154,13 +154,7 @@ jello_jit_module* jit_module_create(const jello_bc_module* m, int eager) {
 int jello_jit_available(void) { return 1; }
 
 jello_jit_module* jello_jit_module_create(const jello_bc_module* m) {
-  jello_jit_module* jm = (jello_jit_module*)calloc(1, sizeof(jello_jit_module));
-  if(!jm) return NULL;
-  if(!jello_jit_module_prepare(m, jm)) {
-    free(jm);
-    return NULL;
-  }
-  return jm;
+  return jit_module_create(m, 0);
 }
 
 void jello_jit_module_destroy(jello_jit_module* jm) {
@@ -178,7 +172,8 @@ int jello_jit_try_enter(jello_vm* vm, jello_jit_module* jm, jello_numeric_result
   call_frame* fr = &vm->call_frames[vm->call_frames_len - 1u];
   if(fr->pc != 0 || fr->has_caller != 0) return 0;
   uint32_t fi = fr->func_index;
-  if(fi >= jm->nfuncs || jm->funcs[fi].size == 0) return 0;
+  if(fi >= jm->nfuncs) return 0;
+  if(!jm->funcs[fi].compiled && !compile_shared(vm, jm, fi)) return 0;
 
   jello_jit_entry_fn entry = (jello_jit_entry_fn)(uintptr_t)(jm->blob.mem + jm->funcs[fi].blob_off +
                                                              jm->funcs[fi].entry_off);

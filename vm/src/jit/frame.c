@@ -45,20 +45,8 @@ void jit_bits_write(jello_bytes* b, uint32_t width, uint32_t bit_off, uint32_t v
 }
 
 jello_bytes* jit_bytes_concat2(jello_vm* vm, jello_bytes* b, jello_bytes* c) {
-  uint64_t total = (uint64_t)b->length + (uint64_t)c->length;
-  if(total > (uint64_t)UINT32_MAX) {
-    vm->trap_code = JELLO_TRAP_BOUNDS;
-    return NULL;
-  }
-  jello_bytes* dst = jello_bytes_new(vm, (uint32_t)total);
-  memcpy(dst->data, b->data, b->length);
-  memcpy(dst->data + b->length, c->data, c->length);
-  return dst;
-}
-
-void jit_debug_assert_rsp_aligned16(uint64_t rsp) {
-  (void)rsp;
-  assert((rsp & 0xFu) == 0 && "body_off's own 16-byte call alignment was broken by a survive-slot stack adjustment");
+  jello_bytes* parts[2] = {b, c};
+  return jello_bytes_join(vm, parts, 2, NULL);
 }
 
 uint32_t jit_bits_read(const jello_bytes* b, uint32_t width, uint32_t bit_off) {
