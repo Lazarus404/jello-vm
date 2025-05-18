@@ -209,16 +209,173 @@ void proc_sockets_end(jello_process* p) {
 
 static void failed(jdlo_ctx* c, int32_t err) { c->vm->net_error = err; }
 
+static int arg_fd(jdlo_ctx* c, jello_process** p, proc_socket** k) {
+  failed(c, 0);
+  *p = proc_self_or_fail(c);
+  *k = *p ? (proc_socket*)proc_arg_handle(c, 0, &proc_socket_class) : NULL;
+  if(!*k) return -1;
+  int fd = owner_of(*k) == *p ? (*k)->fd : -1;
+  if(fd < 0) failed(c, NET_CLOSED);
+  return fd;
+}
+
+static int watch_fd(jello_vm* vm, int fd, int stream) {
+  int watched = 0;
+#ifdef SO_NOSIGPIPE
+  int one = 1;
+  int quiet = setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one) == 0;
+#else
+  int quiet = 1;
+#endif
+  if(quiet && jello_sock_nonblocking(fd) == 0) {
+    if(stream) jello_sock_nodelay(fd);
+    proc_poll_open(vm, fd, &watched);
+  }
+  if(!watched) {
+    int err = errno ? errno : EMFILE;
+    jello_sock_close(fd);
+    errno = err;
+  }
+  return watched;
+}
+
+static void close_fd(jello_vm* vm, int fd) {
+  proc_poll_close(vm, fd);
+  jello_sock_close(fd);
+}
+
+static void return_socket(jdlo_ctx* c, jello_process* p, int fd, const struct sockaddr* peer,
+                          socklen_t peer_len) {
+  proc_socket* k = (proc_socket*)calloc(1, sizeof(proc_socket));
+  if(!k) {
+    close_fd(c->vm, fd);
+    jdl_fail(c, "out of memory");
+    return;
+  }
+  k->refs = 1;
+  k->fd = fd;
+  if(peer && (size_t)peer_len <= sizeof k->peer) {
+    memcpy(&k->peer, peer, (size_t)peer_len);
+    k->peer_len = peer_len;
+  }
+  pthread_mutex_lock(&net_lock);
+  adopt(k, p);
+  pthread_mutex_unlock(&net_lock);
+  jdl_return_handle(c, &proc_socket_class, k, (uint32_t)sizeof(proc_socket));
+}
+
+static int await(jdlo_ctx* c, int fd, uint32_t events, uint64_t deadline) {
+  uint32_t ready = 0;
+  jello_trap_code trap = proc_poll_wait(c->vm, fd, events, deadline, &ready);
+  if(trap) proc_trap(c, trap);
+  else if(ready & PROC_FD_CLOSED) failed(c, NET_CLOSED);
+  else if(!ready) failed(c, NET_TIMEOUT);
+  return !trap && ready && !(ready & PROC_FD_CLOSED);
+}
+
+static int retry(jdlo_ctx* c, int fd, uint32_t events, uint64_t deadline) {
+  if(errno == EINTR) return 1;
+  if(errno == EAGAIN || errno == EWOULDBLOCK) return await(c, fd, events, deadline);
+  failed(c, errno);
+  return 0;
+}
+
+static int tls_retry(jdlo_ctx* c, const proc_socket* k, int fd, int r, uint64_t deadline) {
+  if(r == NET_TLS_WANT_READ) return await(c, fd, PROC_FD_READ, deadline);
+  if(r == NET_TLS_WANT_WRITE) return await(c, fd, PROC_FD_WRITE, deadline);
+  failed(c, k->tls_ops->error(k->tls));
+  return 0;
+}
+
 typedef struct net_addrs {
   struct addrinfo* list;
   struct addrinfo one;
   struct sockaddr_storage addr;
 } net_addrs;
 
+void vm_net_tcp_accept(jdlo_ctx* c) {
+  jello_process* p;
+  proc_socket* k;
+  int fd = arg_fd(c, &p, &k);
+  uint64_t deadline = proc_deadline(jdl_arg_i32(c, 1));
+  while(fd >= 0) {
+    struct sockaddr_storage peer;
+    socklen_t peer_len = sizeof peer;
+    int nfd = jello_accept(fd, (struct sockaddr*)&peer, &peer_len);
+    if(nfd >= 0) {
+      if(watch_fd(c->vm, nfd, 1)) {
+        return_socket(c, p, nfd, (struct sockaddr*)&peer, peer_len);
+        return;
+      }
+      failed(c, errno);
+      break;
+    }
+    if(errno != ECONNABORTED && !retry(c, fd, PROC_FD_READ, deadline)) break;
+  }
+  if(!c->failed) jdl_return_null(c);
+}
+
+void vm_net_close(jdlo_ctx* c) {
+  jello_process* p;
+  proc_socket* k;
+  int fd = arg_fd(c, &p, &k);
+  if(fd >= 0) {
+    pthread_mutex_lock(&net_lock);
+    close_locked(k, p);
+  }
+  if(k) jdl_return_bool(c, fd >= 0);
+}
+
+void vm_net_tls_start(jdlo_ctx* c) {
+  jello_process* p;
+  proc_socket* k;
+  int fd = arg_fd(c, &p, &k);
+  const net_tls_ops* tls = NULL;
+  void* config = NULL;
+  if(fd >= 0) {
+    tls = tls_library(c->m);
+    if(tls) config = proc_arg_handle(c, 1, tls->config_class);
+    else jdl_fail(c, "not a TLS configuration");
+  }
+  if(c->failed) return;
+  int type = 0;
+  if(fd >= 0 && (k->tls || jello_sock_option(fd, SO_TYPE, &type) != 0 || type != SOCK_STREAM)) {
+    failed(c, EINVAL);
+    fd = -1;
+  }
+  int done = 0;
+  if(fd >= 0) {
+    int32_t err = 0;
+    k->tls_ops = tls;
+    k->tls = tls->open(config, fd, jdl_arg_bytes_data(c, 2), jdl_arg_bytes_len(c, 2), &err);
+    if(!k->tls) failed(c, err);
+    int r = NET_TLS_FAILED;
+    while(k->tls && (r = tls->handshake(k->tls)) != 0 && tls_retry(c, k, fd, r, 0)) {}
+    done = k->tls && r == 0;
+    if(!done && owner_of(k) == p) {
+      pthread_mutex_lock(&net_lock);
+      close_locked(k, p);
+    }
+  }
+  if(!c->failed) jdl_return_bool(c, done);
+}
+
 static int32_t port_of(const struct sockaddr_storage* a) {
   if(a->ss_family == AF_INET) return ntohs(((const struct sockaddr_in*)a)->sin_port);
   if(a->ss_family == AF_INET6) return ntohs(((const struct sockaddr_in6*)a)->sin6_port);
   return -1;
+}
+
+void vm_net_local_port(jdlo_ctx* c) {
+  jello_process* p;
+  proc_socket* k;
+  int fd = arg_fd(c, &p, &k);
+  if(!k) return;
+  struct sockaddr_storage a;
+  socklen_t len = sizeof a;
+  memset(&a, 0, sizeof a);
+  if(fd >= 0 && jello_getsockname(fd, (struct sockaddr*)&a, &len) < 0) failed(c, errno);
+  jdl_return_i32(c, fd >= 0 ? port_of(&a) : -1);
 }
 
 void vm_net_error(jdlo_ctx* c) { jdl_return_i32(c, c->vm->net_error); }

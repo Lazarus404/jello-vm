@@ -227,6 +227,28 @@ static void vm_reply_new(jdlo_ctx* c) {
   jdl_return_handle(c, &proc_reply_class, r, (uint32_t)sizeof(proc_reply));
 }
 
+static proc_reply* arg_reply(jdlo_ctx* c, int index) {
+  return (proc_reply*)proc_arg_handle(c, index, &proc_reply_class);
+}
+
+static void vm_reply_send(jdlo_ctx* c) {
+  proc_reply* r = arg_reply(c, 0);
+  if(!r || !proc_self_or_fail(c)) return;
+  vm_parcel v;
+  if(pack_arg(c, &v)) jdl_return_bool(c, proc_reply_send(c->vm, r, &v));
+}
+
+static void vm_reply_value(jdlo_ctx* c) {
+  proc_reply* r = arg_reply(c, 0);
+  if(!r) return;
+  jdl_return_value(c, vm_parcel_read(c->vm, &r->value));
+}
+
+static void vm_schedulers(jdlo_ctx* c) {
+  jello_process* p = proc_self_or_fail(c);
+  if(p) jdl_return_i32(c, (int32_t)p->sched->nworkers);
+}
+
 typedef struct proc_buffer {
   jdl_refs refs;
   uint32_t length;
@@ -238,6 +260,38 @@ static void free_buffer(void* payload) {
 }
 
 static const jello_jdll_handle_class proc_buffer_class = {"buffer", free_buffer, jdl_retain};
+
+static void vm_buf_new(jdlo_ctx* c) {
+  int32_t n = jdl_arg_i32(c, 0);
+  if(n < 0) {
+    proc_trap(c, JELLO_TRAP_BOUNDS);
+    return;
+  }
+  proc_buffer* b = (proc_buffer*)calloc(1, sizeof(proc_buffer) + (size_t)n);
+  if(!b) {
+    jdl_fail(c, "out of memory");
+    return;
+  }
+  b->refs = 1;
+  b->length = (uint32_t)n;
+  jdl_return_handle(c, &proc_buffer_class, b, (uint32_t)sizeof(proc_buffer) + (uint32_t)n);
+}
+
+static void vm_buf_length(jdlo_ctx* c) {
+  proc_buffer* b = (proc_buffer*)proc_arg_handle(c, 0, &proc_buffer_class);
+  if(b) jdl_return_i32(c, (int32_t)b->length);
+}
+
+static void* element(jdlo_ctx* c, int index, uint32_t width) {
+  proc_buffer* b = (proc_buffer*)proc_arg_handle(c, 0, &proc_buffer_class);
+  if(!b) return NULL;
+  int32_t i = jdl_arg_i32(c, index);
+  if(i < 0 || (uint64_t)(uint32_t)i * width + width > b->length) {
+    proc_trap(c, JELLO_TRAP_BOUNDS);
+    return NULL;
+  }
+  return b->data + (size_t)i * width;
+}
 
 static uint64_t load_bits(const void* at, uint32_t width) {
   switch(width) {
@@ -257,6 +311,129 @@ static void store_bits(void* at, uint32_t width, uint64_t v) {
   }
 }
 
+static void* sized_element(jdlo_ctx* c, uint32_t* width) {
+  int32_t w = jdl_arg_i32(c, 1);
+  if(w != 1 && w != 2 && w != 4) {
+    proc_trap(c, JELLO_TRAP_TYPE_MISMATCH);
+    return NULL;
+  }
+  *width = (uint32_t)w;
+  return element(c, 2, *width);
+}
+
+static void vm_buf_get(jdlo_ctx* c) {
+  uint32_t w;
+  void* at = sized_element(c, &w);
+  if(at) jdl_return_i32(c, (int32_t)(uint32_t)load_bits(at, w));
+}
+
+static void vm_buf_set(jdlo_ctx* c) {
+  uint32_t w;
+  void* at = sized_element(c, &w);
+  if(!at) return;
+  store_bits(at, w, (uint32_t)jdl_arg_i32(c, 3));
+  jdl_return_bool(c, 1);
+}
+
+static void vm_buf_get_i64(jdlo_ctx* c) {
+  void* at = element(c, 1, 8);
+  if(at) jdl_return_i64(c, (int64_t)load_bits(at, 8));
+}
+
+static void vm_buf_set_i64(jdlo_ctx* c) {
+  void* at = element(c, 1, 8);
+  if(!at) return;
+  store_bits(at, 8, (uint64_t)jdl_arg_i64(c, 2));
+  jdl_return_bool(c, 1);
+}
+
+static void vm_buf_get_f32(jdlo_ctx* c) {
+  void* at = element(c, 1, 4);
+  if(!at) return;
+  uint32_t bits = (uint32_t)load_bits(at, 4);
+  float v;
+  memcpy(&v, &bits, sizeof v);
+  jdl_return_f32(c, v);
+}
+
+static void vm_buf_set_f32(jdlo_ctx* c) {
+  void* at = element(c, 1, 4);
+  if(!at) return;
+  float v = jdl_arg_f32(c, 2);
+  uint32_t bits;
+  memcpy(&bits, &v, sizeof bits);
+  store_bits(at, 4, bits);
+  jdl_return_bool(c, 1);
+}
+
+static void vm_buf_get_f64(jdlo_ctx* c) {
+  void* at = element(c, 1, 8);
+  if(!at) return;
+  uint64_t bits = load_bits(at, 8);
+  double v;
+  memcpy(&v, &bits, sizeof v);
+  jdl_return_f64(c, v);
+}
+
+static void vm_buf_set_f64(jdlo_ctx* c) {
+  void* at = element(c, 1, 8);
+  if(!at) return;
+  double v = jdl_arg_f64(c, 2);
+  uint64_t bits;
+  memcpy(&bits, &v, sizeof bits);
+  store_bits(at, 8, bits);
+  jdl_return_bool(c, 1);
+}
+
+static void vm_buf_add_i32(jdlo_ctx* c) {
+  uint32_t* at = (uint32_t*)element(c, 1, 4);
+  if(at) {
+    jdl_return_i32(c,
+                   (int32_t)__atomic_fetch_add(at, (uint32_t)jdl_arg_i32(c, 2), __ATOMIC_ACQ_REL));
+  }
+}
+
+static void vm_buf_cas_i32(jdlo_ctx* c) {
+  uint32_t* at = (uint32_t*)element(c, 1, 4);
+  if(!at) return;
+  uint32_t old = (uint32_t)jdl_arg_i32(c, 2);
+  jdl_return_bool(c, __atomic_compare_exchange_n(at, &old, (uint32_t)jdl_arg_i32(c, 3), 0,
+                                                 __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+}
+
+static void vm_buf_add_i64(jdlo_ctx* c) {
+  uint64_t* at = (uint64_t*)element(c, 1, 8);
+  if(at) {
+    jdl_return_i64(c,
+                   (int64_t)__atomic_fetch_add(at, (uint64_t)jdl_arg_i64(c, 2), __ATOMIC_ACQ_REL));
+  }
+}
+
+static void vm_buf_cas_i64(jdlo_ctx* c) {
+  uint64_t* at = (uint64_t*)element(c, 1, 8);
+  if(!at) return;
+  uint64_t old = (uint64_t)jdl_arg_i64(c, 2);
+  jdl_return_bool(c, __atomic_compare_exchange_n(at, &old, (uint64_t)jdl_arg_i64(c, 3), 0,
+                                                 __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+}
+
+static void vm_buf_slice(jdlo_ctx* c) {
+  proc_buffer* b = (proc_buffer*)proc_arg_handle(c, 0, &proc_buffer_class);
+  if(!b) return;
+  int32_t start = jdl_arg_i32(c, 1), n = jdl_arg_i32(c, 2);
+  if(start < 0 || n < 0 || (uint64_t)start + (uint64_t)n > b->length) {
+    proc_trap(c, JELLO_TRAP_BOUNDS);
+    return;
+  }
+  jello_bytes* out = jello_bytes_new(c->vm, (uint32_t)n);
+  if(!out) {
+    jdl_fail(c, "out of memory");
+    return;
+  }
+  for(int32_t i = 0; i < n; i++) out->data[i] = (uint8_t)load_bits(&b->data[start + i], 1);
+  jdl_return_value(c, jello_from_ptr(out));
+}
+
 #define D (uint8_t)JELLO_T_DYNAMIC
 #define I (uint8_t)JELLO_T_I32
 #define B (uint8_t)JELLO_T_BOOL
@@ -267,11 +444,58 @@ static void store_bits(void* at, uint32_t width, uint64_t v) {
 
 static const jello_jdll_export VM_EXPORTS[] = {
     {"proc_spawn", vm_spawn, D, 1, {D}, 0},
+    {"proc_spawn_detached", vm_spawn_detached, D, 1, {D}, 0},
+    {"proc_spawn_on_main", vm_spawn_on_main, D, 1, {D}, 0},
+    {"proc_on_main", vm_on_main, B, 0, {0}, 0},
+    {"proc_self", vm_self, D, 0, {0}, 0},
+    {"proc_send", vm_send, B, 2, {D, D}, 0},
+    {"proc_receive", vm_receive, D, 0, {0}, 0},
+    {"proc_pending", vm_pending, I, 0, {0}, 0},
+    {"proc_wait_message", vm_wait_message, B, 1, {I}, 0},
+    {"proc_sleep", vm_sleep, B, 1, {I}, 0},
+    {"proc_poll_open", vm_poll_open, B, 1, {I}, 0},
+    {"proc_poll_wait", vm_poll_wait, I, 3, {I, I, I}, 0},
+    {"proc_poll_close", vm_poll_close, B, 1, {I}, 0},
+    {"proc_clock", vm_clock, I, 0, {0}, 0},
+    {"proc_send_after", vm_send_after, D, 2, {I, D}, 0},
+    {"proc_timer_cancel", vm_timer_cancel, B, 1, {D}, 0},
+    {"proc_exited", vm_exited, I, 1, {D}, 0},
+    {"proc_exit_value", vm_exit_value, D, 1, {D}, 0},
+    {"proc_stop", vm_stop, B, 1, {D}, 0},
+    {"proc_on_exit", vm_on_exit, B, 1, {D}, 0},
+    {"proc_yield", vm_yield, B, 0, {0}, 0},
+    {"proc_reply_new", vm_reply_new, D, 0, {0}, 0},
+    {"proc_reply_send", vm_reply_send, B, 2, {D, D}, 0},
+    {"proc_reply_value", vm_reply_value, D, 1, {D}, 0},
+    {"proc_schedulers", vm_schedulers, I, 0, {0}, 0},
+    {"buffer_new", vm_buf_new, D, 1, {I}, 0},
+    {"buffer_length", vm_buf_length, I, 1, {D}, 0},
+    {"buffer_get", vm_buf_get, I, 3, {D, I, I}, 0},
+    {"buffer_set", vm_buf_set, B, 4, {D, I, I, I}, 0},
+    {"buffer_get_i64", vm_buf_get_i64, L, 2, {D, I}, 0},
+    {"buffer_set_i64", vm_buf_set_i64, B, 3, {D, I, L}, 0},
+    {"buffer_get_f32", vm_buf_get_f32, F, 2, {D, I}, 0},
+    {"buffer_set_f32", vm_buf_set_f32, B, 3, {D, I, F}, 0},
+    {"buffer_get_f64", vm_buf_get_f64, G, 2, {D, I}, 0},
+    {"buffer_set_f64", vm_buf_set_f64, B, 3, {D, I, G}, 0},
+    {"buffer_add_i32", vm_buf_add_i32, I, 3, {D, I, I}, 0},
+    {"buffer_cas_i32", vm_buf_cas_i32, B, 4, {D, I, I, I}, 0},
+    {"buffer_add_i64", vm_buf_add_i64, L, 3, {D, I, L}, 0},
+    {"buffer_cas_i64", vm_buf_cas_i64, B, 4, {D, I, L, L}, 0},
+    {"buffer_slice", vm_buf_slice, D, 3, {D, I, I}, 0},
+    {"net_tcp_accept", vm_net_tcp_accept, D, 2, {D, I}, 0},
+    {"net_close", vm_net_close, B, 1, {D}, 0},
+    {"net_local_port", vm_net_local_port, I, 1, {D}, 0},
+    {"net_error", vm_net_error, I, 0, {0}, 0},
+    {"net_error_text", vm_net_error_text, Y, 1, {I}, 0},
+    {"net_tls_start", vm_net_tls_start, B, 3, {D, D, Y}, 0},
+    {"image_run", vm_image_run, Y, 3, {Y, Y, L}, 0},
 };
 
 const jello_jdll_manifest vm_builtin_manifest = {
     JELLO_JDLL_MANIFEST_MAGIC,
     JELLO_JDLL_ABI_VERSION,
+    "vm",
     VM_EXPORTS,
     (uint32_t)(sizeof(VM_EXPORTS) / sizeof(VM_EXPORTS[0])),
     NULL,

@@ -1019,6 +1019,39 @@ jello_trap_code proc_sleep(jello_vm* vm, uint64_t deadline) {
   return park_until(running(vm)->sched, vm, PROC_PARK_SLEEP, deadline);
 }
 
+static jello_trap_code await(proc_sched* s, jello_vm* vm, jello_process* p, const uint8_t* done,
+                             uint64_t deadline) {
+  jello_process* self = vm->proc;
+  if(deadline) timer_arm(s, &self->deadline, deadline);
+  jello_trap_code trap = JELLO_TRAP_NONE;
+  while(!proc_finished(p) && !(done && *done) && !expired(deadline)) {
+    if(p == self) {
+      trap = JELLO_TRAP_DEADLOCK;
+      break;
+    }
+    self->joining = p;
+    self->join_prev = NULL;
+    self->join_next = p->joiners;
+    if(p->joiners) p->joiners->join_prev = self;
+    p->joiners = self;
+    pthread_mutex_lock(&self->mu);
+    trap = park(s, vm, PROC_PARK_JOIN, 1);
+    lock(s);
+    if(self->joining) join_unlink(self);
+    if(trap) break;
+  }
+  deadline_disarm(s, self);
+  return trap;
+}
+
+jello_trap_code proc_await(jello_vm* vm, jello_process* p, uint64_t deadline) {
+  proc_sched* s = running(vm)->sched;
+  lock(s);
+  jello_trap_code trap = await(s, vm, p, NULL, deadline);
+  unlock(s);
+  return trap;
+}
+
 jello_trap_code proc_receive(jello_vm* vm, jello_value* out) {
   jello_process* p = running(vm);
   pthread_mutex_lock(&p->mu);
@@ -1034,6 +1067,8 @@ jello_trap_code proc_receive(jello_vm* vm, jello_value* out) {
   *out = vm_parcel_take(vm, &msg);
   return JELLO_TRAP_NONE;
 }
+
+jello_trap_code proc_join(jello_vm* vm, jello_process* p) { return proc_await(vm, p, 0); }
 
 proc_timer* proc_send_after(jello_vm* vm, uint64_t deadline, vm_parcel* msg) {
   jello_process* p = running(vm);
@@ -1067,6 +1102,33 @@ void proc_on_exit(jello_vm* vm, jello_value fn) {
   p->cleanups = (jello_value*)realloc(p->cleanups, sizeof(jello_value) * (p->ncleanups + 1u));
   if(!p->cleanups) abort();
   p->cleanups[p->ncleanups++] = fn;
+}
+
+int proc_reply_send(jello_vm* vm, proc_reply* r, vm_parcel* value) {
+  proc_sched* s = running(vm)->sched;
+  lock(s);
+  int first = !r->sent;
+  if(first) {
+    vm_parcel_move(&r->value, value);
+    r->sent = 1;
+    if(r->waiter) wake(s, r->waiter);
+  }
+  unlock(s);
+  if(!first && value->sockets) proc_sockets_take(vm->proc, &value->sockets);
+  if(!first) vm_parcel_free(value);
+  return first;
+}
+
+jello_trap_code proc_reply_wait(jello_vm* vm, proc_reply* r, jello_process* p, uint64_t deadline,
+                                int* outcome) {
+  proc_sched* s = running(vm)->sched;
+  lock(s);
+  r->waiter = vm->proc;
+  jello_trap_code trap = await(s, vm, p, &r->sent, deadline);
+  r->waiter = NULL;
+  *outcome = r->sent ? 1 : proc_finished(p) ? 0 : -1;
+  unlock(s);
+  return trap;
 }
 
 static void native_done(proc_sched* s, jello_process* p) {

@@ -315,8 +315,12 @@ jello_process* proc_self_or_fail(struct jdlo_ctx* c);
 extern const struct jello_jdll_handle_class proc_socket_class;
 void proc_socket_moved(void* payload, const struct jello_vm* vm);
 void proc_sockets_end(jello_process* p);
+void vm_net_tcp_accept(struct jdlo_ctx* c);
+void vm_net_close(struct jdlo_ctx* c);
+void vm_net_local_port(struct jdlo_ctx* c);
 void vm_net_error(struct jdlo_ctx* c);
 void vm_net_error_text(struct jdlo_ctx* c);
+void vm_net_tls_start(struct jdlo_ctx* c);
 void vm_image_run(struct jdlo_ctx* c);
 int proc_on_main(const struct jello_vm* vm);
 jello_process* proc_self(struct jello_vm* vm);
@@ -329,6 +333,7 @@ uint32_t proc_pending(struct jello_vm* vm);
 jello_trap_code proc_receive(struct jello_vm* vm, jello_value* out);
 uint64_t proc_now(void);
 uint64_t proc_deadline(int32_t ms);
+jello_trap_code proc_await(struct jello_vm* vm, jello_process* p, uint64_t deadline);
 jello_trap_code proc_wait_message(struct jello_vm* vm, uint64_t deadline);
 jello_trap_code proc_sleep(struct jello_vm* vm, uint64_t deadline);
 proc_timer* proc_send_after(struct jello_vm* vm, uint64_t deadline, vm_parcel* msg);
@@ -345,6 +350,7 @@ static inline void proc_call_quiescent(struct jello_vm* vm, jdll_export_fn fn, j
   fn(ctx);
   vm_leave_quiescent(vm);
 }
+jello_trap_code proc_join(struct jello_vm* vm, jello_process* p);
 void proc_on_exit(struct jello_vm* vm, jello_value fn);
 void proc_wait_all(struct jello_vm* vm);
 void proc_end_all(struct jello_vm* vm);
@@ -355,6 +361,10 @@ typedef struct proc_reply {
   uint8_t sent;
   jello_process* waiter; /**< The process waiting for it, while one does. */
 } proc_reply;
+
+int proc_reply_send(struct jello_vm* vm, proc_reply* r, vm_parcel* value);
+jello_trap_code proc_reply_wait(struct jello_vm* vm, proc_reply* r, jello_process* p,
+                                uint64_t deadline, int* outcome);
 
 extern const struct jello_jdll_handle_class proc_handle_class;
 extern const struct jello_jdll_handle_class proc_reply_class;
