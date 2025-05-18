@@ -1572,24 +1572,6 @@ static void emit_bytes_bitop(emit_ctx* ctx, const jello_jit_ir_insn* ins) {
   jit_reg_store_home_gpr64(ctx->ra, ins->a, dst);
 }
 
-static void bytes_rw_info(jello_jir_bytes_rw rw, uint32_t* width, int* be, int* is_float) {
-  switch(rw) {
-    case JIR_BRW_U16_LE: *width = 2; *be = 0; *is_float = 0; return;
-    case JIR_BRW_U16_BE: *width = 2; *be = 1; *is_float = 0; return;
-    case JIR_BRW_U32_LE: *width = 4; *be = 0; *is_float = 0; return;
-    case JIR_BRW_U32_BE: *width = 4; *be = 1; *is_float = 0; return;
-    case JIR_BRW_I32_LE: *width = 4; *be = 0; *is_float = 0; return;
-    case JIR_BRW_I32_BE: *width = 4; *be = 1; *is_float = 0; return;
-    case JIR_BRW_F32_LE: *width = 4; *be = 0; *is_float = 1; return;
-    case JIR_BRW_F32_BE: *width = 4; *be = 1; *is_float = 1; return;
-    case JIR_BRW_I64_LE: *width = 8; *be = 0; *is_float = 0; return;
-    case JIR_BRW_I64_BE: *width = 8; *be = 1; *is_float = 0; return;
-    case JIR_BRW_F64_LE: *width = 8; *be = 0; *is_float = 1; return;
-    case JIR_BRW_F64_BE: *width = 8; *be = 1; *is_float = 1; return;
-  }
-  *width = 4; *be = 0; *is_float = 0;
-}
-
 static void emit_bytes_bounds_check(emit_ctx* ctx, int bytes_gpr, int off_gpr, uint32_t width) {
   jit_exec_buf* buf = ctx->buf;
   emit_load32(buf, A64_TMP0, (unsigned)bytes_gpr, (uint32_t)offsetof(jello_bytes, length));
