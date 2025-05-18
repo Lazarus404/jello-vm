@@ -2,7 +2,18 @@
 // Copyright (c) Jahred Love. All rights reserved.
 
 #include <jello/internal/jit_impl.h>
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) Jahred Love. All rights reserved.
+
+/** @file
+ * Executable buffers with their append and patch windows, the trap setters, and the op policy
+ * and helpers both JIT backends share. */
+
+#include <jello/internal/jit_emit.h>
+#include <jello/internal/platform.h>
+#include <jello/internal/vm_internal.h>
 #include <assert.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -11,9 +22,9 @@
 #endif
 
 static size_t jit_icache_span(size_t n, size_t cap) {
-  long page = sysconf(_SC_PAGESIZE);
+  size_t page = jello_page_size();
   if(page < 64) page = 64;
-  size_t span = (n + (size_t)page - 1u) & ~((size_t)page - 1u);
+  size_t span = (n + page - 1u) & ~(page - 1u);
   if(span > cap) span = cap;
   return span;
 }
@@ -30,8 +41,6 @@ static void jit_sync_icache(void* mem, size_t n) {
 #endif
 }
 
-/* -- the minimal W^X proof mechanism -- */
-
 jit_exec_buf jit_alloc_exec_buf(size_t cap) {
   jit_exec_buf buf;
   buf.mem = NULL;
@@ -43,9 +52,7 @@ jit_exec_buf jit_alloc_exec_buf(size_t cap) {
   buf.append_from = 0;
   buf.append_end = 0;
 
-  void* mem = mmap(NULL, cap, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  if(mem == MAP_FAILED) return buf;
-  buf.mem = (uint8_t*)mem;
+  buf.mem = (uint8_t*)jello_pages_map(cap);
   return buf;
 }
 
@@ -61,7 +68,7 @@ int jit_exec_buf_write(jit_exec_buf* buf, const void* bytes, size_t n) {
 
 int jit_finalize_exec_buf(jit_exec_buf* buf) {
   if(!buf->mem) return 0;
-  if(mprotect(buf->mem, buf->cap, PROT_READ | PROT_EXEC) != 0) return 0;
+  if(!jello_pages_protect(buf->mem, buf->cap, JELLO_PAGES_RX)) return 0;
   jit_sync_icache(buf->mem, jit_icache_span(buf->len, buf->cap));
   buf->finalized = 1;
   return 1;
@@ -95,7 +102,12 @@ int jit_exec_buf_end_append(jit_exec_buf* buf) {
 
 void jit_free_exec_buf(jit_exec_buf* buf) {
   if(!buf->mem) return;
-  munmap(buf->mem, buf->cap);
+#if defined(__APPLE__) && defined(__x86_64__)
+  int dropped = jello_pages_protect(buf->mem, buf->cap, JELLO_PAGES_RW);
+  assert(dropped);
+  (void)dropped;
+#endif
+  jello_pages_unmap(buf->mem, buf->cap);
   buf->mem = NULL;
 }
 
@@ -117,10 +129,6 @@ void jit_trap_bounds(jello_vm* vm) {
 
 void jit_trap_type_mismatch(jello_vm* vm) {
   vm->trap_code = JELLO_TRAP_TYPE_MISMATCH;
-}
-
-void jit_trap_fuel(jello_vm* vm) {
-  vm->trap_code = JELLO_TRAP_FUEL;
 }
 
 void jit_trap_limit(jello_vm* vm) {

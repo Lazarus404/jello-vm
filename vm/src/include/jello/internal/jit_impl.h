@@ -312,7 +312,6 @@ JELLO_JIT_ABI void jit_trap_stack_overflow(jello_vm* vm);
 JELLO_JIT_ABI void jit_trap_null_deref(jello_vm* vm);
 JELLO_JIT_ABI void jit_trap_bounds(jello_vm* vm);
 JELLO_JIT_ABI void jit_trap_type_mismatch(jello_vm* vm);
-void jit_trap_fuel(jello_vm* vm);
 JELLO_JIT_ABI void jit_trap_limit(jello_vm* vm);
 JELLO_JIT_ABI void jit_trap_pop_frame(jello_vm* vm);
 

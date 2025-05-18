@@ -106,8 +106,6 @@ extern uint32_t jit_try_enter_count;
 
 int jello_jit_emit_function_into(const jello_bc_module* m, uint32_t fi, jit_exec_buf* buf,
                                  jello_jit_func_code* out_fc, const void* const* entries);
-
-void jello_jit_patch_call_rel32(jit_exec_buf* buf, size_t at, int32_t rel);
 int jit_resolve_target_bc(uint32_t bc_pc, int32_t imm, uint32_t ninsns, uint32_t* out);
 int jit_ir_shape_ok(const jello_jit_ir_function* ir, const jello_bc_module* m,
                     const jello_bc_function* f, uint32_t fi, jello_type_kind* out_ret_kind,
