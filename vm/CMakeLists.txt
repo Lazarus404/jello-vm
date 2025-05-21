@@ -148,10 +148,45 @@ set(JELLO_STD_SOURCES
   std/float.c
   std/io.c
   std/math.c
+  std/object.c
+  std/random.c
   std/regexp.c
-  std/text.c)
+  std/text.c
+  std/unicode.c)
 list(APPEND JELLO_STD_SOURCES std/command.c)
+add_library(jello_pcre2 STATIC
+  third_party/pcre2-10.30/src/pcre2_auto_possess.c
+  third_party/pcre2-10.30/src/pcre2_chartables.c
+  third_party/pcre2-10.30/src/pcre2_compile.c
+  third_party/pcre2-10.30/src/pcre2_config.c
+  third_party/pcre2-10.30/src/pcre2_context.c
+  third_party/pcre2-10.30/src/pcre2_convert.c
+  third_party/pcre2-10.30/src/pcre2_dfa_match.c
+  third_party/pcre2-10.30/src/pcre2_error.c
+  third_party/pcre2-10.30/src/pcre2_find_bracket.c
+  third_party/pcre2-10.30/src/pcre2_jit_compile.c
+  third_party/pcre2-10.30/src/pcre2_maketables.c
+  third_party/pcre2-10.30/src/pcre2_match.c
+  third_party/pcre2-10.30/src/pcre2_match_data.c
+  third_party/pcre2-10.30/src/pcre2_newline.c
+  third_party/pcre2-10.30/src/pcre2_ord2utf.c
+  third_party/pcre2-10.30/src/pcre2_pattern_info.c
+  third_party/pcre2-10.30/src/pcre2_serialize.c
+  third_party/pcre2-10.30/src/pcre2_string_utils.c
+  third_party/pcre2-10.30/src/pcre2_study.c
+  third_party/pcre2-10.30/src/pcre2_substitute.c
+  third_party/pcre2-10.30/src/pcre2_substring.c
+  third_party/pcre2-10.30/src/pcre2_tables.c
+  third_party/pcre2-10.30/src/pcre2_ucd.c
+  third_party/pcre2-10.30/src/pcre2_valid_utf.c
+  third_party/pcre2-10.30/src/pcre2_xclass.c)
+target_include_directories(jello_pcre2 PRIVATE third_party/pcre2-10.30/src)
+target_compile_definitions(jello_pcre2 PRIVATE HAVE_CONFIG_H PCRE2_CODE_UNIT_WIDTH=8 PCRE2_STATIC
+  SUPPORT_UNICODE HAVE_STDINT_H=1 HAVE_INTTYPES_H=1 HAVE_MEMMOVE=1 HAVE_STRERROR=1)
+set_target_properties(jello_pcre2 PROPERTIES POSITION_INDEPENDENT_CODE ON C_VISIBILITY_PRESET hidden)
 jello_jdll(jello_std_jdll std ${JELLO_STD_SOURCES})
+target_include_directories(jello_std_jdll PRIVATE third_party/pcre2-10.30/src)
+target_link_libraries(jello_std_jdll PRIVATE jello_pcre2)
 
 file(GLOB JELLO_MBEDTLS_SOURCES "${CMAKE_CURRENT_LIST_DIR}/third_party/mbedtls-3.5.1/library/*.c")
 add_library(jello_mbedtls STATIC ${JELLO_MBEDTLS_SOURCES})
