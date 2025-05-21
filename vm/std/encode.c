@@ -1,0 +1,148 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) Jahred Love. All rights reserved.
+
+/* Bytes as text and back, for std.core.Bytes: hexadecimal, and Base64 in its standard alphabet,
+ * padded, or its URL alphabet, unpadded (RFC 4648). Reading text that is not in the encoding
+ * gives null; running out of memory fails the call. Also the eight bytes of an I64 or F64, either
+ * way round, and back. */
+
+#include "std.h"
+
+#include <stdlib.h>
+#include <string.h>
+
+static const char HEX[] = "0123456789abcdef";
+static const char BASE64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static const char BASE64_URL[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+static void return_owned(jdlo_ctx* c, uint8_t* out, uint32_t len) {
+  if(out) jdl_return_bytes_copy(c, out, len);
+  else jdl_fail(c, "out of memory");
+  free(out);
+}
+
+static void return_bad(jdlo_ctx* c, uint8_t* out) {
+  jdl_return_null(c);
+  free(out);
+}
+
+static int hex_value(uint8_t d) {
+  if(d >= '0' && d <= '9') return d - '0';
+  if(d >= 'a' && d <= 'f') return d - 'a' + 10;
+  if(d >= 'A' && d <= 'F') return d - 'A' + 10;
+  return -1;
+}
+
+static int base64_value(uint8_t d, int url) {
+  if(d >= 'A' && d <= 'Z') return d - 'A';
+  if(d >= 'a' && d <= 'z') return d - 'a' + 26;
+  if(d >= '0' && d <= '9') return d - '0' + 52;
+  if(d == (url ? '-' : '+')) return 62;
+  if(d == (url ? '_' : '/')) return 63;
+  return -1;
+}
+
+void std_bytes_hex(jdlo_ctx* c) {
+  const uint8_t* s = jdl_arg_bytes_data(c, 0);
+  uint32_t len = jdl_arg_bytes_len(c, 0);
+  if(len > UINT32_MAX / 2) {
+    jdl_fail(c, "too long");
+    return;
+  }
+  uint8_t* out = (uint8_t*)malloc((size_t)len * 2 + 1);
+  for(uint32_t i = 0; out && i < len; i++) {
+    out[2 * i] = (uint8_t)HEX[s[i] >> 4];
+    out[2 * i + 1] = (uint8_t)HEX[s[i] & 15];
+  }
+  return_owned(c, out, len * 2);
+}
+
+void std_bytes_from_hex(jdlo_ctx* c) {
+  const uint8_t* s = jdl_arg_bytes_data(c, 0);
+  uint32_t len = jdl_arg_bytes_len(c, 0);
+  if(len % 2) {
+    jdl_return_null(c);
+    return;
+  }
+  uint8_t* out = (uint8_t*)malloc((size_t)len / 2 + 1);
+  for(uint32_t i = 0; out && i < len; i += 2) {
+    int high = hex_value(s[i]), low = hex_value(s[i + 1]);
+    if(high < 0 || low < 0) {
+      return_bad(c, out);
+      return;
+    }
+    out[i / 2] = (uint8_t)(high << 4 | low);
+  }
+  return_owned(c, out, len / 2);
+}
+
+void std_bytes_base64(jdlo_ctx* c) {
+  const uint8_t* s = jdl_arg_bytes_data(c, 0);
+  uint32_t len = jdl_arg_bytes_len(c, 0);
+  int url = jdl_arg_bool(c, 1);
+  const char* digits = url ? BASE64_URL : BASE64;
+  if(len > UINT32_MAX / 4 * 3 - 3) {
+    jdl_fail(c, "too long");
+    return;
+  }
+  uint8_t* out = (uint8_t*)malloc(((size_t)len + 2) / 3 * 4 + 1);
+  if(!out) {
+    jdl_fail(c, "out of memory");
+    return;
+  }
+  uint32_t n = 0, i = 0;
+  for(; i + 3 <= len; i += 3) {
+    uint32_t v = (uint32_t)s[i] << 16 | (uint32_t)s[i + 1] << 8 | s[i + 2];
+    out[n++] = (uint8_t)digits[v >> 18];
+    out[n++] = (uint8_t)digits[v >> 12 & 63];
+    out[n++] = (uint8_t)digits[v >> 6 & 63];
+    out[n++] = (uint8_t)digits[v & 63];
+  }
+  if(i < len) {
+    uint32_t v = (uint32_t)s[i] << 16 | (i + 1 < len ? (uint32_t)s[i + 1] << 8 : 0);
+    out[n++] = (uint8_t)digits[v >> 18];
+    out[n++] = (uint8_t)digits[v >> 12 & 63];
+    if(i + 1 < len) out[n++] = (uint8_t)digits[v >> 6 & 63];
+    else if(!url) out[n++] = '=';
+    if(!url) out[n++] = '=';
+  }
+  return_owned(c, out, n);
+}
+
+void std_bytes_from_base64(jdlo_ctx* c) {
+  const uint8_t* s = jdl_arg_bytes_data(c, 0);
+  uint32_t len = jdl_arg_bytes_len(c, 0);
+  int url = jdl_arg_bool(c, 1);
+  if(len % 4 == 0 && len > 0 && s[len - 1] == '=') len -= s[len - 2] == '=' ? 2 : 1;
+  if(len % 4 == 1) {
+    jdl_return_null(c);
+    return;
+  }
+  uint8_t* out = (uint8_t*)malloc((size_t)len / 4 * 3 + 3);
+  uint32_t n = 0, v = 0;
+  for(uint32_t i = 0; out && i < len; i++) {
+    int d = base64_value(s[i], url);
+    if(d < 0) {
+      return_bad(c, out);
+      return;
+    }
+    v = v << 6 | (uint32_t)d;
+    if(i % 4 == 3) {
+      out[n++] = (uint8_t)(v >> 16);
+      out[n++] = (uint8_t)(v >> 8);
+      out[n++] = (uint8_t)v;
+    }
+  }
+  /* Two or three digits left give one or two bytes, and the bits after them must be 0. */
+  uint32_t left = len % 4;
+  if((left == 2 && (v & 15)) || (left == 3 && (v & 3))) {
+    return_bad(c, out);
+    return;
+  }
+  if(out && left == 2) out[n++] = (uint8_t)(v >> 4);
+  if(out && left == 3) {
+    out[n++] = (uint8_t)(v >> 10);
+    out[n++] = (uint8_t)(v >> 2);
+  }
+  return_owned(c, out, n);
+}

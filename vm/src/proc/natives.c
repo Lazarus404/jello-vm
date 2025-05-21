@@ -125,6 +125,22 @@ static void vm_receive(jdlo_ctx* c) {
 
 static void vm_pending(jdlo_ctx* c) { jdl_return_i32(c, (int32_t)proc_pending(c->vm)); }
 
+static void vm_join(jdlo_ctx* c) {
+  jello_process* p = arg_process(c, 0);
+  if(!p) return;
+  jello_trap_code code = proc_join(c->vm, p);
+  if(code) proc_trap(c, code);
+  else jdl_return_i32(c, (int32_t)proc_exit_of(p));
+}
+
+static void vm_join_within(jdlo_ctx* c) {
+  jello_process* p = arg_process(c, 0);
+  if(!p) return;
+  jello_trap_code code = proc_await(c->vm, p, proc_deadline(jdl_arg_i32(c, 1)));
+  if(code) proc_trap(c, code);
+  else jdl_return_i32(c, (int32_t)proc_exit_of(p));
+}
+
 static void vm_wait_message(jdlo_ctx* c) {
   jello_trap_code code = proc_wait_message(c->vm, proc_deadline(jdl_arg_i32(c, 0)));
   if(code) proc_trap(c, code);
@@ -236,6 +252,16 @@ static void vm_reply_send(jdlo_ctx* c) {
   if(!r || !proc_self_or_fail(c)) return;
   vm_parcel v;
   if(pack_arg(c, &v)) jdl_return_bool(c, proc_reply_send(c->vm, r, &v));
+}
+
+static void vm_reply_wait(jdlo_ctx* c) {
+  proc_reply* r = arg_reply(c, 0);
+  jello_process* p = r ? arg_process(c, 1) : NULL;
+  if(!p || !proc_self_or_fail(c)) return;
+  int outcome = 0;
+  jello_trap_code code = proc_reply_wait(c->vm, r, p, proc_deadline(jdl_arg_i32(c, 2)), &outcome);
+  if(code) proc_trap(c, code);
+  else jdl_return_i32(c, outcome);
 }
 
 static void vm_reply_value(jdlo_ctx* c) {
@@ -451,6 +477,8 @@ static const jello_jdll_export VM_EXPORTS[] = {
     {"proc_send", vm_send, B, 2, {D, D}, 0},
     {"proc_receive", vm_receive, D, 0, {0}, 0},
     {"proc_pending", vm_pending, I, 0, {0}, 0},
+    {"proc_join", vm_join, I, 1, {D}, 0},
+    {"proc_join_within", vm_join_within, I, 2, {D, I}, 0},
     {"proc_wait_message", vm_wait_message, B, 1, {I}, 0},
     {"proc_sleep", vm_sleep, B, 1, {I}, 0},
     {"proc_poll_open", vm_poll_open, B, 1, {I}, 0},
@@ -466,6 +494,7 @@ static const jello_jdll_export VM_EXPORTS[] = {
     {"proc_yield", vm_yield, B, 0, {0}, 0},
     {"proc_reply_new", vm_reply_new, D, 0, {0}, 0},
     {"proc_reply_send", vm_reply_send, B, 2, {D, D}, 0},
+    {"proc_reply_wait", vm_reply_wait, I, 3, {D, D, I}, 0},
     {"proc_reply_value", vm_reply_value, D, 1, {D}, 0},
     {"proc_schedulers", vm_schedulers, I, 0, {0}, 0},
     {"buffer_new", vm_buf_new, D, 1, {I}, 0},

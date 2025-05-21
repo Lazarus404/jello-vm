@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.2.2)
-project(jello_vm LANGUAGES C ASM)
+project(jello_vm VERSION 0.1.0 LANGUAGES C ASM)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -83,6 +83,10 @@ if(CMAKE_C_COMPILER_TARGET)
   set_property(SOURCE src/proc/switch.S tools/jelloc_image.S APPEND_STRING PROPERTY
     COMPILE_FLAGS " --target=${CMAKE_C_COMPILER_TARGET}")
 endif()
+set(JELLO_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+file(WRITE "${JELLO_GENERATED_DIR}/jello_version.h.tmp" "#define JELLO_VERSION \"${PROJECT_VERSION}\"\n")
+execute_process(COMMAND ${CMAKE_COMMAND} -E copy_if_different
+  "${JELLO_GENERATED_DIR}/jello_version.h.tmp" "${JELLO_GENERATED_DIR}/jello_version.h")
 target_include_directories(jello_vm PUBLIC src/include)
 if(WIN32)
   target_sources(jello_vm PRIVATE third_party/wepoll-1.5.8/wepoll.c)
@@ -109,7 +113,7 @@ install(FILES src/include/jello.h DESTINATION include)
 install(FILES src/include/jello/jdll.h DESTINATION include/jello)
 
 add_library(jello_host STATIC tools/host.c tools/boot.c tools/deps.c)
-target_include_directories(jello_host PUBLIC tools)
+target_include_directories(jello_host PUBLIC tools "${JELLO_GENERATED_DIR}")
 target_link_libraries(jello_host PUBLIC jello_vm)
 jello_enable_warnings(jello_host)
 if(JELLO_WARNINGS_AS_ERRORS)
@@ -125,7 +129,7 @@ endif()
 
 function(jello_jdll target name)
   add_library(${target} MODULE ${ARGN})
-  target_include_directories(${target} PRIVATE src/include)
+  target_include_directories(${target} PRIVATE src/include "${JELLO_GENERATED_DIR}")
   set_target_properties(${target} PROPERTIES OUTPUT_NAME "${name}" PREFIX "" SUFFIX ".jdll")
   if(APPLE)
     set_target_properties(${target} PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
@@ -139,9 +143,14 @@ endfunction()
 
 set(JELLO_STD_SOURCES
   std/std.c
+  std/date.c
+  std/encode.c
+  std/float.c
   std/io.c
+  std/math.c
   std/regexp.c
   std/text.c)
+list(APPEND JELLO_STD_SOURCES std/command.c)
 jello_jdll(jello_std_jdll std ${JELLO_STD_SOURCES})
 
 file(GLOB JELLO_MBEDTLS_SOURCES "${CMAKE_CURRENT_LIST_DIR}/third_party/mbedtls-3.5.1/library/*.c")
