@@ -59,6 +59,21 @@ struct net_tls {
   int32_t err; /**< Why the last call failed, as a net_error code. */
 };
 
+static int random_bytes(void* unused, unsigned char* out, size_t len) {
+  return jello_entropy(out, len) ? 0 : MBEDTLS_ERR_ERROR_GENERIC_ERROR;
+}
+
+static void config_free(void* payload) {
+  if(!jdl_release(payload)) return;
+  net_tls_config* t = (net_tls_config*)payload;
+  mbedtls_ssl_config_free(&t->conf);
+  mbedtls_x509_crt_free(&t->certs);
+  mbedtls_pk_free(&t->key);
+  free(t);
+}
+
+static const jello_jdll_handle_class CONFIG_CLASS = {"TLS configuration", config_free, jdl_retain};
+
 unsigned char* tls_with_nul(const uint8_t* pem, uint32_t len, size_t* out_len) {
   unsigned char* s = (unsigned char*)malloc((size_t)len + 1);
   if(!s) return NULL;
@@ -113,8 +128,85 @@ int tls_system_certificates(mbedtls_x509_crt* certs) {
   return certs->version ? 0 : ret < 0 ? ret : MBEDTLS_ERR_X509_CERT_UNKNOWN_FORMAT;
 }
 
+static uint32_t config_bytes(const net_tls_config* t, size_t key_len) {
+  size_t n = sizeof(net_tls_config) + key_len;
+  for(const mbedtls_x509_crt* crt = &t->certs; crt && crt->version; crt = crt->next) {
+    n += sizeof(mbedtls_x509_crt) + crt->raw.len;
+  }
+  return n > UINT32_MAX ? UINT32_MAX : (uint32_t)n;
+}
+
+static net_tls_config* make_config(jdlo_ctx* c, uint32_t* bytes, int32_t* err) {
+  int server = jdl_arg_bool(c, 0);
+  size_t first_len = 0, key_len = 0;
+  net_tls_config* t = (net_tls_config*)calloc(1, sizeof(net_tls_config));
+  unsigned char* first =
+      t ? tls_with_nul(jdl_arg_bytes_data(c, 1), jdl_arg_bytes_len(c, 1), &first_len) : NULL;
+  unsigned char* key =
+      first && server ? tls_with_nul(jdl_arg_bytes_data(c, 2), jdl_arg_bytes_len(c, 2), &key_len)
+                      : NULL;
+  if(!first || (server && !key)) {
+    free(first);
+    free(t);
+    *err = ENOMEM;
+    return NULL;
+  }
+  t->refs = 1;
+  t->server = server;
+  mbedtls_ssl_config_init(&t->conf);
+  mbedtls_x509_crt_init(&t->certs);
+  mbedtls_pk_init(&t->key);
+  int side = server ? MBEDTLS_SSL_IS_SERVER : MBEDTLS_SSL_IS_CLIENT;
+  int ret = mbedtls_ssl_config_defaults(&t->conf, side, MBEDTLS_SSL_TRANSPORT_STREAM,
+                                        MBEDTLS_SSL_PRESET_DEFAULT);
+  mbedtls_ssl_conf_rng(&t->conf, random_bytes, NULL);
+  if(server) {
+    if(!ret) ret = tls_parse_certificates(&t->certs, first, first_len);
+    if(!ret) ret = mbedtls_pk_parse_key(&t->key, key, key_len, NULL, 0, random_bytes, NULL);
+    if(!ret) ret = mbedtls_pk_check_pair(&t->certs.pk, &t->key, random_bytes, NULL);
+    if(!ret) ret = mbedtls_ssl_conf_own_cert(&t->conf, &t->certs, &t->key);
+  } else {
+    if(!ret) {
+      ret = first_len > 1 ? tls_parse_certificates(&t->certs, first, first_len)
+                          : tls_system_certificates(&t->certs);
+    }
+    mbedtls_ssl_conf_authmode(&t->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
+    mbedtls_ssl_conf_ca_chain(&t->conf, &t->certs, NULL);
+  }
+  mbedtls_platform_zeroize(key, key_len);
+  free(key);
+  free(first);
+  if(ret) {
+    config_free(t);
+    *err = NET_TLS_ERRORS - ret;
+    return NULL;
+  }
+  *bytes = config_bytes(t, key_len);
+  return t;
+}
+
+static void tls_version(jdlo_ctx* c) {
+  static const char VERSION[] = MBEDTLS_VERSION_STRING_FULL;
+  jdl_return_bytes_copy(c, (const uint8_t*)VERSION, (uint32_t)(sizeof VERSION - 1));
+}
+
+static void tls_config(jdlo_ctx* c) {
+  uint32_t bytes = 0;
+  int32_t err = 0;
+  net_tls_config* t = make_config(c, &bytes, &err);
+  if(t) jdl_return_handle(c, &CONFIG_CLASS, t, bytes);
+  else jdl_return_value(c, jello_make_i32(err));
+}
+
 #define B (uint8_t)JELLO_T_BOOL
 #define Y (uint8_t)JELLO_T_BYTES
 #define I (uint8_t)JELLO_T_I32
 #define L (uint8_t)JELLO_T_I64
 #define D (uint8_t)JELLO_T_DYNAMIC
+
+static const jello_jdll_export TLS_EXPORTS[] = {
+    {"tls_version", tls_version, Y, 0, {0}, 0},
+    {"tls_config", tls_config, D, 3, {B, Y, Y}, JELLO_JDLL_BLOCKING},
+    CRYPTO_EXPORTS};
+
+JELLO_JDLL_LIBRARY(tls, TLS_EXPORTS);

@@ -11,17 +11,6 @@
 #include <string.h>
 #include <sys/mman.h>
 
-/* -- frame stack + per-function layout cache -- */
-
-static int frame_stack_reserve(jello_vm* vm) {
-  if(vm->frame_stack) return 1;
-  void* mem = mmap(NULL, JIT_FRAME_STACK_MAX, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  if(mem == MAP_FAILED) return 0;
-  vm->frame_stack = (uint8_t*)mem;
-  vm->frame_stack_cap = JIT_FRAME_STACK_MAX;
-  return 1;
-}
-
 #define VM_FIRST_FRAME_STACK_BYTES (16u * 1024u)
 
 static void load_segment(jello_vm* vm, frame_segment* seg) {

@@ -40,8 +40,12 @@ void std_regexp_find_at(jdlo_ctx* c);
 void std_regexp_capture_named(jdlo_ctx* c);
 void std_regexp_replace(jdlo_ctx* c);
 void std_regexp_escape_literal(jdlo_ctx* c);
+
+void std_unicode_validate(jdlo_ctx* c);
 void std_unicode_length(jdlo_ctx* c);
+void std_unicode_get(jdlo_ctx* c);
 void std_unicode_compare(jdlo_ctx* c);
+void std_unicode_sub(jdlo_ctx* c);
 void std_unicode_from_codepoint(jdlo_ctx* c);
 
 int std_utf8_valid(const uint8_t* s, uint32_t len);

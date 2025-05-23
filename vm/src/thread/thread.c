@@ -12,14 +12,9 @@
 #include <stdlib.h>
 #include <sys/mman.h>
 
-/* -- the shared heap: lifecycle + registration -- */
-
-void vm_free_layouts(jello_vm* vm);
-
 static jello_heap* heap_new(void) {
   jello_heap* heap = (jello_heap*)calloc(1, sizeof(jello_heap));
   if(!heap) abort();
-  heap->gc_next_collect = 0; /* jello_gc_init (gc.c) sets the real initial threshold */
   if(pthread_mutex_init(&heap->alloc_lock, NULL) != 0) abort();
   if(pthread_mutex_init(&heap->stw_lock, NULL) != 0) abort();
   if(pthread_cond_init(&heap->stw_resume_cv, NULL) != 0) abort();
@@ -60,8 +55,14 @@ static uint8_t* frame_stack_reserve(void) {
 }
 
 jello_vm* jello_vm_create(void) {
+  uint8_t* mem = frame_stack_reserve();
+  if(!mem) return NULL;
   jello_vm* vm = (jello_vm*)calloc(1, sizeof(jello_vm));
-  if(!vm) return NULL;
+  if(!vm) {
+    jello_pages_unmap(mem, VM_DEFAULT_FRAME_STACK_BYTES);
+    return NULL;
+  }
+  vm_frame_stack_attach(vm, mem, VM_DEFAULT_FRAME_STACK_BYTES, VM_DEFAULT_CALL_FRAMES);
   vm->heap = heap_new();
   vm->space = &vm->heap->space;
   heap_register(vm->heap, vm, NULL);
@@ -102,22 +103,10 @@ int jello_run_for(jello_vm* vm, uint32_t ms) { return proc_run_for(vm, ms); }
 
 void jello_vm_destroy(jello_vm* vm) {
   if(!vm) return;
-  jello_heap* heap = vm->heap;
-  if(heap) {
-    int last = heap_unregister(heap, vm);
-    if(last) {
-      jello_gc_shutdown(vm); /* frees heap-owned gc state via vm->heap; never frees heap itself */
-      pthread_mutex_destroy(&heap->alloc_lock);
-      pthread_mutex_destroy(&heap->stw_lock);
-      pthread_cond_destroy(&heap->stw_resume_cv);
-      free(heap->threads);
-      free(heap);
-    }
-  }
-  if(vm->frame_stack) munmap(vm->frame_stack, vm->frame_stack_cap);
-  free(vm->call_frames);
-  vm_free_layouts(vm);
-  free(vm);
+  vm_end_kept(vm);
+  uint8_t* mem = vm->first_segment.mem;
+  vm_destroy_attached(vm);
+  jello_pages_unmap(mem, VM_DEFAULT_FRAME_STACK_BYTES);
 }
 
 void vm_destroy_attached(jello_vm* vm) {
@@ -185,17 +174,6 @@ void vm_safepoint_check(jello_vm* vm) {
   vm_go_quiescent(vm);
   vm_wait_for_resume(vm);
   vm_leave_quiescent(vm);
-}
-
-/* -- fuel -- */
-int vm_fuel_charge(jello_vm* vm) {
-  if(!vm->fuel_limit) return 0;
-  if(vm->fuel_remaining == 0) {
-    vm->trap_code = JELLO_TRAP_FUEL;
-    return -1;
-  }
-  vm->fuel_remaining--;
-  return 0;
 }
 
 static void reductions_refill(jello_vm* vm) {

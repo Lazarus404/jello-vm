@@ -231,7 +231,6 @@ typedef struct jello_space {
 } jello_space;
 
 typedef struct jello_heap {
-  uint32_t gc_next_collect;
   jello_space space;
 
   pthread_mutex_t alloc_lock;
@@ -268,7 +267,6 @@ struct jello_vm {
 
   uint8_t* frame_stack;
   uint32_t frame_stack_top;
-  uint32_t frame_stack_cap;
   uint32_t frame_stack_limit;  /**< The bytes of frame_stack committed; a push past them grows
                                 * them, through jit_try_grow_push. */
   uint32_t frame_stack_max;    /**< Bytes of frame_stack; a push past them enters a segment above,
@@ -330,8 +328,6 @@ struct jello_vm {
   struct jello_process* proc;  /**< The process it runs as, once its scheduler has started. */
   jello_trap_trace trap_trace; /**< How the last trap was reached; last, being cold. */
 };
-
-#define JIT_FRAME_STACK_MAX (64u * 1024u * 1024u)
 
 static inline int vm_space_shared(const jello_heap* heap, const jello_space* space) {
   return space == &heap->space;
@@ -790,7 +786,6 @@ void vm_go_quiescent(jello_vm* vm);
 void vm_wait_for_resume(jello_vm* vm);
 void vm_leave_quiescent(jello_vm* vm);
 void vm_safepoint_check(jello_vm* vm);
-int vm_fuel_charge(jello_vm* vm);
 int vm_reductions_out(jello_vm* vm);
 int proc_window_end(jello_vm* vm, int trapped);
 void vm_inherit_fuel(jello_vm* vm, const jello_vm* from);

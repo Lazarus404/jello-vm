@@ -29,10 +29,24 @@ static int decode(const uint8_t* s, uint32_t len, uint32_t at, uint32_t* cp, uin
   return 1;
 }
 
+static int64_t offset_of(const uint8_t* s, uint32_t len, int32_t index) {
+  if(index < 0) return -1;
+  uint32_t at = 0, cp = 0, size = 0;
+  for(int32_t k = 0; k < index; k++) {
+    if(!decode(s, len, at, &cp, &size)) return -1;
+    at += size;
+  }
+  return at;
+}
+
 int std_utf8_valid(const uint8_t* s, uint32_t len) {
   uint32_t at = 0, cp = 0, size = 0;
   while(at < len && decode(s, len, at, &cp, &size)) at += size;
   return at == len;
+}
+
+void std_unicode_validate(jdlo_ctx* c) {
+  jdl_return_bool(c, std_utf8_valid(jdl_arg_bytes_data(c, 0), jdl_arg_bytes_len(c, 0)));
 }
 
 void std_unicode_length(jdlo_ctx* c) {
@@ -51,6 +65,18 @@ void std_unicode_length(jdlo_ctx* c) {
   jdl_return_i32(c, n);
 }
 
+void std_unicode_get(jdlo_ctx* c) {
+  const uint8_t* s = jdl_arg_bytes_data(c, 0);
+  uint32_t len = jdl_arg_bytes_len(c, 0);
+  int64_t at = offset_of(s, len, jdl_arg_i32(c, 1));
+  uint32_t cp = 0, size = 0;
+  if(at < 0 || !decode(s, len, (uint32_t)at, &cp, &size)) {
+    jdl_fail(c, "index out of range");
+    return;
+  }
+  jdl_return_i32(c, (int32_t)cp);
+}
+
 void std_unicode_compare(jdlo_ctx* c) {
   const uint8_t* a = jdl_arg_bytes_data(c, 0);
   uint32_t alen = jdl_arg_bytes_len(c, 0);
@@ -67,6 +93,26 @@ void std_unicode_compare(jdlo_ctx* c) {
     i += sa;
     j += sb;
   }
+}
+
+void std_unicode_sub(jdlo_ctx* c) {
+  const uint8_t* s = jdl_arg_bytes_data(c, 0);
+  uint32_t len = jdl_arg_bytes_len(c, 0);
+  int32_t count = jdl_arg_i32(c, 2);
+  int64_t start = offset_of(s, len, jdl_arg_i32(c, 1));
+  if(start < 0 || count < 0) {
+    jdl_fail(c, "range out of bounds");
+    return;
+  }
+  uint32_t at = (uint32_t)start, cp = 0, size = 0;
+  for(int32_t k = 0; k < count; k++) {
+    if(!decode(s, len, at, &cp, &size)) {
+      jdl_fail(c, "range out of bounds");
+      return;
+    }
+    at += size;
+  }
+  jdl_return_bytes_copy(c, s + start, at - (uint32_t)start);
 }
 
 void std_unicode_from_codepoint(jdlo_ctx* c) {
