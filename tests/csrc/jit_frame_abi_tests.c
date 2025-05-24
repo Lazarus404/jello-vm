@@ -10,9 +10,9 @@
 #include <string.h>
 
 #if defined(__x86_64__)
-enum { k_jit_body_off = 14 };
+enum { k_jit_body_off = 17 };
 #elif defined(__aarch64__)
-enum { k_jit_body_off = 28 };
+enum { k_jit_body_off = 44 };
 #endif
 
 static jello_bc_module build_noop_void_module(jello_type_entry* type_void,
@@ -30,8 +30,7 @@ static jello_bc_module build_noop_void_module(jello_type_entry* type_void,
   func->ninsns = 1;
   func->insns = insns;
 
-  jello_bc_module m;
-  memset(&m, 0, sizeof(m));
+  jello_bc_module m = {0};
   m.ntypes = 1;
   m.types = type_void;
   m.nfuncs = 1;
@@ -74,6 +73,8 @@ static void test_emitted_bytes_match_golden_sequence(const jello_jit_code* code)
     0x41, 0x54,
     0x41, 0x55,
     0x53,
+    0x41, 0x56,
+    0x55, /* push rbp, the staging register; R15 is saved only by armed bodies */
     0x49, 0x89, 0xFC,
     0x49, 0x89, 0xF5,
     0x48, 0x89, 0xD3,
@@ -83,7 +84,7 @@ static void test_emitted_bytes_match_golden_sequence(const jello_jit_code* code)
   };
   static const uint8_t mov_rdi_r12[] = { 0x4C, 0x89, 0xE7 };
   static const uint8_t call_rax[] = { 0xFF, 0xD0 };
-  static const uint8_t restore_pops[] = { 0x5B, 0x41, 0x5D, 0x41, 0x5C };
+  static const uint8_t restore_pops[] = { 0x5D, 0x41, 0x5E, 0x5B, 0x41, 0x5D, 0x41, 0x5C };
   static const uint8_t mov_eax_ok[] = { 0xB8, 0x00, 0x00, 0x00, 0x00 };
   static const uint8_t sub_rsp8[] = { 0x48, 0x83, 0xEC, 0x08 };
   static const uint8_t add_rsp8[] = { 0x48, 0x83, 0xC4, 0x08 };
@@ -108,9 +109,7 @@ static void test_emitted_bytes_match_golden_sequence(const jello_jit_code* code)
     if(ep[i] == 0x48 && ep[i + 1] == 0xB8) {
       uint64_t embedded;
       memcpy(&embedded, ep + i + 2, 8);
-      uint64_t real;
-      void (*pop_frame_fn)(jello_vm*) = vm_pop_frame;
-      memcpy(&real, &pop_frame_fn, sizeof(real));
+      uint64_t real = (uint64_t)(uintptr_t)JIT_C(vm_pop_frame);
       assert(embedded == real);
       found_movabs = 1;
       break;
@@ -127,6 +126,10 @@ static void test_emitted_bytes_match_golden_sequence(const jello_jit_code* code)
     0xFD, 0x03, 0x1F, 0xAA,
     0xF3, 0x53, 0xBF, 0xA9,
     0xF5, 0x6F, 0xBF, 0xA9,
+    0xE8, 0x27, 0xBF, 0x6D, /* stp d8, d9: the FP pool is callee-saved */
+    0xEA, 0x2F, 0xBF, 0x6D,
+    0xEC, 0x37, 0xBF, 0x6D,
+    0xEE, 0x3F, 0xBF, 0x6D,
     0xF4, 0x03, 0x00, 0xAA,
     0xF5, 0x03, 0x01, 0xAA,
     0xF3, 0x03, 0x02, 0xAA,
@@ -169,7 +172,7 @@ static void test_noop_function_called_through_private_abi(jello_jit_code* code, 
 
   atomic_store(&vm->in_exec, 1);
   vm_frame_reset(vm);
-  vm->running_module = m;
+  vm_enter_module(vm, m);
   int pushed = vm_push_frame(vm, m, 0, 0, 0, 0, 0);
   assert(pushed == 1);
   uint32_t frames_before = vm->call_frames_len;
@@ -203,7 +206,7 @@ int main(void) {
   jello_type_entry type_void;
   jello_type_id reg_types[1];
   jello_insn insns[1];
-  jello_bc_function func;
+  jello_bc_function func = {0};
   jello_bc_module m = build_noop_void_module(&type_void, reg_types, insns, &func);
 
   jello_jit_code code;

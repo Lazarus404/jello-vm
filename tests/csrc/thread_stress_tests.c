@@ -16,7 +16,7 @@
 #include "watchdog.h"
 
 #define N_THREADS 8
-#define ALLOC_ROUNDS 2500
+#define ALLOC_ROUNDS 10000
 #define JDLL_CYCLES 50
 #define NATIVE_CALLS 4000
 

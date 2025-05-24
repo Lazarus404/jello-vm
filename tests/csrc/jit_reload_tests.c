@@ -246,6 +246,48 @@ static void test_reload_unchanged_is_successful_noop(void) {
   printf("test_reload_unchanged_is_successful_noop: PASS\n");
 }
 
+/* An unchanged module that is a different object is still recompiled, since the old code
+ * points into old_m; reloading jm's own module again is a no-op. */
+static void test_reload_unchanged_succeeds(void) {
+  jello_type_entry types_a[1], types_b[1];
+  jello_type_id r0_a[1], r1_a[1], r0_b[1], r1_b[1];
+  jello_insn e0_a[2], e1_a[2], e0_b[2], e1_b[2];
+  jello_bc_function funcs_a[2] = {0}, funcs_b[2] = {0};
+  jello_bc_module old_m = {0}, new_m = {0};
+  build_named_two_func_module(types_a, r0_a, r1_a, e0_a, e1_a, funcs_a, &old_m, 0, 1, 100);
+  old_m.atoms = g_two_func_atoms; old_m.natoms = 2; /* build_* memsets m -- set atoms after */
+  build_named_two_func_module(types_b, r0_b, r1_b, e0_b, e1_b, funcs_b, &new_m, 0, 1, 100);
+  new_m.atoms = g_two_func_atoms; new_m.natoms = 2;
+
+  jello_jit_module* jm = jello_jit_module_create(&old_m);
+  assert(jm != NULL);
+  jello_vm* vm = jello_vm_create();
+
+  jello_jit_module_prepare_count = 0;
+  jello_jit_reload_report report;
+  int rc = jello_jit_module_reload(vm, jm, &old_m, &new_m, 0, &report);
+  assert(rc == 1);
+  assert(report.n_unchanged == 2);
+  assert(report.n_changed == 0);
+  assert(report.n_new == 0);
+  assert(report.n_removed == 0);
+  assert(report.n_signature_conflicts == 0);
+  assert(report.n_type_conflicts == 0);
+  assert(jello_jit_module_prepare_count == 1);
+  assert(jm->m == &new_m);
+  jello_jit_reload_report_free(&report);
+
+  rc = jello_jit_module_reload(vm, jm, &new_m, &new_m, 0, &report);
+  assert(rc == 1);
+  assert(report.n_unchanged == 2);
+  assert(jello_jit_module_prepare_count == 1);
+  jello_jit_reload_report_free(&report);
+
+  jello_jit_module_destroy(jm);
+  jello_vm_destroy(vm);
+  printf("test_reload_unchanged_succeeds: PASS\n");
+}
+
 /* The struct type-conflict cascade, end to end through
  * jello_jit_module_reload itself (not just the standalone
  * jello_reload_struct_sig_changed/jello_reload_function_uses_struct_sig unit
@@ -548,6 +590,63 @@ static void test_reload_allow_conflicts_overrides_refusal(void) {
   jello_jit_module_destroy(jm);
   jello_vm_destroy(vm);
   printf("test_reload_allow_conflicts_overrides_refusal: PASS\n");
+}
+
+static void build_const_func(jello_type_id* r, jello_insn* insns, jello_bc_function* f,
+    uint32_t name_atom, int32_t value) {
+  r[0] = 0;
+  memset(insns, 0, 2 * sizeof(jello_insn));
+  insns[0].op = (uint8_t)JOP_CONST_I32; insns[0].a = 0; insns[0].imm = (uint32_t)value;
+  insns[1].op = (uint8_t)JOP_RET; insns[1].a = 0;
+  memset(f, 0, sizeof(*f));
+  f->name_atom = name_atom;
+  f->nregs = 1; f->cap_start = 1; f->reg_types = r; f->ninsns = 2; f->insns = insns;
+}
+
+static const char* g_removal_atoms[2] = {"a", "b"};
+
+/* Removing "a" moves the unchanged "b" from index 1 to 0, so code kept from the old module
+ * would run "a" for new_m's entry. Every function is unchanged or removed, so the per-function
+ * analysis alone finds nothing to compile. */
+static void test_reload_removal_runs_shifted_function(void) {
+  jello_type_entry types[1];
+  types[0].kind = JELLO_T_I32;
+  memset(&types[0].as, 0, sizeof(types[0].as));
+
+  jello_type_id ra[1], rb_old[1], rb_new[1];
+  jello_insn ea[2], eb_old[2], eb_new[2];
+  jello_bc_function old_funcs[2] = {0}, new_funcs[1] = {0};
+  build_const_func(ra, ea, &old_funcs[0], 0, 111);
+  build_const_func(rb_old, eb_old, &old_funcs[1], 1, 222);
+  build_const_func(rb_new, eb_new, &new_funcs[0], 1, 222);
+
+  jello_bc_module old_m = {0}, new_m = {0};
+  old_m.ntypes = 1; old_m.types = types; old_m.nfuncs = 2; old_m.funcs = old_funcs;
+  old_m.atoms = g_removal_atoms; old_m.natoms = 2;
+  new_m.ntypes = 1; new_m.types = types; new_m.nfuncs = 1; new_m.funcs = new_funcs;
+  new_m.atoms = g_removal_atoms; new_m.natoms = 2;
+
+  jello_jit_module* jm = jello_jit_module_create(&old_m);
+  assert(jm != NULL);
+  jello_vm* vm = jello_vm_create();
+
+  jello_jit_reload_report report;
+  int rc = jello_jit_module_reload(vm, jm, &old_m, &new_m, 0, &report);
+  assert(rc == 1);
+  assert(report.n_unchanged == 1 && report.n_removed == 1);
+  assert(report.n_changed == 0 && report.n_new == 0);
+  jello_jit_reload_report_free(&report);
+
+  jello_numeric_result out;
+  memset(&out, 0, sizeof(out));
+  assert(jello_vm_exec_numeric_with_jit(vm, jm, &new_m, &out) == JELLO_EXEC_OK);
+  if(out.kind != JELLO_NUM_I32 || out.as.i32 != 222)
+    fprintf(stderr, "test_reload_removal_runs_shifted_function: got %d\n", out.as.i32);
+  assert(out.kind == JELLO_NUM_I32 && out.as.i32 == 222);
+
+  jello_jit_module_destroy(jm);
+  jello_vm_destroy(vm);
+  printf("test_reload_removal_runs_shifted_function: PASS\n");
 }
 
 #endif

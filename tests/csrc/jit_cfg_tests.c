@@ -10,9 +10,9 @@
 #include <string.h>
 
 #if defined(__x86_64__)
-enum { k_jit_body_off = 14 };
+enum { k_jit_body_off = 17 };
 #elif defined(__aarch64__)
-enum { k_jit_body_off = 28 };
+enum { k_jit_body_off = 44 };
 #endif
 
 static int jit_branch_targets_ahead(const uint8_t* mem, size_t start, size_t end) {
@@ -59,8 +59,7 @@ static jello_bc_module make_i32_module(jello_type_entry* types,
   func->ninsns = ninsns;
   func->insns = insns;
 
-  jello_bc_module m;
-  memset(&m, 0, sizeof(m));
+  jello_bc_module m = {0};
   m.ntypes = 1;
   m.types = types;
   m.nfuncs = 1;
@@ -86,7 +85,7 @@ static void test_prologue_unchanged(void) {
   jello_type_entry types[1];
   jello_type_id reg_types[1];
   jello_insn insns[1];
-  jello_bc_function func;
+  jello_bc_function func = {0};
 
   types[0].kind = JELLO_T_VOID;
   memset(&types[0].as, 0, sizeof(types[0].as));
@@ -99,8 +98,7 @@ static void test_prologue_unchanged(void) {
   func.ninsns = 1;
   func.insns = insns;
 
-  jello_bc_module m;
-  memset(&m, 0, sizeof(m));
+  jello_bc_module m = {0};
   m.ntypes = 1;
   m.types = types;
   m.nfuncs = 1;
@@ -123,7 +121,7 @@ static void test_jmp_forward_patches(void) {
   jello_type_entry types[1];
   jello_type_id reg_types[2];
   jello_insn insns[5];
-  jello_bc_function func;
+  jello_bc_function func = {0};
 
   init_i32_reg_types(reg_types, 2);
   insns[0].op = (uint8_t)JOP_CONST_I32; insns[0].a = 0; insns[0].imm = 1;
@@ -153,7 +151,7 @@ static void test_hot_loop_anchors_and_discard(void) {
   jello_type_entry types[2];
   jello_type_id reg_types[3];
   jello_insn insns[7];
-  jello_bc_function func;
+  jello_bc_function func = {0};
 
   types[0].kind = JELLO_T_I32;
   memset(&types[0].as, 0, sizeof(types[0].as));
@@ -177,8 +175,7 @@ static void test_hot_loop_anchors_and_discard(void) {
   func.ninsns = 7;
   func.insns = insns;
 
-  jello_bc_module m;
-  memset(&m, 0, sizeof(m));
+  jello_bc_module m = {0};
   m.ntypes = 2;
   m.types = types;
   m.nfuncs = 1;
@@ -202,7 +199,7 @@ static void test_hot_loop_anchors_and_discard(void) {
   static const uint8_t call_rax[] = { 0xFF, 0xD0 };
   assert(bytes_contain(code.buf.mem, code.buf.len, call_rax, sizeof(call_rax)));
 
-  uint64_t safepoint_addr = (uint64_t)(uintptr_t)vm_safepoint_check;
+  uint64_t safepoint_addr = (uint64_t)(uintptr_t)JIT_C(vm_safepoint_check);
   uint8_t movabs[10];
   movabs[0] = 0x48;
   movabs[1] = 0xB8;
@@ -238,7 +235,7 @@ static jello_exec_status run_jit_entry(const jello_bc_module* m,
   assert(vm != NULL);
   atomic_store(&vm->in_exec, 1);
   vm_frame_reset(vm);
-  vm->running_module = m;
+  vm_enter_module(vm, m);
   assert(vm_push_frame(vm, m, 0, 0, 0, 0, 0) == 1);
 
   jello_jit_entry_fn entry =
@@ -255,7 +252,7 @@ static void test_hot_loop_execute(void) {
   jello_type_entry types[2];
   jello_type_id reg_types[3];
   jello_insn insns[7];
-  jello_bc_function func;
+  jello_bc_function func = {0};
 
   types[0].kind = JELLO_T_I32;
   memset(&types[0].as, 0, sizeof(types[0].as));
@@ -279,8 +276,7 @@ static void test_hot_loop_execute(void) {
   func.ninsns = 7;
   func.insns = insns;
 
-  jello_bc_module m;
-  memset(&m, 0, sizeof(m));
+  jello_bc_module m = {0};
   m.ntypes = 2;
   m.types = types;
   m.nfuncs = 1;
@@ -300,7 +296,7 @@ static void test_jmp_if_taken_execute(void) {
   jello_type_entry types[2];
   jello_type_id reg_types[3];
   jello_insn insns[6];
-  jello_bc_function func;
+  jello_bc_function func = {0};
 
   types[0].kind = JELLO_T_I32;
   memset(&types[0].as, 0, sizeof(types[0].as));
@@ -323,8 +319,7 @@ static void test_jmp_if_taken_execute(void) {
   func.ninsns = 6;
   func.insns = insns;
 
-  jello_bc_module m;
-  memset(&m, 0, sizeof(m));
+  jello_bc_module m = {0};
   m.ntypes = 2;
   m.types = types;
   m.nfuncs = 1;

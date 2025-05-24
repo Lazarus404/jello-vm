@@ -36,9 +36,17 @@ static double now_ms(void) {
   return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
 }
 
-/* -- fixture 1: two joined VMs, one allocating, one blocked in a native call -- */
+/* -- fixture 1: two joined VMs, one allocating, one blocked in a native call.
+ * Thread A drives real allocation pressure entirely at the C level (no
+ * bytecode needed to prove the collector scans/reclaims correctly);
+ * Thread B runs a tiny bytecode program whose only instruction of interest
+ * is a CALL_NATIVE to a test .jdll's own sleep_ms export -- which
+ * op_call_native (call_native.c) wraps in quiescent state automatically,
+ * without this fixture ever calling jello_vm_blocking itself, proving the
+ * automatic wrapping alone is sufficient.
+ */
 
-#define ALLOC_ROUNDS 4000
+#define ALLOC_ROUNDS 24000
 #define SLEEP_MS 60
 
 typedef struct alloc_thread_arg {
@@ -48,6 +56,7 @@ typedef struct alloc_thread_arg {
 
 static void* alloc_thread_main(void* argp) {
   alloc_thread_arg* arg = (alloc_thread_arg*)argp;
+  jello_vm_running(arg->vm, 1);
   for(int i = 0; i < ALLOC_ROUNDS; i++) {
     /* Each Bytes object is garbage the instant this loop iterates again --
      * nothing roots it (this thread never pushes a call_frame at all), so
@@ -58,7 +67,9 @@ static void* alloc_thread_main(void* argp) {
     jello_bytes* b = jello_bytes_new(arg->vm, 300);
     (void)b;
   }
-  uint32_t live = 0, collections = 0;
+  jello_vm_running(arg->vm, 0);
+  uint64_t live = 0;
+  uint32_t collections = 0;
   double pause_ms = 0.0;
   jello_vm_gc_stats(arg->vm, &live, &collections, &pause_ms);
   arg->collections_seen = collections;
@@ -325,6 +336,50 @@ typedef struct jit_loop_arg {
   const jello_bc_module* m;
   jello_exec_status st;
 } jit_loop_arg;
+
+static void* jit_loop_thread_main(void* argp) {
+  jit_loop_arg* arg = (jit_loop_arg*)argp;
+  jello_numeric_result out;
+  arg->st = jello_vm_exec_numeric_with_jit(arg->vm, arg->jm, arg->m, &out);
+  return NULL;
+}
+
+static void test_compiled_loop_parks_for_stop_the_world(void) {
+  printf("== fixture: compiled loop parks at a pending stop-the-world ==\n");
+  jello_vm* vm_loop = jello_vm_create();
+  assert(vm_loop);
+  jello_vm* vm_stopper = jello_vm_create_joined(vm_loop);
+  assert(vm_stopper);
+
+  jello_bc_module* m = build_counting_loop_module(INT32_MAX - 1);
+  jello_jit_module jm;
+  memset(&jm, 0, sizeof(jm));
+  assert(jello_jit_module_prepare(m, &jm) == 1);
+  assert(jm.ncompiled == jm.nfuncs);
+
+  jit_loop_arg arg = {vm_loop, &jm, m, JELLO_EXEC_OK};
+  pthread_t tl;
+  assert(pthread_create(&tl, NULL, jit_loop_thread_main, &arg) == 0);
+  while(!atomic_load(&vm_loop->in_exec)) sched_yield();
+  struct timespec settle = {0, 20 * 1000 * 1000};
+  nanosleep(&settle, NULL);
+
+  assert(vm_heap_stop_the_world(vm_stopper) == 1);
+  vm_loop->fuel_limit = 1;
+  vm_loop->fuel_remaining = 0;
+  vm_heap_resume_the_world(vm_stopper);
+  assert(pthread_join(tl, NULL) == 0);
+
+  printf("  st=%d trap=%d\n", (int)arg.st, (int)jello_vm_last_trap_code(vm_loop));
+  assert(arg.st == JELLO_EXEC_TRAP && jello_vm_last_trap_code(vm_loop) == JELLO_TRAP_FUEL &&
+         "the stop must reach the compiled loop before it finishes");
+
+  jello_jit_module_free(&jm);
+  free_counting_loop_module(m);
+  jello_vm_destroy(vm_stopper);
+  jello_vm_destroy(vm_loop);
+  printf("  PASS\n");
+}
 
 /* -- fixture 3: the std JDLL's file I/O, get_env, argv -- */
 
@@ -620,6 +675,7 @@ int main(void) {
   start_watchdog("thread_tests", 45);
   test_shared_heap_alloc_and_blocking_call();
   test_safepoint_at_loop_backedge();
+  test_compiled_loop_parks_for_stop_the_world();
 
   /* "std" is loaded exactly once for the whole process, shared by both
    * fixtures below -- see build_std_file_roundtrip_module's own comment

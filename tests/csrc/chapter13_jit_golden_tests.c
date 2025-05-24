@@ -10,7 +10,7 @@
 #include <string.h>
 
 #if defined(__aarch64__)
-enum { k_jit_body_off = 28 };
+enum { k_jit_body_off = 44 };
 
 static int bytes_contain(const uint8_t* hay, size_t hay_len,
                          const uint8_t* needle, size_t needle_len) {
@@ -43,8 +43,7 @@ static jello_bc_module make_i32_module(jello_type_entry* types,
   func->reg_types = reg_types;
   func->ninsns = ninsns;
   func->insns = insns;
-  jello_bc_module m;
-  memset(&m, 0, sizeof(m));
+  jello_bc_module m = {0};
   m.ntypes = 1;
   m.types = types;
   m.nfuncs = 1;
@@ -57,7 +56,7 @@ static void test_golden_12b_add_i32(void) {
   jello_type_entry types[1];
   jello_type_id reg_types[3];
   jello_insn insns[4];
-  jello_bc_function func;
+  jello_bc_function func = {0};
   for(uint32_t i = 0; i < 3; i++) reg_types[i] = 0;
   insns[0].op = (uint8_t)JOP_CONST_I32; insns[0].a = 0; insns[0].imm = 5;
   insns[1].op = (uint8_t)JOP_CONST_I32; insns[1].a = 1; insns[1].imm = 3;
@@ -80,7 +79,7 @@ static void test_golden_12c_back_edge_branch(void) {
   jello_type_entry types[1];
   jello_type_id reg_types[1];
   jello_insn insns[2];
-  jello_bc_function func;
+  jello_bc_function func = {0};
   reg_types[0] = 0;
   insns[0].op = (uint8_t)JOP_JMP; insns[0].imm = 0;
   insns[1].op = (uint8_t)JOP_RET; insns[1].a = 0;
@@ -98,24 +97,29 @@ static void test_golden_12c_back_edge_branch(void) {
 }
 
 static int jit_call_site_targets(const uint8_t* mem, size_t start, size_t end, size_t target) {
-  for(size_t i = start; i + 4 <= end; i++) {
+  /* arm64 calls through the module's entry table: x16 is built from
+   * movz/movk, then loaded through (`ldr x16, [x16]`) and called. TARGET is
+   * the table slot's address. */
+  uint64_t x16 = 0;
+  for(size_t i = start; i + 4 <= end; i += 4) {
     uint32_t w = 0;
     memcpy(&w, mem + i, 4);
-    if((w & 0xFC000000u) != 0x94000000u) continue;
-    int32_t off = (int32_t)(w & 0x03FFFFFFu);
-    if(off & 0x02000000) off |= (int32_t)~0x03FFFFFFu;
-    if(i + (size_t)off * 4u == target) return 1;
+    unsigned sh = ((w >> 21) & 3u) * 16u;
+    uint64_t imm = (uint64_t)((w >> 5) & 0xFFFFu) << sh;
+    if((w & 0xFF80001Fu) == 0xD2800010u) x16 = imm;
+    else if((w & 0xFF80001Fu) == 0xF2800010u) x16 = (x16 & ~((uint64_t)0xFFFFu << sh)) | imm;
+    else if(w == 0xF9400210u && x16 == (uint64_t)target) return 1;
   }
   return 0;
 }
 
-static void test_golden_12d_bl_call_patch(void) {
+static void test_golden_12d_call_through_entry_table(void) {
   jello_type_entry types[1];
   types[0].kind = JELLO_T_I32;
   memset(&types[0].as, 0, sizeof(types[0].as));
   jello_type_id r0[2], r1[2];
   jello_insn e0[3], e1[2];
-  jello_bc_function funcs[2];
+  jello_bc_function funcs[2] = {0};
   r0[0] = 0; r0[1] = 0;
   r1[0] = 0; r1[1] = 0;
   e0[0].op = (uint8_t)JOP_CONST_I32; e0[0].a = 0; e0[0].imm = 4;
@@ -125,8 +129,7 @@ static void test_golden_12d_bl_call_patch(void) {
   e1[1].op = (uint8_t)JOP_RET; e1[1].a = 1;
   funcs[0].nregs = 2; funcs[0].cap_start = 0; funcs[0].reg_types = r0; funcs[0].ninsns = 3; funcs[0].insns = e0;
   funcs[1].nregs = 2; funcs[1].cap_start = 0; funcs[1].reg_types = r1; funcs[1].ninsns = 2; funcs[1].insns = e1;
-  jello_bc_module m;
-  memset(&m, 0, sizeof(m));
+  jello_bc_module m = {0};
   m.ntypes = 1; m.types = types; m.nfuncs = 2; m.funcs = funcs; m.entry = 0;
 
   jello_jit_module jm;
@@ -135,9 +138,10 @@ static void test_golden_12d_bl_call_patch(void) {
   size_t f0_start = jm.funcs[0].blob_off;
   size_t f0_end = f0_start + jm.funcs[0].size;
   size_t callee_target = jm.funcs[1].blob_off + jm.funcs[1].body_off;
-  assert(jit_call_site_targets(jm.blob.mem, f0_start, f0_end, callee_target) == 1);
+  assert(jm.entries[1] == jm.blob.mem + callee_target);
+  assert(jit_call_site_targets(jm.blob.mem, f0_start, f0_end, (size_t)(uintptr_t)&jm.entries[1]) == 1);
   jello_jit_module_free(&jm);
-  printf("test_golden_13d_bl_call_patch: PASS\n");
+  printf("test_golden_12d_call_through_entry_table: PASS\n");
 }
 
 static void test_golden_12e_to_dyn_physeq(void) {
@@ -156,15 +160,14 @@ static void test_golden_12e_to_dyn_physeq(void) {
   insns[3].op = (uint8_t)JOP_PHYSEQ; insns[3].a = 4; insns[3].b = 1; insns[3].c = 2;
   insns[4].op = (uint8_t)JOP_RET; insns[4].a = 4;
 
-  jello_bc_function func;
+  jello_bc_function func = {0};
   func.nregs = 5;
   func.cap_start = 0;
   func.reg_types = reg_types;
   func.ninsns = 5;
   func.insns = insns;
 
-  jello_bc_module m;
-  memset(&m, 0, sizeof(m));
+  jello_bc_module m = {0};
   m.ntypes = 4;
   m.types = types;
   m.nfuncs = 1;
@@ -189,8 +192,8 @@ static void test_golden_12b_add_i32(void) {
 static void test_golden_12c_back_edge_branch(void) {
   printf("test_golden_13c_back_edge_branch: SKIPPED (host is not aarch64)\n");
 }
-static void test_golden_12d_bl_call_patch(void) {
-  printf("test_golden_13d_bl_call_patch: SKIPPED (host is not aarch64)\n");
+static void test_golden_12d_call_through_entry_table(void) {
+  printf("test_golden_12d_call_through_entry_table: SKIPPED (host is not aarch64)\n");
 }
 static void test_golden_12e_to_dyn_physeq(void) {
   printf("test_golden_13e_to_dyn_physeq: SKIPPED (host is not aarch64)\n");
@@ -200,7 +203,7 @@ static void test_golden_12e_to_dyn_physeq(void) {
 int main(void) {
   test_golden_12b_add_i32();
   test_golden_12c_back_edge_branch();
-  test_golden_12d_bl_call_patch();
+  test_golden_12d_call_through_entry_table();
   test_golden_12e_to_dyn_physeq();
   printf("chapter13_jit_golden_tests: all tests passed\n");
   return 0;

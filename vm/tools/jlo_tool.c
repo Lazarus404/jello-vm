@@ -1447,6 +1447,9 @@ static void print_real_module(const jello_bc_module* m, FILE* out) {
     }
     if(kind == JELLO_T_STRUCT) fprintf(out, "(%u)", m->types[i].as.strct.struct_sig_id);
     if(kind == JELLO_T_FUNCTION) fprintf(out, "(%u)", m->types[i].as.fun.sig_id);
+    if(kind == JELLO_T_ABSTRACT) fprintf(out, "(%u)", m->types[i].as.abs.abstract_id);
+    if(kind == JELLO_T_ENUM && (m->features & (uint32_t)JELLO_BC_FEAT_ENUM_SCHEMA))
+      fprintf(out, "(%u)", m->types[i].as.enm.enum_sig_id);
   }
   fprintf(out, "]\n");
   fprintf(out, "sigs: [");
@@ -1527,6 +1530,64 @@ static void print_real_module(const jello_bc_module* m, FILE* out) {
     fprintf(out, "]\n");
   }
 
+  // The Bytes pool, escaped as the compiler prints Bytes literals.
+  if(m->nconst_bytes > 0) {
+    fprintf(out, "const_bytes: [");
+    for(uint32_t i = 0; i < m->nconst_bytes; i++) {
+      fprintf(out, "%s\"", i ? ", " : "");
+      const uint8_t* p = m->const_bytes_values[i]->data;
+      for(uint32_t j = 0; j < m->const_bytes_values[i]->length; j++) {
+        uint8_t ch = p[j];
+        if(ch == '\n') fprintf(out, "\\n");
+        else if(ch == '\r') fprintf(out, "\\r");
+        else if(ch == '\t') fprintf(out, "\\t");
+        else if(ch == '"' || ch == '\\') fprintf(out, "\\%c", ch);
+        else if(ch >= 32 && ch <= 126) fputc(ch, out);
+        else fprintf(out, "\\x%02x", ch);
+      }
+      fprintf(out, "\"");
+    }
+    fprintf(out, "]\n");
+  }
+
+  // Native imports, as library.export(arg kinds) -> result kind.
+  if(m->nimports > 0) {
+    fprintf(out, "imports: [");
+    for(uint32_t i = 0; i < m->nimports; i++) {
+      const jello_import_sig* imp = &m->imports[i];
+      fprintf(out, "%s%s.%s(", i ? ", " : "", m->atoms[imp->library_atom],
+              m->atoms[imp->export_atom]);
+      for(uint8_t j = 0; j < imp->arity; j++)
+        fprintf(out, "%s%s", j ? " " : "", kind_name_of((jello_type_kind)imp->arg_kinds[j]));
+      fprintf(out, ") -> %s", kind_name_of((jello_type_kind)imp->ret_kind));
+    }
+    fprintf(out, "]\n");
+  }
+
+  if(m->features & (uint32_t)JELLO_BC_FEAT_GLOBALS) {
+    fprintf(out, "globals: [");
+    for(uint32_t i = 0; i < m->nglobals; i++) {
+      if(i) fprintf(out, ", ");
+      print_type_ref(out, m, m->global_types[i]);
+    }
+    fprintf(out, "]\n");
+  }
+
+  if(m->features & (uint32_t)JELLO_BC_FEAT_LINE_TABLE) {
+    fprintf(out, "source_files: [");
+    for(uint32_t i = 0; i < m->nsource_files; i++)
+      fprintf(out, "%s%s", i ? ", " : "", m->source_files[i]);
+    fprintf(out, "]\nlines: [");
+    int any = 0;
+    for(uint32_t f = 0; f < m->nfuncs; f++)
+      for(uint32_t i = 0; i < m->funcs[f].nlocs; i++) {
+        const jello_bc_location* l = &m->funcs[f].locs[i];
+        fprintf(out, "%s%u %u %u %u %u", any ? ", " : "", f, l->pc, l->file, l->line, l->col);
+        any = 1;
+      }
+    fprintf(out, "]\n");
+  }
+
   for(uint32_t f = 0; f < m->nfuncs; f++) {
     const jello_bc_function* fn = &m->funcs[f];
     fprintf(out, "func[%u]", f);
@@ -1545,23 +1606,6 @@ static void print_real_module(const jello_bc_module* m, FILE* out) {
       fprintf(out, "  %u: %s a=r%u b=r%u c=r%u imm=%d\n",
               k, op_name_of((jello_op)in->op), in->a, in->b, in->c, (int32_t)in->imm);
     }
-  }
-}
-
-/* -- run -- */
-
-static const char* trap_code_name(jello_trap_code tc) {
-  switch(tc) {
-    case JELLO_TRAP_NONE: return "NONE";
-    case JELLO_TRAP_ARITHMETIC: return "ARITHMETIC";
-    case JELLO_TRAP_STACK_OVERFLOW: return "STACK_OVERFLOW";
-    case JELLO_TRAP_NULL_DEREF: return "NULL_DEREF";
-    case JELLO_TRAP_BOUNDS: return "BOUNDS";
-    case JELLO_TRAP_TYPE_MISMATCH: return "TYPE_MISMATCH";
-    case JELLO_TRAP_FUEL: return "FUEL";
-    case JELLO_TRAP_LIMIT: return "LIMIT";
-    case JELLO_TRAP_UNCAUGHT_THROW: return "UNCAUGHT_THROW";
-    default: return "UNKNOWN";
   }
 }
 
@@ -1613,41 +1657,46 @@ static int cmd_run(const char* in_path, int repeat, int gc_stats, uint64_t fuel,
   if(fuel) jello_vm_set_fuel(vm, fuel);
   if(max_bytes_len) jello_vm_set_max_bytes_len(vm, max_bytes_len);
 
+  jello_jit_module* jm = jello_jit_module_create(m);
   jello_numeric_result result;
   jello_exec_status st = JELLO_EXEC_OK;
-  clock_t t0 = clock();
+  struct timespec t0, t1;
+  clock_gettime(CLOCK_MONOTONIC, &t0);
   for(int i = 0; i < repeat; i++) {
-    st = jello_vm_exec_numeric(vm, m, &result);
+    st = jello_vm_exec_numeric_with_jit(vm, jm, m, &result);
     if(st != JELLO_EXEC_OK) break;
   }
-  clock_t t1 = clock();
+  clock_gettime(CLOCK_MONOTONIC, &t1);
+  jello_jit_module_destroy(jm);
 
   if(st == JELLO_EXEC_OK) {
     if(host_print) jello_print_host_result(m, &result, stdout, 1);
     else print_numeric_result(&result, stdout);
   } else {
     if(host_print) {
-      fprintf(stderr, "TRAP code=%s\n", trap_code_name(jello_vm_last_trap_code(vm)));
-      fprintf(stderr, "TRAP_PC func_index=%u pc=%u\n",
-              jello_vm_last_trap_func_index(vm), jello_vm_last_trap_pc(vm));
+      fprintf(stderr, "TRAP code=%s\n", jello_trap_code_name(jello_vm_last_trap_code(vm)));
+      fprintf(stderr, "TRAP_PC func_index=%u pc=%u\n", jello_vm_last_trap_func_index(vm),
+              jello_vm_last_trap_pc(vm));
     } else {
-      printf("TRAP code=%s\n", trap_code_name(jello_vm_last_trap_code(vm)));
+      printf("TRAP code=%s\n", jello_trap_code_name(jello_vm_last_trap_code(vm)));
       if(trap_pc) {
         printf("TRAP_PC func_index=%u pc=%u\n", jello_vm_last_trap_func_index(vm), jello_vm_last_trap_pc(vm));
       }
     }
   }
   if(repeat > 1) {
-    double ms = (double)(t1 - t0) * 1000.0 / (double)CLOCKS_PER_SEC;
+    double ms = (double)(t1.tv_sec - t0.tv_sec) * 1000.0 + (double)(t1.tv_nsec - t0.tv_nsec) / 1e6;
     printf("ELAPSED_MS %.3f\n", ms);
   }
   if(gc_stats) {
-    uint32_t live_bytes = 0, collections = 0;
+    uint64_t live_bytes = 0;
+    uint32_t collections = 0;
     double pause_ms = 0.0;
     jello_vm_gc_stats(vm, &live_bytes, &collections, &pause_ms);
-    printf("GC_LIVE_BYTES %u\n", live_bytes);
+    printf("GC_LIVE_BYTES %llu\n", (unsigned long long)live_bytes);
     printf("GC_COLLECTIONS %u\n", collections);
     printf("GC_PAUSE_MS %.3f\n", pause_ms);
+    printf("GC_FINALIZED_HANDLES %u\n", vm->space->finalized_handles);
   }
 
   jello_vm_destroy(vm);
@@ -1669,6 +1718,10 @@ static const char* jir_op_name(jello_jit_ir_op op) {
     case JIR_CALL_SELF: return "CALL_SELF";
     case JIR_CALL_DIRECT: return "CALL_DIRECT";
     case JIR_CALL_NATIVE: return "CALL_NATIVE";
+    case JIR_CALLR: return "CALLR";
+    case JIR_TRY: return "TRY";
+    case JIR_ENDTRY: return "ENDTRY";
+    case JIR_THROW: return "THROW";
     case JIR_CONST_I8_IMM: return "CONST_I8_IMM";
     case JIR_CONST_I32: return "CONST_I32";
     case JIR_CONST_I64: return "CONST_I64";
@@ -1701,6 +1754,9 @@ static const char* jir_op_name(jello_jit_ir_op op) {
     case JIR_TO_DYN: return "TO_DYN";
     case JIR_FROM_DYN: return "FROM_DYN";
     case JIR_KINDOF: return "KINDOF";
+    case JIR_IS_NULL: return "IS_NULL";
+    case JIR_IS_ENUM: return "IS_ENUM";
+    case JIR_NULL_CHECK: return "NULL_CHECK";
     case JIR_PHYSEQ: return "PHYSEQ";
     case JIR_BYTES_NEW: return "BYTES_NEW";
     case JIR_BYTES_LEN: return "BYTES_LEN";
@@ -1714,6 +1770,7 @@ static const char* jir_op_name(jello_jit_ir_op op) {
     case JIR_BYTES_BLIT: return "BYTES_BLIT";
     case JIR_BITS_WRITE: return "BITS_WRITE";
     case JIR_BITS_READ: return "BITS_READ";
+    case JIR_BYTES_FREEZE: return "BYTES_FREEZE";
     case JIR_STRUCT_NEW: return "STRUCT_NEW";
     case JIR_STRUCT_GET: return "STRUCT_GET";
     case JIR_STRUCT_SET: return "STRUCT_SET";
@@ -1727,6 +1784,11 @@ static const char* jir_op_name(jello_jit_ir_op op) {
     case JIR_OBJ_REMOVE: return "OBJ_REMOVE";
     case JIR_OBJ_CLEAR: return "OBJ_CLEAR";
     case JIR_OBJ_COPY: return "OBJ_COPY";
+    case JIR_ARRAY_LEN: return "ARRAY_LEN";
+    case JIR_ARRAY_GET: return "ARRAY_GET";
+    case JIR_ARRAY_SET: return "ARRAY_SET";
+    case JIR_GLOBAL_GET: return "GLOBAL_GET";
+    case JIR_GLOBAL_SET: return "GLOBAL_SET";
     default: return "?";
   }
 }
@@ -1786,14 +1848,37 @@ static jir_shape jir_shape_of(jello_jit_ir_op op) {
   s.has_c_literal = (op == JIR_BITS_WRITE || op == JIR_BITS_READ);
 
   switch(op) {
-    case JIR_JMP: case JIR_JMP_IF: case JIR_CONST_I8_IMM: case JIR_CONST_I32:
-    case JIR_CONST_I64: case JIR_CONST_F16: case JIR_CONST_F32: case JIR_CONST_F64:
-    case JIR_CONST_BOOL: case JIR_CONST_ATOM: case JIR_ADD_I32_IMM: case JIR_SUB_I32_IMM:
-    case JIR_MUL_I32_IMM: case JIR_EQ_I32_IMM: case JIR_LT_I32_IMM: case JIR_STRUCT_GET:
-    case JIR_STRUCT_SET: case JIR_OBJ_HAS_ATOM: case JIR_OBJ_GET_ATOM: case JIR_OBJ_SET_ATOM:
-    case JIR_BITS_WRITE: case JIR_BITS_READ: case JIR_CALL_DIRECT: case JIR_CALL_NATIVE:
+    case JIR_JMP:
+    case JIR_JMP_IF:
+    case JIR_CONST_I8_IMM:
+    case JIR_CONST_I32:
+    case JIR_CONST_I64:
+    case JIR_CONST_F16:
+    case JIR_CONST_F32:
+    case JIR_CONST_F64:
+    case JIR_CONST_BOOL:
+    case JIR_CONST_ATOM:
+    case JIR_ADD_I32_IMM:
+    case JIR_SUB_I32_IMM:
+    case JIR_MUL_I32_IMM:
+    case JIR_EQ_I32_IMM:
+    case JIR_LT_I32_IMM:
+    case JIR_STRUCT_GET:
+    case JIR_STRUCT_SET:
+    case JIR_OBJ_HAS_ATOM:
+    case JIR_OBJ_GET_ATOM:
+    case JIR_OBJ_SET_ATOM:
+    case JIR_BITS_WRITE:
+    case JIR_BITS_READ:
+    case JIR_CALL_DIRECT:
+    case JIR_CALL_NATIVE:
+    case JIR_CALLR:
     case JIR_SLOW:
-      s.has_imm = 1; s.imm_kind = JIRSHAPE_RAW;
+    case JIR_TRY:
+    case JIR_GLOBAL_GET:
+    case JIR_GLOBAL_SET:
+      s.has_imm = 1;
+      s.imm_kind = JIRSHAPE_RAW;
       break;
     case JIR_BIN_I32: case JIR_BIN_I64: case JIR_BIN_F16: case JIR_BIN_F32: case JIR_BIN_F64:
     case JIR_BYTES_BITOP:
