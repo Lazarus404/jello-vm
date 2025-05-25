@@ -27,10 +27,13 @@ typedef struct alloc_arg {
 
 static void* alloc_thread_main(void* argp) {
   alloc_arg* arg = (alloc_arg*)argp;
+  jello_vm_running(arg->vm, 1);
   for(int i = 0; i < ALLOC_ROUNDS; i++) {
-    (void)jello_bytes_new(arg->vm, 300);
+    (void)jello_bytes_new(arg->vm, 400);
   }
-  uint32_t live = 0, collections = 0;
+  jello_vm_running(arg->vm, 0);
+  uint64_t live = 0;
+  uint32_t collections = 0;
   double pause_ms = 0.0;
   jello_vm_gc_stats(arg->vm, &live, &collections, &pause_ms);
   arg->collections_seen = collections;

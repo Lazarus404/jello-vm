@@ -36,10 +36,4 @@ static const jello_jdll_export TEST_NATIVE_EXPORTS[] = {
   {"sleep_ms", tn_sleep_ms, (uint8_t)JELLO_T_BOOL, 1, {(uint8_t)JELLO_T_I32}, 0},
 };
 
-const jello_jdll_manifest jello_jdll_manifest_test_native = {
-  JELLO_JDLL_MANIFEST_MAGIC,
-  JELLO_JDLL_ABI_VERSION,
-  "test_native",
-  TEST_NATIVE_EXPORTS,
-  (uint32_t)(sizeof(TEST_NATIVE_EXPORTS) / sizeof(TEST_NATIVE_EXPORTS[0])),
-};
+JELLO_JDLL_LIBRARY(test_native, TEST_NATIVE_EXPORTS);

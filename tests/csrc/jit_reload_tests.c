@@ -215,37 +215,6 @@ static void build_named_two_func_module(jello_type_entry* types, jello_type_id* 
 
 static const char* g_two_func_atoms[2] = {"main", "helper"};
 
-static void test_reload_unchanged_is_successful_noop(void) {
-  jello_type_entry types_a[1], types_b[1];
-  jello_type_id r0_a[1], r1_a[1], r0_b[1], r1_b[1];
-  jello_insn e0_a[2], e1_a[2], e0_b[2], e1_b[2];
-  jello_bc_function funcs_a[2], funcs_b[2];
-  jello_bc_module old_m, new_m;
-  build_named_two_func_module(types_a, r0_a, r1_a, e0_a, e1_a, funcs_a, &old_m, 0, 1, 100);
-  old_m.atoms = g_two_func_atoms; old_m.natoms = 2; /* build_* memsets m -- set atoms after */
-  build_named_two_func_module(types_b, r0_b, r1_b, e0_b, e1_b, funcs_b, &new_m, 0, 1, 100);
-  new_m.atoms = g_two_func_atoms; new_m.natoms = 2;
-
-  jello_jit_module* jm = jello_jit_module_create(&old_m);
-  assert(jm != NULL);
-  jello_vm* vm = jello_vm_create();
-
-  jello_jit_reload_report report;
-  int rc = jello_jit_module_reload(vm, jm, &old_m, &new_m, 0, &report);
-  assert(rc == 1);
-  assert(report.n_unchanged == 2);
-  assert(report.n_changed == 0);
-  assert(report.n_new == 0);
-  assert(report.n_removed == 0);
-  assert(report.n_signature_conflicts == 0);
-  assert(report.n_type_conflicts == 0);
-
-  jello_jit_reload_report_free(&report);
-  jello_jit_module_destroy(jm);
-  jello_vm_destroy(vm);
-  printf("test_reload_unchanged_is_successful_noop: PASS\n");
-}
-
 /* An unchanged module that is a different object is still recompiled, since the old code
  * points into old_m; reloading jm's own module again is a no-op. */
 static void test_reload_unchanged_succeeds(void) {
@@ -776,19 +745,22 @@ static void build_fib_survive_reload_module(jello_type_entry* types, jello_type_
 
 static const char* g_fib_survive_reload_atoms[3] = {"main", "fib", "unrelated"};
 
-static void test_reload_chapter15_survive_interaction(void) {
+static void test_reload_survive_interaction(void) {
   jello_type_entry types_a[2], types_b[2];
   jello_type_id r0_a[2], r1_a[7], r2_a[1], r0_b[2], r1_b[7], r2_b[1];
   jello_insn e0_a[3], e1_a[9], e2_a[2], e0_b[3], e1_b[9], e2_b[2];
-  jello_bc_function funcs_a[3], funcs_b[3];
-  jello_bc_module old_m, new_m;
+  jello_bc_function funcs_a[3] = {0}, funcs_b[3] = {0};
+  jello_bc_module old_m = {0}, new_m = {0};
   build_fib_survive_reload_module(types_a, r0_a, r1_a, r2_a, e0_a, e1_a, e2_a, funcs_a, &old_m, 111);
   old_m.atoms = g_fib_survive_reload_atoms; old_m.natoms = 3;
   build_fib_survive_reload_module(types_b, r0_b, r1_b, r2_b, e0_b, e1_b, e2_b, funcs_b, &new_m, 222);
   new_m.atoms = g_fib_survive_reload_atoms; new_m.natoms = 3;
 
+  /* jit_call_survive_armed_count increments at compile time. The eager create below compiles
+   * every function of old_m (a lazy one would compile only when called), so the reset must happen
+   * before it, not before the exec call. */
   jit_call_survive_armed_count = 0;
-  jello_jit_module* jm = jello_jit_module_create(&old_m);
+  jello_jit_module* jm = jit_module_create(&old_m, 1);
   assert(jm != NULL);
   assert(jit_call_survive_armed_count > 0);
   jello_vm* vm = jello_vm_create();
@@ -799,6 +771,10 @@ static void test_reload_chapter15_survive_interaction(void) {
   assert(out.kind == JELLO_NUM_I32 && out.as.i32 == fib_ref_reload(15));
 
   jello_jit_reload_report report;
+  /* Reset immediately before the reload call, not before the exec call
+   * after it -- jello_jit_module_reload is what actually recompiles new_m
+   * (module.c's own jello_jit_module_prepare, called from within reload.c),
+   * so this is where the fresh compile's own armed count must be observed. */
   jit_call_survive_armed_count = 0;
   int rc = jello_jit_module_reload(vm, jm, &old_m, &new_m, 0, &report);
   assert(rc == 1);
@@ -810,16 +786,24 @@ static void test_reload_chapter15_survive_interaction(void) {
   assert(report.n_type_conflicts == 0);
   assert(report.fn_status[1] == JELLO_RELOAD_FN_UNCHANGED); /* fib itself */
   jello_jit_reload_report_free(&report);
+  /* Confirms the reload's own fresh compile re-ran survive's own pattern
+   * match for fib, even though fib's own reload status came out UNCHANGED --
+   * the whole module is recompiled wholesale, proven here rather than only
+   * argued. */
   assert(jit_call_survive_armed_count > 0);
   uint32_t armed_after_reload = jit_call_survive_armed_count;
 
+  /* The actual proof: fib(15), through the *freshly recompiled* jm, still
+   * produces the correct answer -- reentrancy across many co-live R15
+   * holds on the native call stack is re-established correctly by the new
+   * compile, with nothing reload-specific required to make that true. */
   memset(&out, 0, sizeof(out));
   assert(jello_vm_exec_numeric_with_jit(vm, jm, &new_m, &out) == JELLO_EXEC_OK);
   assert(out.kind == JELLO_NUM_I32 && out.as.i32 == fib_ref_reload(15));
 
   jello_jit_module_destroy(jm);
   jello_vm_destroy(vm);
-  printf("test_reload_chapter15_survive_interaction: PASS (fib(15)=%d, armed_after_reload=%u)\n",
+  printf("test_reload_survive_interaction: PASS (fib(15)=%d, armed_after_reload=%u)\n",
       out.as.i32, armed_after_reload);
 }
 
@@ -1219,20 +1203,21 @@ int main(void) {
   test_module_create_rejects_empty_module();
   test_pause_resume_all_idle_succeeds();
   test_reload_pause_blocks_fresh_call_on_other_thread();
-  test_reload_unchanged_is_successful_noop();
+  test_reload_unchanged_succeeds();
   test_reload_refuses_struct_type_conflict_by_default();
   test_reload_allow_conflicts_recompiles_even_if_body_unchanged();
   test_reload_new_function_recompiles_even_if_nothing_changed();
 #if defined(__x86_64__) || defined(__aarch64__)
   test_reload_refuses_signature_conflict_by_default();
   test_reload_allow_conflicts_overrides_refusal();
+  test_reload_removal_runs_shifted_function();
   test_persistent_handle_no_per_call_recompile();
   test_persistent_handle_null_falls_back_correctly();
 #endif
 #if defined(__x86_64__)
   test_persistent_handle_matches_fresh_path();
   test_reload_changed_function_end_to_end();
-  test_reload_chapter15_survive_interaction();
+  test_reload_survive_interaction();
 #else
   printf("test_persistent_handle_matches_fresh_path: SKIPPED (host is not x86_64)\n");
   printf("test_reload_changed_function_end_to_end: SKIPPED (host is not x86_64)\n");

@@ -110,7 +110,8 @@ static void run_build_and_sum(int jit) {
   int32_t want = (int32_t)(uint32_t)(((uint64_t)BUILD_N * (BUILD_N + 1u)) / 2u);
   assert(out.as.i32 == want);
 
-  uint32_t live = 0, collections = 0;
+  uint64_t live = 0;
+  uint32_t collections = 0;
   double pause_ms = 0.0;
   jello_vm_gc_stats(vm, &live, &collections, &pause_ms);
   assert(collections > 0);
