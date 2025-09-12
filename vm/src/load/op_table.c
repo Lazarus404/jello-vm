@@ -34,13 +34,11 @@
 #define T_DYNAMIC JELLO_T_DYNAMIC
 #define T_ENUM JELLO_T_ENUM
 
-#define OP(id, name, ar, ak, br, bk, cr, ck, ir, fl, h) \
+#define OP(id, name, ar, ak, br, bk, cr, ck, ir, fl, h)                                            \
   {name,          (uint8_t)(ar), (uint8_t)(br), (uint8_t)(cr), (uint8_t)(ak),                      \
    (uint8_t)(bk), (uint8_t)(ck), (uint8_t)(ir), (uint8_t)(fl)},
 
-const jello_op_info jello_op_table[JOP_COUNT] = {
-  JELLO_OP_LIST(OP)
-};
+const jello_op_info jello_op_table[JOP_COUNT] = {JELLO_OP_LIST(OP)};
 
 #undef OP
 

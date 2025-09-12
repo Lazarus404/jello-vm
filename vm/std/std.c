@@ -52,6 +52,9 @@ static const jello_jdll_export STD_EXPORTS[] = {
     {"file_real_path", std_file_real_path, Y, 1, {Y}, W},
     {"process_executable", std_process_executable, Y, 0, {0}, 0},
     {"get_env", std_get_env, Y, 1, {Y}, 0},
+    {"platform_os", std_platform_os, Y, 0, {0}, 0},
+    {"platform_arch", std_platform_arch, Y, 0, {0}, 0},
+    {"platform_temp_dir", std_platform_temp_dir, Y, 0, {0}, 0},
     {"argv_count", std_argv_count, I, 0, {0}, 0},
     {"args_count", std_args_count, I, 0, {0}, 0},
     {"args_get", std_args_get, Y, 1, {I}, 0},
@@ -61,6 +64,7 @@ static const jello_jdll_export STD_EXPORTS[] = {
     {"command_stdout", std_command_stdout, Y, 1, {D}, W},
     {"command_stderr", std_command_stderr, Y, 1, {D}, W},
     {"command_done", std_command_done, B, 1, {D}, 0},
+    {"command_kill", std_command_kill, B, 1, {D}, 0},
     {"command_next", std_command_next, B, 0, {0}, W},
     {"cpu_count", std_cpu_count, I, 0, {0}, 0},
     {"date_now", std_date_now, L, 0, {0}, 0},
@@ -90,6 +94,10 @@ static const jello_jdll_export STD_EXPORTS[] = {
     {"bytes_from_hex", std_bytes_from_hex, D, 1, {Y}, 0},
     {"bytes_base64", std_bytes_base64, Y, 2, {Y, B}, 0},
     {"bytes_from_base64", std_bytes_from_base64, D, 2, {Y, B}, 0},
+    {"bytes_read_i64", std_bytes_read_i64, L, 3, {Y, I, B}, 0},
+    {"bytes_read_f64", std_bytes_read_f64, F, 3, {Y, I, B}, 0},
+    {"bytes_i64", std_bytes_i64, Y, 2, {L, B}, 0},
+    {"bytes_f64", std_bytes_f64, Y, 2, {F, B}, 0},
 };
 
 JELLO_JDLL_LIBRARY(std, STD_EXPORTS);

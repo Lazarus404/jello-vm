@@ -146,3 +146,46 @@ void std_bytes_from_base64(jdlo_ctx* c) {
   }
   return_owned(c, out, n);
 }
+
+static int read_word(jdlo_ctx* c, uint64_t* word) {
+  const uint8_t* s = jdl_arg_bytes_data(c, 0);
+  uint32_t len = jdl_arg_bytes_len(c, 0);
+  int32_t at = jdl_arg_i32(c, 1);
+  int big = jdl_arg_bool(c, 2);
+  if(at < 0 || len < 8 || (uint32_t)at > len - 8) {
+    jdl_fail(c, "index out of range");
+    return 0;
+  }
+  const uint8_t* p = s + at;
+  *word = 0;
+  for(int i = 0; i < 8; i++) *word |= (uint64_t)p[big ? 7 - i : i] << (8 * i);
+  return 1;
+}
+
+static void return_word(jdlo_ctx* c, uint64_t word, int big) {
+  uint8_t out[8];
+  for(int i = 0; i < 8; i++) out[big ? 7 - i : i] = (uint8_t)(word >> (8 * i));
+  jdl_return_bytes_copy(c, out, sizeof out);
+}
+
+void std_bytes_read_i64(jdlo_ctx* c) {
+  uint64_t word;
+  if(read_word(c, &word)) jdl_return_i64(c, (int64_t)word);
+}
+
+void std_bytes_read_f64(jdlo_ctx* c) {
+  uint64_t word;
+  double value;
+  if(!read_word(c, &word)) return;
+  memcpy(&value, &word, sizeof value);
+  jdl_return_f64(c, value);
+}
+
+void std_bytes_i64(jdlo_ctx* c) { return_word(c, (uint64_t)jdl_arg_i64(c, 0), jdl_arg_bool(c, 1)); }
+
+void std_bytes_f64(jdlo_ctx* c) {
+  double value = jdl_arg_f64(c, 0);
+  uint64_t word;
+  memcpy(&word, &value, sizeof word);
+  return_word(c, word, jdl_arg_bool(c, 1));
+}

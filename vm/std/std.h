@@ -61,6 +61,9 @@ void std_dir_make(jdlo_ctx* c);
 void std_file_real_path(jdlo_ctx* c);
 void std_process_executable(jdlo_ctx* c);
 void std_get_env(jdlo_ctx* c);
+void std_platform_os(jdlo_ctx* c);
+void std_platform_arch(jdlo_ctx* c);
+void std_platform_temp_dir(jdlo_ctx* c);
 void std_argv_count(jdlo_ctx* c);
 void std_args_count(jdlo_ctx* c);
 void std_args_get(jdlo_ctx* c);
@@ -71,6 +74,7 @@ void std_command_wait(jdlo_ctx* c);
 void std_command_stdout(jdlo_ctx* c);
 void std_command_stderr(jdlo_ctx* c);
 void std_command_done(jdlo_ctx* c);
+void std_command_kill(jdlo_ctx* c);
 void std_command_next(jdlo_ctx* c);
 void std_cpu_count(jdlo_ctx* c);
 void std_date_now(jdlo_ctx* c);
@@ -119,5 +123,9 @@ void std_bytes_hex(jdlo_ctx* c);
 void std_bytes_from_hex(jdlo_ctx* c);
 void std_bytes_base64(jdlo_ctx* c);
 void std_bytes_from_base64(jdlo_ctx* c);
+void std_bytes_read_i64(jdlo_ctx* c);
+void std_bytes_read_f64(jdlo_ctx* c);
+void std_bytes_i64(jdlo_ctx* c);
+void std_bytes_f64(jdlo_ctx* c);
 
 #endif /* JELLO_STD_H */

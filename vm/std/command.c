@@ -313,6 +313,20 @@ void std_command_done(jdlo_ctx* c) {
   jdl_return_bool(c, done != 0);
 }
 
+void std_command_kill(jdlo_ctx* c) {
+  std_command* p = (std_command*)jdl_arg_handle(c, 0, &COMMAND);
+  if(!p) {
+    jdl_fail(c, "null command");
+    return;
+  }
+  pthread_mutex_lock(&lock);
+  reap_ended(p);
+  int running = !p->waited && p->pid > 0;
+  if(running) kill(p->pid, SIGKILL);
+  pthread_mutex_unlock(&lock);
+  jdl_return_bool(c, running);
+}
+
 void std_command_next(jdlo_ctx* c) {
   int lost = await_child();
   if(!lost) {

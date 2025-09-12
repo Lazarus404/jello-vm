@@ -205,6 +205,30 @@ void std_process_executable(jdlo_ctx* c) {
   jdl_return_bytes_copy(c, (const uint8_t*)path, found ? (uint32_t)strlen(path) : 0u);
 }
 
+void std_platform_os(jdlo_ctx* c) {
+#if defined(__APPLE__)
+  static const char os[] = "macos";
+#elif defined(_WIN32)
+  static const char os[] = "windows";
+#elif defined(__linux__)
+  static const char os[] = "linux";
+#else
+#error "std.jdll does not know this system"
+#endif
+  jdl_return_bytes_copy(c, (const uint8_t*)os, sizeof os - 1);
+}
+
+void std_platform_arch(jdlo_ctx* c) {
+#if defined(__aarch64__) || defined(_M_ARM64)
+  static const char arch[] = "arm64";
+#elif defined(__x86_64__) || defined(_M_X64)
+  static const char arch[] = "x64";
+#else
+#error "std.jdll does not know this processor"
+#endif
+  jdl_return_bytes_copy(c, (const uint8_t*)arch, sizeof arch - 1);
+}
+
 int std_temp_dir(char* out, size_t cap) {
   const char* dir = getenv("TMPDIR");
 #ifdef _WIN32
@@ -221,6 +245,12 @@ int std_temp_dir(char* out, size_t cap) {
   while(len > (root ? root : 1u) && out[len - 1] == '/') len--;
   out[len] = '\0';
   return 1;
+}
+
+void std_platform_temp_dir(jdlo_ctx* c) {
+  char dir[STD_MAX_PATH];
+  if(!std_temp_dir(dir, sizeof dir)) jdl_fail(c, "the path is too long");
+  else jdl_return_bytes_copy(c, (const uint8_t*)dir, (uint32_t)strlen(dir));
 }
 
 void std_get_env(jdlo_ctx* c) {
