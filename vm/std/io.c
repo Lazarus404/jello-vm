@@ -229,6 +229,11 @@ void std_platform_arch(jdlo_ctx* c) {
   jdl_return_bytes_copy(c, (const uint8_t*)arch, sizeof arch - 1);
 }
 
+void std_platform_version(jdlo_ctx* c) {
+  static const char version[] = JELLO_VERSION;
+  jdl_return_bytes_copy(c, (const uint8_t*)version, sizeof version - 1);
+}
+
 int std_temp_dir(char* out, size_t cap) {
   const char* dir = getenv("TMPDIR");
 #ifdef _WIN32

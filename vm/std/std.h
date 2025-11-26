@@ -63,6 +63,7 @@ void std_process_executable(jdlo_ctx* c);
 void std_get_env(jdlo_ctx* c);
 void std_platform_os(jdlo_ctx* c);
 void std_platform_arch(jdlo_ctx* c);
+void std_platform_version(jdlo_ctx* c);
 void std_platform_temp_dir(jdlo_ctx* c);
 void std_argv_count(jdlo_ctx* c);
 void std_args_count(jdlo_ctx* c);

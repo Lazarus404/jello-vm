@@ -272,3 +272,6 @@ endif()
 add_test(NAME containers_lists
   COMMAND list_tests
   WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME jello_version COMMAND jello --version)
+set_tests_properties(jello_version PROPERTIES
+  PASS_REGULAR_EXPRESSION "^jello ${PROJECT_VERSION}[\r\n]*$")

@@ -54,6 +54,7 @@ static const jello_jdll_export STD_EXPORTS[] = {
     {"get_env", std_get_env, Y, 1, {Y}, 0},
     {"platform_os", std_platform_os, Y, 0, {0}, 0},
     {"platform_arch", std_platform_arch, Y, 0, {0}, 0},
+    {"platform_version", std_platform_version, Y, 0, {0}, 0},
     {"platform_temp_dir", std_platform_temp_dir, Y, 0, {0}, 0},
     {"argv_count", std_argv_count, I, 0, {0}, 0},
     {"args_count", std_args_count, I, 0, {0}, 0},
