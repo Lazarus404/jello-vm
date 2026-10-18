@@ -25,6 +25,13 @@
 
 #if defined(_WIN32)
 
+void proc_poller_rearm(proc_poller* pl, int fd, void* token, uint32_t events) {
+  struct epoll_event ev = {.events = EPOLLONESHOT, .data = {.ptr = token}};
+  if(events & PROC_FD_READ) ev.events |= EPOLLIN | EPOLLRDHUP;
+  if(events & PROC_FD_WRITE) ev.events |= EPOLLOUT;
+  if(events) epoll_ctl(pl->port, EPOLL_CTL_MOD, JELLO_SOCKET(fd), &ev);
+}
+
 #elif defined(__linux__)
 
 #else

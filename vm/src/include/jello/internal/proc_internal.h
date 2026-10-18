@@ -106,9 +106,12 @@ enum { PROC_FD_READ = 1u, PROC_FD_WRITE = 2u, PROC_FD_CLOSED = 4u };
 
 typedef struct proc_poller {
 #if defined(_WIN32)
+  void* port;
+  int wake;
 #else
   int fd;
 #if defined(__linux__)
+  int wake;
 #endif
 #endif
 } proc_poller;
@@ -122,6 +125,7 @@ int proc_poller_open(proc_poller* pl);
 int proc_poller_watch(proc_poller* pl, int fd, void* token);
 
 #if defined(_WIN32)
+void proc_poller_rearm(proc_poller* pl, int fd, void* token, uint32_t events);
 #else
 static inline void proc_poller_rearm(proc_poller* pl, int fd, void* token, uint32_t events) {}
 #endif
@@ -315,7 +319,12 @@ jello_process* proc_self_or_fail(struct jdlo_ctx* c);
 extern const struct jello_jdll_handle_class proc_socket_class;
 void proc_socket_moved(void* payload, const struct jello_vm* vm);
 void proc_sockets_end(jello_process* p);
+void vm_net_tcp_listen(struct jdlo_ctx* c);
+void vm_net_udp_bind(struct jdlo_ctx* c);
 void vm_net_tcp_accept(struct jdlo_ctx* c);
+void vm_net_tcp_connect(struct jdlo_ctx* c);
+void vm_net_write(struct jdlo_ctx* c);
+void vm_net_send_to(struct jdlo_ctx* c);
 void vm_net_close(struct jdlo_ctx* c);
 void vm_net_local_port(struct jdlo_ctx* c);
 void vm_net_error(struct jdlo_ctx* c);

@@ -17,8 +17,10 @@
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
 #endif
 #ifndef NOMINMAX
+#define NOMINMAX
 #endif
 #include <winsock2.h> /* Before windows.h, which would otherwise bring in the older winsock.h. */
 #include <windows.h>
@@ -106,6 +108,7 @@ static inline void* jello_pages_reserve(size_t bytes) {
 }
 
 #ifdef _WIN32
+#define JELLO_PAGES_COMMIT_COSTS 1
 #else
 #define JELLO_PAGES_COMMIT_COSTS 0
 #endif
@@ -178,12 +181,15 @@ static inline void jello_aligned_free(void* p) {
 }
 
 #ifdef _WIN32
+#define JELLO_PATH_LIST_SEP ';'
 #else
 #define JELLO_PATH_LIST_SEP ':'
 #endif
 
 #ifdef _WIN32
+#define JELLO_EXE_SUFFIX ".exe"
 #else
+#define JELLO_EXE_SUFFIX ""
 #endif
 
 static inline int jello_is_slash(char c) {
@@ -291,6 +297,76 @@ static inline int jello_self_path(char* out, size_t out_len) {
 }
 
 #ifdef _WIN32
+static inline size_t jello_quote_arg(char* out, const char* arg) {
+  size_t n = 0;
+#define JELLO_PUT(c) (out ? (void)(out[n] = (c)) : (void)0, n++)
+  if(*arg && !strpbrk(arg, " \t\n\v\"")) {
+    for(; *arg; arg++) JELLO_PUT(*arg);
+    return n;
+  }
+  JELLO_PUT('"');
+  for(;; arg++) {
+    size_t slashes = 0;
+    for(; *arg == '\\'; arg++) slashes++;
+    if(*arg == '"' || !*arg) slashes *= 2;
+    for(size_t i = 0; i < slashes; i++) JELLO_PUT('\\');
+    if(!*arg) break;
+    if(*arg == '"') JELLO_PUT('\\');
+    JELLO_PUT(*arg);
+  }
+  JELLO_PUT('"');
+#undef JELLO_PUT
+  return n;
+}
+
+static inline char* jello_command_line(char* const argv[]) {
+  size_t len = 0;
+  for(size_t i = 0; argv[i]; i++) len += jello_quote_arg(NULL, argv[i]) + 1u;
+  char* line = (char*)malloc(len + 1u);
+  if(!line) return NULL;
+  size_t at = 0;
+  for(size_t i = 0; argv[i]; i++) {
+    if(i) line[at++] = ' ';
+    at += jello_quote_arg(line + at, argv[i]);
+  }
+  line[at] = '\0';
+  return line;
+}
+
+static inline int jello_program_file(const char* path, const char* name, char* out, size_t cap) {
+  const char* dot = strrchr(name, '.');
+  int bare = !dot || jello_last_slash(dot);
+  const char* exts = getenv("PATHEXT");
+  if(!exts || !*exts) exts = ".COM;.EXE;.BAT;.CMD";
+  for(const char* ext = bare ? exts : "";;) {
+    const char* end = bare ? strchr(ext, ';') : NULL;
+    int len = end ? (int)(end - ext) : (int)strlen(ext);
+    int n = snprintf(out, cap, "%s%.*s", path, len, ext);
+    DWORD attrs = n >= 0 && (size_t)n < cap ? GetFileAttributesA(out) : INVALID_FILE_ATTRIBUTES;
+    if(attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY)) return 1;
+    if(!end) return 0;
+    ext = end + 1;
+  }
+}
+
+static inline int jello_find_program(const char* program, char* out, size_t cap) {
+  if(jello_last_slash(program) || jello_path_root_len(program) > 0)
+    return jello_program_file(program, program, out, cap) ? 0 : ENOENT;
+  const char* path = getenv("PATH");
+  char dir_path[PATH_MAX];
+  for(const char* dir = path ? path : ""; *dir;) {
+    const char* end = strchr(dir, JELLO_PATH_LIST_SEP);
+    int len = end ? (int)(end - dir) : (int)strlen(dir);
+    int slash = len > 0 && !jello_is_slash(dir[len - 1]);
+    int n = snprintf(dir_path, sizeof dir_path, "%.*s%s%s", len, dir, slash ? "/" : "", program);
+    if(len > 0 && n >= 0 && (size_t)n < sizeof dir_path &&
+       jello_program_file(dir_path, program, out, cap))
+      return 0;
+    if(!end) break;
+    dir = end + 1;
+  }
+  return ENOENT;
+}
 #endif
 
 static inline void* jello_dl_open(const char* path, char* why, size_t why_len) {

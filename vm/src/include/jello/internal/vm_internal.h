@@ -372,6 +372,8 @@ static inline void vm_enter_module(jello_vm* vm, const jello_bc_module* m) {
 #define VM_FIRST_CALL_FRAMES 4u
 
 #if defined(_WIN32) && defined(__x86_64__)
+#define JELLO_JIT_SYSV_THUNKS 1
+#define JELLO_JIT_ABI __attribute__((sysv_abi))
 #else
 #define JELLO_JIT_ABI
 #endif

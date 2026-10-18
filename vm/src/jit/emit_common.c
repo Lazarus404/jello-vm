@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Jahred Love. All rights reserved.
 
-#include <jello/internal/jit_impl.h>
-// SPDX-License-Identifier: BSD-3-Clause
-// Copyright (c) Jahred Love. All rights reserved.
-
 /** @file
  * Executable buffers with their append and patch windows, the trap setters, and the op policy
  * and helpers both JIT backends share. */
@@ -15,8 +11,6 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
-#include <unistd.h>
 #if defined(__APPLE__) && defined(__aarch64__)
 #include <libkern/OSCacheControl.h>
 #endif
@@ -31,12 +25,14 @@ static size_t jit_icache_span(size_t n, size_t cap) {
 
 static void jit_sync_icache(void* mem, size_t n) {
   if(!mem || n == 0) return;
-#if defined(__APPLE__) && defined(__aarch64__)
+#if defined(_WIN32)
+  FlushInstructionCache(GetCurrentProcess(), mem, n);
+#elif defined(__APPLE__) && defined(__aarch64__)
   sys_icache_invalidate(mem, n);
 #else
   __builtin___clear_cache((char*)mem, (char*)mem + n);
 #endif
-#if defined(__aarch64__) && !defined(__APPLE__)
+#if defined(__aarch64__) && !defined(__APPLE__) && !defined(_WIN32)
   __asm__ __volatile__("dsb ish\n\tisb" ::: "memory");
 #endif
 }

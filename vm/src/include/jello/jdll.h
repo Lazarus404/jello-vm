@@ -196,6 +196,8 @@ typedef struct jello_jdll_manifest {
 } jello_jdll_manifest;
 
 #if defined(_WIN32)
+#define JELLO_JDLL_EXPORT __declspec(dllexport)
+#define JELLO_JDLL_HIDDEN
 #else
 #define JELLO_JDLL_EXPORT __attribute__((visibility("default")))
 #define JELLO_JDLL_HIDDEN __attribute__((visibility("hidden")))

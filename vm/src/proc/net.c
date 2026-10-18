@@ -62,6 +62,19 @@ struct proc_socket_list {
 
 static pthread_mutex_t net_lock = PTHREAD_MUTEX_INITIALIZER;
 
+static _Thread_local uint8_t* read_buf;
+static _Thread_local uint32_t read_buf_cap;
+
+static __attribute__((noinline)) uint8_t* read_buffer(uint32_t max) {
+  if(read_buf_cap < max) {
+    uint8_t* grown = (uint8_t*)realloc(read_buf, max);
+    if(!grown) return NULL;
+    read_buf = grown;
+    read_buf_cap = max;
+  }
+  return read_buf;
+}
+
 static jello_process* owner_of(const proc_socket* k) {
   return __atomic_load_n(&k->owner, __ATOMIC_ACQUIRE);
 }
@@ -239,6 +252,12 @@ static int watch_fd(jello_vm* vm, int fd, int stream) {
   return watched;
 }
 
+static int open_fd(jello_vm* vm, int family, int type) {
+  int fd = jello_sock_open(family, type);
+  if(fd >= 0 && type == SOCK_DGRAM) jello_sock_datagram(fd);
+  return fd >= 0 && watch_fd(vm, fd, type == SOCK_STREAM) ? fd : -1;
+}
+
 static void close_fd(jello_vm* vm, int fd) {
   proc_poll_close(vm, fd);
   jello_sock_close(fd);
@@ -293,6 +312,106 @@ typedef struct net_addrs {
   struct sockaddr_storage addr;
 } net_addrs;
 
+static void addrs_free(net_addrs* a) {
+  if(a->list != &a->one) freeaddrinfo(a->list);
+}
+
+static int numeric(net_addrs* a, const char* host, int32_t port, int type) {
+  memset(&a->addr, 0, sizeof a->addr);
+  memset(&a->one, 0, sizeof a->one);
+  struct sockaddr_in* v4 = (struct sockaddr_in*)&a->addr;
+  struct sockaddr_in6* v6 = (struct sockaddr_in6*)&a->addr;
+  if(inet_pton(AF_INET, host, &v4->sin_addr) == 1) {
+    v4->sin_family = AF_INET;
+    v4->sin_port = htons((uint16_t)port);
+    a->one.ai_addrlen = sizeof *v4;
+  } else if(inet_pton(AF_INET6, host, &v6->sin6_addr) == 1) {
+    v6->sin6_family = AF_INET6;
+    v6->sin6_port = htons((uint16_t)port);
+    a->one.ai_addrlen = sizeof *v6;
+  } else {
+    return 0;
+  }
+  a->one.ai_family = a->addr.ss_family;
+  a->one.ai_socktype = type;
+  a->one.ai_addr = (struct sockaddr*)&a->addr;
+  a->list = &a->one;
+  return 1;
+}
+
+static int resolve(jdlo_ctx* c, int hi, int pi, int type, int passive, net_addrs* a) {
+  uint32_t len = jdl_arg_bytes_len(c, hi);
+  const uint8_t* data = jdl_arg_bytes_data(c, hi);
+  int32_t port = jdl_arg_i32(c, pi);
+  char host[256];
+  if(len >= sizeof host || (len && memchr(data, '\0', len)) || port < 0 || port > 65535) {
+    failed(c, EINVAL);
+    return 0;
+  }
+  if(len) memcpy(host, data, len);
+  host[len] = '\0';
+  if(len && numeric(a, host, port, type)) return 1;
+  if(!jello_sockets_start()) {
+    failed(c, EIO);
+    return 0;
+  }
+  char service[16];
+  snprintf(service, sizeof service, "%d", (int)port);
+  struct addrinfo hints;
+  memset(&hints, 0, sizeof hints);
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = type;
+  hints.ai_flags = AI_NUMERICSERV | (passive ? AI_PASSIVE : 0);
+  int err = getaddrinfo(len ? host : NULL, service, &hints, &a->list);
+  if(err) {
+#ifdef EAI_SYSTEM
+    failed(c, err == EAI_SYSTEM ? errno : NET_GAI + err);
+#else
+    failed(c, NET_GAI + err);
+#endif
+    return 0;
+  }
+  return 1;
+}
+
+static void bound(jdlo_ctx* c, int type) {
+  failed(c, 0);
+  jello_process* p = proc_self_or_fail(c);
+  net_addrs ai;
+  if(!p) return;
+  if(!resolve(c, 0, 1, type, 1, &ai)) {
+    jdl_return_null(c);
+    return;
+  }
+  int fd = -1;
+  int err = EADDRNOTAVAIL;
+  for(struct addrinfo* a = ai.list; a && fd < 0; a = a->ai_next) {
+    fd = open_fd(c->vm, a->ai_family, type);
+    if(fd < 0) {
+      err = errno;
+      continue;
+    }
+    jello_sock_reuse_port(fd);
+    if(jello_bind(fd, a->ai_addr, (socklen_t)a->ai_addrlen) < 0 ||
+       (type == SOCK_STREAM && jello_listen(fd, 1024) < 0)) {
+      err = errno;
+      close_fd(c->vm, fd);
+      fd = -1;
+    }
+  }
+  addrs_free(&ai);
+  if(fd >= 0) {
+    return_socket(c, p, fd, NULL, 0);
+    return;
+  }
+  failed(c, err);
+  jdl_return_null(c);
+}
+
+void vm_net_tcp_listen(jdlo_ctx* c) { bound(c, SOCK_STREAM); }
+
+void vm_net_udp_bind(jdlo_ctx* c) { bound(c, SOCK_DGRAM); }
+
 void vm_net_tcp_accept(jdlo_ctx* c) {
   jello_process* p;
   proc_socket* k;
@@ -313,6 +432,132 @@ void vm_net_tcp_accept(jdlo_ctx* c) {
     if(errno != ECONNABORTED && !retry(c, fd, PROC_FD_READ, deadline)) break;
   }
   if(!c->failed) jdl_return_null(c);
+}
+
+void vm_net_tcp_connect(jdlo_ctx* c) {
+  failed(c, 0);
+  jello_process* p = proc_self_or_fail(c);
+  net_addrs ai;
+  if(!p) return;
+  if(!resolve(c, 0, 1, SOCK_STREAM, 0, &ai)) {
+    jdl_return_null(c);
+    return;
+  }
+  uint64_t deadline = proc_deadline(jdl_arg_i32(c, 2));
+  int err = ECONNREFUSED;
+  for(struct addrinfo* a = ai.list; a; a = a->ai_next) {
+    int fd = open_fd(c->vm, a->ai_family, SOCK_STREAM);
+    if(fd < 0) {
+      err = errno;
+      continue;
+    }
+    int r = jello_connect(fd, a->ai_addr, (socklen_t)a->ai_addrlen);
+    if(r < 0 && errno == EINPROGRESS) {
+      if(await(c, fd, PROC_FD_WRITE, deadline)) {
+        err = jello_sock_connect_error(fd);
+        r = err ? -1 : 0;
+      } else {
+        err = c->vm->net_error;
+      }
+    } else if(r < 0) {
+      err = errno;
+    }
+    if(r == 0) {
+      return_socket(c, p, fd, a->ai_addr, (socklen_t)a->ai_addrlen);
+      addrs_free(&ai);
+      return;
+    }
+    close_fd(c->vm, fd);
+    if(c->failed || err == NET_TIMEOUT) break;
+  }
+  addrs_free(&ai);
+  if(c->failed) return;
+  failed(c, err);
+  jdl_return_null(c);
+}
+
+static void receive(jdlo_ctx* c, int from) {
+  jello_process* p;
+  proc_socket* k;
+  int fd = arg_fd(c, &p, &k);
+  int32_t max = jdl_arg_i32(c, 1);
+  if(fd >= 0 && max <= 0) {
+    failed(c, EINVAL);
+    fd = -1;
+  }
+  if((uint32_t)max > NET_READ_MAX) max = (int32_t)NET_READ_MAX;
+  uint64_t deadline = proc_deadline(jdl_arg_i32(c, 2));
+  while(fd >= 0) {
+    uint8_t* buf = read_buffer((uint32_t)max);
+    if(!buf) {
+      jdl_fail(c, "out of memory");
+      return;
+    }
+    if(k->tls) {
+      int r = k->tls_ops->read(k->tls, buf, (uint32_t)max);
+      if(r >= 0) {
+        jdl_return_bytes_copy(c, buf, (uint32_t)r);
+        return;
+      }
+      if(!tls_retry(c, k, fd, r, deadline)) break;
+      continue;
+    }
+    struct sockaddr_storage peer;
+    socklen_t peer_len = sizeof peer;
+    ssize_t n = from ? jello_recvfrom(fd, buf, (size_t)max, (struct sockaddr*)&peer, &peer_len)
+                     : jello_recv(fd, buf, (size_t)max);
+    if(n >= 0) {
+      if(from) {
+        memcpy(&k->peer, &peer, (size_t)peer_len);
+        k->peer_len = peer_len;
+      }
+      jdl_return_bytes_copy(c, buf, (uint32_t)n);
+      return;
+    }
+    if(!retry(c, fd, PROC_FD_READ, deadline)) break;
+  }
+  if(!c->failed) jdl_return_bytes_copy(c, NULL, 0);
+}
+
+void vm_net_write(jdlo_ctx* c) {
+  jello_process* p;
+  proc_socket* k;
+  int fd = arg_fd(c, &p, &k);
+  const uint8_t* data = fd >= 0 ? jdl_arg_bytes_data(c, 1) : NULL;
+  uint32_t len = fd >= 0 ? jdl_arg_bytes_len(c, 1) : 0;
+  uint32_t done = 0;
+  while(fd >= 0 && done < len && k->tls) {
+    int r = k->tls_ops->write(k->tls, data + done, len - done);
+    if(r >= 0) done += (uint32_t)r;
+    else if(!tls_retry(c, k, fd, r, 0)) break;
+  }
+  while(fd >= 0 && done < len && !k->tls) {
+    ssize_t n = jello_send(fd, data + done, len - done);
+    if(n > 0) {
+      done += (uint32_t)n;
+      continue;
+    }
+    if(n == 0) errno = EAGAIN;
+    if(!retry(c, fd, PROC_FD_WRITE, 0)) break;
+  }
+  if(!c->failed) jdl_return_bool(c, fd >= 0 && done == len);
+}
+
+void vm_net_send_to(jdlo_ctx* c) {
+  jello_process* p;
+  proc_socket* k;
+  int fd = arg_fd(c, &p, &k);
+  net_addrs ai;
+  int sent = 0;
+  if(fd >= 0 && resolve(c, 2, 3, SOCK_DGRAM, 0, &ai)) {
+    const uint8_t* data = jdl_arg_bytes_data(c, 1);
+    uint32_t len = jdl_arg_bytes_len(c, 1);
+    while(!(sent = jello_sendto(fd, data, len, ai.list->ai_addr, (socklen_t)ai.list->ai_addrlen) >=
+                   0) &&
+          retry(c, fd, PROC_FD_WRITE, 0)) {}
+    addrs_free(&ai);
+  }
+  if(!c->failed) jdl_return_bool(c, sent);
 }
 
 void vm_net_close(jdlo_ctx* c) {

@@ -21,6 +21,7 @@
 #include <mstcpip.h>
 #include <ws2tcpip.h>
 #ifndef SIO_UDP_CONNRESET
+#define SIO_UDP_CONNRESET _WSAIOW(IOC_VENDOR, 12)
 #endif
 #else
 #include <arpa/inet.h>
@@ -33,6 +34,56 @@
 #endif
 
 #ifdef _WIN32
+
+#define JELLO_SOCKET(fd) ((SOCKET)(uintptr_t)(uint32_t)(fd))
+
+static inline int jello_sock_failed(void) {
+  switch(WSAGetLastError()) {
+    case WSAEWOULDBLOCK: errno = EWOULDBLOCK; break;
+    case WSAEINPROGRESS: errno = EINPROGRESS; break;
+    case WSAEALREADY: errno = EALREADY; break;
+    case WSAEINTR: errno = EINTR; break;
+    case WSAEBADF:
+    case WSAENOTSOCK: errno = EBADF; break;
+    case WSAEACCES: errno = EACCES; break;
+    case WSAEFAULT:
+    case WSAEINVAL: errno = EINVAL; break;
+    case WSAEMFILE: errno = EMFILE; break;
+    case WSAEMSGSIZE: errno = EMSGSIZE; break;
+    case WSAEPROTOTYPE: errno = EPROTOTYPE; break;
+    case WSAENOPROTOOPT: errno = ENOPROTOOPT; break;
+    case WSAEPROTONOSUPPORT: errno = EPROTONOSUPPORT; break;
+    case WSAEOPNOTSUPP: errno = EOPNOTSUPP; break;
+    case WSAEAFNOSUPPORT: errno = EAFNOSUPPORT; break;
+    case WSAEADDRINUSE: errno = EADDRINUSE; break;
+    case WSAEADDRNOTAVAIL: errno = EADDRNOTAVAIL; break;
+    case WSAENETDOWN: errno = ENETDOWN; break;
+    case WSAENETUNREACH: errno = ENETUNREACH; break;
+    case WSAENETRESET: errno = ENETRESET; break;
+    case WSAECONNABORTED: errno = ECONNABORTED; break;
+    case WSAECONNRESET: errno = ECONNRESET; break;
+    case WSAENOBUFS: errno = ENOBUFS; break;
+    case WSAEISCONN: errno = EISCONN; break;
+    case WSAENOTCONN: errno = ENOTCONN; break;
+    case WSAESHUTDOWN: errno = EPIPE; break;
+    case WSAETIMEDOUT: errno = ETIMEDOUT; break;
+    case WSAECONNREFUSED: errno = ECONNREFUSED; break;
+    case WSAEHOSTDOWN:
+    case WSAEHOSTUNREACH: errno = EHOSTUNREACH; break;
+    case WSA_NOT_ENOUGH_MEMORY: errno = ENOMEM; break;
+    default: errno = EIO; break;
+  }
+  return -1;
+}
+
+static inline int jello_sockets_start(void) {
+  static volatile LONG started;
+  if(started) return 1;
+  WSADATA wsa;
+  if(WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return 0;
+  InterlockedExchange(&started, 1);
+  return 1;
+}
 
 #else
 
@@ -76,7 +127,19 @@ static inline void jello_sock_reuse_port(int fd) {
 #endif
 }
 
+static inline void jello_sock_datagram(int fd) {
 #ifdef _WIN32
+  BOOL off = FALSE;
+  DWORD bytes = 0;
+  WSAIoctl(JELLO_SOCKET(fd), SIO_UDP_CONNRESET, &off, sizeof off, NULL, 0, &bytes, NULL, NULL);
+#else
+  (void)fd;
+#endif
+}
+
+#ifdef _WIN32
+/** `len`, as much of it as one Winsock call, which counts in `int`, can take. */
+static inline int jello_sock_len(size_t len) { return len > INT32_MAX ? INT32_MAX : (int)len; }
 #endif
 
 static inline void jello_sock_close(int fd) {
@@ -84,6 +147,42 @@ static inline void jello_sock_close(int fd) {
   closesocket(JELLO_SOCKET(fd));
 #else
   close(fd);
+#endif
+}
+
+static inline ssize_t jello_send(int fd, const void* buf, size_t len) {
+#ifdef _WIN32
+  return jello_sock_check(send(JELLO_SOCKET(fd), (const char*)buf, jello_sock_len(len), 0));
+#else
+  return send(fd, buf, len, MSG_NOSIGNAL);
+#endif
+}
+
+static inline ssize_t jello_sendto(int fd, const void* buf, size_t len, const struct sockaddr* to,
+                                   socklen_t to_len) {
+#ifdef _WIN32
+  return jello_sock_check(
+      sendto(JELLO_SOCKET(fd), (const char*)buf, jello_sock_len(len), 0, to, to_len));
+#else
+  return sendto(fd, buf, len, MSG_NOSIGNAL, to, to_len);
+#endif
+}
+
+static inline ssize_t jello_recv(int fd, void* buf, size_t len) {
+#ifdef _WIN32
+  return jello_sock_check(recv(JELLO_SOCKET(fd), (char*)buf, jello_sock_len(len), 0));
+#else
+  return recv(fd, buf, len, 0);
+#endif
+}
+
+static inline ssize_t jello_recvfrom(int fd, void* buf, size_t len, struct sockaddr* from,
+                                     socklen_t* from_len) {
+#ifdef _WIN32
+  return jello_sock_check(
+      recvfrom(JELLO_SOCKET(fd), (char*)buf, jello_sock_len(len), 0, from, from_len));
+#else
+  return recvfrom(fd, buf, len, 0, from, from_len);
 #endif
 }
 
