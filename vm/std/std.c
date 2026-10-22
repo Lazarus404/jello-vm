@@ -60,6 +60,7 @@ static const jello_jdll_export STD_EXPORTS[] = {
     {"args_count", std_args_count, I, 0, {0}, 0},
     {"args_get", std_args_get, Y, 1, {I}, 0},
     {"process_exit", std_process_exit, I, 1, {I}, 0},
+    {"process_exec", std_process_exec, Y, 1, {Y}, 0},
     {"command_start", std_command_start, D, 2, {Y, Y}, 0},
     {"command_wait", std_command_wait, I, 1, {D}, W},
     {"command_stdout", std_command_stdout, Y, 1, {D}, W},

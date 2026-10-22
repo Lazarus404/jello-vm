@@ -320,6 +320,62 @@ void std_args_get(jdlo_ctx* c) {
   jdl_return_bytes_copy(c, (const uint8_t*)arg, (uint32_t)strlen(arg));
 }
 
+#ifdef _WIN32
+static BOOL WINAPI ignore_break(DWORD event) {
+  (void)event;
+  return TRUE;
+}
+
+static void exec_windows(char** argv, char* reason, size_t cap) {
+  static const DWORD streams[3] = {STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE};
+  HANDLE copies[3] = {NULL, NULL, NULL};
+  for(int i = 0; i < 3; i++) {
+    HANDLE h = GetStdHandle(streams[i]);
+    if(!h || h == INVALID_HANDLE_VALUE ||
+       !DuplicateHandle(GetCurrentProcess(), h, GetCurrentProcess(), &copies[i], 0, TRUE,
+                        DUPLICATE_SAME_ACCESS)) {
+      SECURITY_ATTRIBUTES inherit = {sizeof inherit, NULL, TRUE};
+      copies[i] = CreateFileA("NUL", GENERIC_READ | GENERIC_WRITE,
+                              FILE_SHARE_READ | FILE_SHARE_WRITE, &inherit, OPEN_EXISTING, 0, NULL);
+    }
+  }
+  SetConsoleCtrlHandler(ignore_break, TRUE);
+  HANDLE child = std_spawn(argv, NULL, copies[0], copies[1], copies[2], reason, cap);
+  for(int i = 0; i < 3; i++)
+    if(copies[i] != INVALID_HANDLE_VALUE) CloseHandle(copies[i]);
+  if(!child) {
+    SetConsoleCtrlHandler(ignore_break, FALSE);
+    return;
+  }
+  DWORD code = 1;
+  WaitForSingleObject(child, INFINITE);
+  GetExitCodeProcess(child, &code);
+  ExitProcess(code);
+}
+#endif
+
+void std_process_exec(jdlo_ctx* c) {
+  char* store = NULL;
+  size_t argc = 0;
+  char** argv = std_entries(c, 0, &store, &argc);
+  char reason[STD_MAX_PATH + 128];
+  if(!argv || argc == 0) {
+    snprintf(reason, sizeof reason,
+             "process_exec: argv must be NUL-terminated entries, at least one");
+  } else {
+    fflush(NULL);
+#ifdef _WIN32
+    exec_windows(argv, reason, sizeof reason);
+#else
+    execvp(argv[0], argv);
+    snprintf(reason, sizeof reason, "cannot run %s: %s", argv[0], strerror(errno));
+#endif
+  }
+  free(argv);
+  free(store);
+  jdl_return_bytes_copy(c, (const uint8_t*)reason, (uint32_t)strlen(reason));
+}
+
 void std_process_exit(jdlo_ctx* c) {
   fflush(NULL);
   exit(jdl_arg_i32(c, 0) & 255);

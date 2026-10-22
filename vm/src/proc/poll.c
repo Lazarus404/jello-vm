@@ -25,6 +25,38 @@
 
 #if defined(_WIN32)
 
+
+int proc_poller_open(proc_poller* pl) {
+  pl->port = jello_sockets_start() ? epoll_create1(0) : NULL;
+  if(!pl->port) {
+    errno = EIO;
+    return -1;
+  }
+  int wake = jello_sock_open(AF_INET, SOCK_DGRAM);
+  struct sockaddr_in at = {.sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
+  socklen_t len = (socklen_t)sizeof at;
+  struct epoll_event ev = {.events = EPOLLIN, .data = {.ptr = NULL}};
+  if(wake < 0 || jello_bind(wake, (struct sockaddr*)&at, len) != 0 ||
+     jello_getsockname(wake, (struct sockaddr*)&at, &len) != 0 ||
+     jello_connect(wake, (struct sockaddr*)&at, len) != 0 || jello_sock_nonblocking(wake) != 0 ||
+     epoll_ctl(pl->port, EPOLL_CTL_ADD, JELLO_SOCKET(wake), &ev) != 0) {
+    int err = errno ? errno : EIO;
+    if(wake >= 0) jello_sock_close(wake);
+    epoll_close(pl->port);
+    errno = err;
+    return -1;
+  }
+  pl->wake = wake;
+  return 0;
+}
+
+int proc_poller_watch(proc_poller* pl, int fd, void* token) {
+  struct epoll_event ev = {.events = EPOLLIN | EPOLLOUT | EPOLLRDHUP | EPOLLONESHOT,
+                           .data = {.ptr = token}};
+  if(epoll_ctl(pl->port, EPOLL_CTL_ADD, JELLO_SOCKET(fd), &ev) == 0) return 0;
+  return -1;
+}
+
 void proc_poller_rearm(proc_poller* pl, int fd, void* token, uint32_t events) {
   struct epoll_event ev = {.events = EPOLLONESHOT, .data = {.ptr = token}};
   if(events & PROC_FD_READ) ev.events |= EPOLLIN | EPOLLRDHUP;
@@ -32,7 +64,81 @@ void proc_poller_rearm(proc_poller* pl, int fd, void* token, uint32_t events) {
   if(events) epoll_ctl(pl->port, EPOLL_CTL_MOD, JELLO_SOCKET(fd), &ev);
 }
 
+void proc_poller_unwatch(proc_poller* pl, int fd) {
+  epoll_ctl(pl->port, EPOLL_CTL_DEL, JELLO_SOCKET(fd), NULL);
+}
+
+uint32_t proc_poller_wait(proc_poller* pl, proc_poll_event* out) {
+  struct epoll_event evs[PROC_POLL_BATCH];
+  int n = epoll_wait(pl->port, evs, (int)PROC_POLL_BATCH, -1);
+  if(n < 0) return 0;
+  for(int i = 0; i < n; i++) {
+    uint32_t e = evs[i].events, ready = 0;
+    if(e & (EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR)) ready |= PROC_FD_READ;
+    if(e & (EPOLLOUT | EPOLLHUP | EPOLLERR)) ready |= PROC_FD_WRITE;
+    out[i] = (proc_poll_event){evs[i].data.ptr, ready};
+  }
+  return (uint32_t)n;
+}
+
+void proc_poller_wake(proc_poller* pl) {
+  char one = 1;
+  jello_send(pl->wake, &one, 1);
+}
+
+void proc_poller_close(proc_poller* pl) {
+  jello_sock_close(pl->wake);
+  epoll_close(pl->port);
+}
+
 #elif defined(__linux__)
+
+int proc_poller_open(proc_poller* pl) {
+  pl->fd = epoll_create1(EPOLL_CLOEXEC);
+  if(pl->fd < 0) return -1;
+  pl->wake = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  struct epoll_event ev = {.events = EPOLLIN, .data = {.ptr = NULL}};
+  if(pl->wake < 0 || epoll_ctl(pl->fd, EPOLL_CTL_ADD, pl->wake, &ev) != 0) {
+    int err = errno;
+    if(pl->wake >= 0) close(pl->wake);
+    close(pl->fd);
+    errno = err;
+    return -1;
+  }
+  return 0;
+}
+
+int proc_poller_watch(proc_poller* pl, int fd, void* token) {
+  struct epoll_event ev = {.events = EPOLLIN | EPOLLOUT | EPOLLRDHUP | EPOLLET,
+                           .data = {.ptr = token}};
+  if(epoll_ctl(pl->fd, EPOLL_CTL_ADD, fd, &ev) == 0) return 0;
+  return errno == EPERM ? 1 : -1;
+}
+
+void proc_poller_unwatch(proc_poller* pl, int fd) { epoll_ctl(pl->fd, EPOLL_CTL_DEL, fd, NULL); }
+
+uint32_t proc_poller_wait(proc_poller* pl, proc_poll_event* out) {
+  struct epoll_event evs[PROC_POLL_BATCH];
+  int n = epoll_wait(pl->fd, evs, (int)PROC_POLL_BATCH, -1);
+  if(n < 0) return 0;
+  for(int i = 0; i < n; i++) {
+    uint32_t e = evs[i].events, ready = 0;
+    if(e & (EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR)) ready |= PROC_FD_READ;
+    if(e & (EPOLLOUT | EPOLLHUP | EPOLLERR)) ready |= PROC_FD_WRITE;
+    out[i] = (proc_poll_event){evs[i].data.ptr, ready};
+  }
+  return (uint32_t)n;
+}
+
+void proc_poller_wake(proc_poller* pl) {
+  uint64_t one = 1;
+  while(write(pl->wake, &one, sizeof one) < 0 && errno == EINTR) {}
+}
+
+void proc_poller_close(proc_poller* pl) {
+  close(pl->wake);
+  close(pl->fd);
+}
 
 #else
 

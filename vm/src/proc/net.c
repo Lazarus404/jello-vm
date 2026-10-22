@@ -519,6 +519,10 @@ static void receive(jdlo_ctx* c, int from) {
   if(!c->failed) jdl_return_bytes_copy(c, NULL, 0);
 }
 
+void vm_net_read(jdlo_ctx* c) { receive(c, 0); }
+
+void vm_net_receive_from(jdlo_ctx* c) { receive(c, 1); }
+
 void vm_net_write(jdlo_ctx* c) {
   jello_process* p;
   proc_socket* k;
@@ -621,6 +625,27 @@ void vm_net_local_port(jdlo_ctx* c) {
   memset(&a, 0, sizeof a);
   if(fd >= 0 && jello_getsockname(fd, (struct sockaddr*)&a, &len) < 0) failed(c, errno);
   jdl_return_i32(c, fd >= 0 ? port_of(&a) : -1);
+}
+
+void vm_net_peer_host(jdlo_ctx* c) {
+  jello_process* p;
+  proc_socket* k;
+  int fd = arg_fd(c, &p, &k);
+  if(!k) return;
+  char host[NI_MAXHOST];
+  if(fd < 0 || !k->peer_len ||
+     getnameinfo((const struct sockaddr*)&k->peer, k->peer_len, host, sizeof host, NULL, 0,
+                 NI_NUMERICHOST)) {
+    host[0] = '\0';
+  }
+  jdl_return_bytes_copy(c, (const uint8_t*)host, (uint32_t)strlen(host));
+}
+
+void vm_net_peer_port(jdlo_ctx* c) {
+  jello_process* p;
+  proc_socket* k;
+  int fd = arg_fd(c, &p, &k);
+  if(k) jdl_return_i32(c, fd >= 0 && k->peer_len ? port_of(&k->peer) : -1);
 }
 
 void vm_net_error(jdlo_ctx* c) { jdl_return_i32(c, c->vm->net_error); }

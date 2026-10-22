@@ -153,7 +153,11 @@ set(JELLO_STD_SOURCES
   std/regexp.c
   std/text.c
   std/unicode.c)
-list(APPEND JELLO_STD_SOURCES std/command.c)
+if(WIN32)
+  list(APPEND JELLO_STD_SOURCES std/command_windows.c)
+else()
+  list(APPEND JELLO_STD_SOURCES std/command.c)
+endif()
 add_library(jello_pcre2 STATIC
   third_party/pcre2-10.30/src/pcre2_auto_possess.c
   third_party/pcre2-10.30/src/pcre2_chartables.c

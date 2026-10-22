@@ -16,6 +16,8 @@ char** std_entries(jdlo_ctx* c, int index, char** store, size_t* count);
 int std_temp_dir(char* out, size_t cap);
 
 #ifdef _WIN32
+void* std_spawn(char** argv, const char* env, void* in, void* out, void* err, char* reason,
+                size_t cap);
 #endif
 
 static inline int std_is_heap(jello_value v, jello_obj_kind kind) {
@@ -69,6 +71,7 @@ void std_argv_count(jdlo_ctx* c);
 void std_args_count(jdlo_ctx* c);
 void std_args_get(jdlo_ctx* c);
 void std_process_exit(jdlo_ctx* c);
+void std_process_exec(jdlo_ctx* c);
 
 void std_command_start(jdlo_ctx* c);
 void std_command_wait(jdlo_ctx* c);
