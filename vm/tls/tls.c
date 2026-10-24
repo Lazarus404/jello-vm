@@ -185,6 +185,102 @@ static net_tls_config* make_config(jdlo_ctx* c, uint32_t* bytes, int32_t* err) {
   return t;
 }
 
+static int bio_send(void* ctx, const unsigned char* buf, size_t len) {
+  net_tls* s = (net_tls*)ctx;
+  for(;;) {
+    ssize_t n = jello_send(s->fd, buf, len);
+    if(n >= 0) return (int)n;
+    if(errno == EINTR) continue;
+    if(errno == EAGAIN || errno == EWOULDBLOCK) return MBEDTLS_ERR_SSL_WANT_WRITE;
+    s->sys_err = errno;
+    return MBEDTLS_ERR_NET_SEND_FAILED;
+  }
+}
+
+static int bio_recv(void* ctx, unsigned char* buf, size_t len) {
+  net_tls* s = (net_tls*)ctx;
+  for(;;) {
+    ssize_t n = jello_recv(s->fd, buf, len);
+    if(n >= 0) return (int)n;
+    if(errno == EINTR) continue;
+    if(errno == EAGAIN || errno == EWOULDBLOCK) return MBEDTLS_ERR_SSL_WANT_READ;
+    s->sys_err = errno;
+    return MBEDTLS_ERR_NET_RECV_FAILED;
+  }
+}
+
+static net_tls* open_session(void* config, int fd, const uint8_t* host, uint32_t len,
+                             int32_t* err) {
+  net_tls_config* t = (net_tls_config*)config;
+  if(!t->server && !len) {
+    *err = EINVAL;
+    return NULL;
+  }
+  net_tls* s = (net_tls*)calloc(1, sizeof(net_tls));
+  char* name = s ? (char*)malloc((size_t)len + 1) : NULL;
+  if(!name) {
+    free(s);
+    *err = ENOMEM;
+    return NULL;
+  }
+  memcpy(name, host, len);
+  name[len] = '\0';
+  mbedtls_ssl_init(&s->ssl);
+  int ret = mbedtls_ssl_setup(&s->ssl, &t->conf);
+  if(!ret && !t->server) ret = mbedtls_ssl_set_hostname(&s->ssl, name);
+  free(name);
+  if(ret) {
+    mbedtls_ssl_free(&s->ssl);
+    free(s);
+    *err = NET_TLS_ERRORS - ret;
+    return NULL;
+  }
+  s->fd = fd;
+  mbedtls_ssl_set_bio(&s->ssl, s, bio_send, bio_recv, NULL);
+  jdl_retain(t);
+  s->config = t;
+  return s;
+}
+
+static int result(net_tls* s, int ret) {
+  if(ret >= 0) return ret;
+  if(ret == MBEDTLS_ERR_SSL_WANT_READ) return NET_TLS_WANT_READ;
+  if(ret == MBEDTLS_ERR_SSL_WANT_WRITE) return NET_TLS_WANT_WRITE;
+  int net = ret == MBEDTLS_ERR_NET_SEND_FAILED || ret == MBEDTLS_ERR_NET_RECV_FAILED;
+  s->err = net && s->sys_err ? s->sys_err : NET_TLS_ERRORS - ret;
+  return NET_TLS_FAILED;
+}
+
+static int handshake(net_tls* s) { return result(s, mbedtls_ssl_handshake(&s->ssl)); }
+
+static int read_data(net_tls* s, uint8_t* buf, uint32_t max) {
+  int ret = mbedtls_ssl_read(&s->ssl, buf, max);
+  if(ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY || ret == MBEDTLS_ERR_SSL_CONN_EOF) return 0;
+  return result(s, ret);
+}
+
+static int write_data(net_tls* s, const uint8_t* data, uint32_t len) {
+  return result(s, mbedtls_ssl_write(&s->ssl, data, len));
+}
+
+static int32_t error(const net_tls* s) { return s->err; }
+
+static void close_session(net_tls* s, int notify) {
+  if(notify) mbedtls_ssl_close_notify(&s->ssl);
+  mbedtls_ssl_free(&s->ssl);
+  config_free(s->config);
+  free(s);
+}
+
+static void error_text(int32_t code, char* out, size_t size) {
+  mbedtls_strerror(NET_TLS_ERRORS - code, out, size);
+}
+
+JELLO_JDLL_EXPORT const net_tls_ops jello_tls_ops = {
+    NET_TLS_OPS_VERSION, &CONFIG_CLASS, open_session,  handshake,  read_data,
+    write_data,          error,         close_session, error_text,
+};
+
 static void tls_version(jdlo_ctx* c) {
   static const char VERSION[] = MBEDTLS_VERSION_STRING_FULL;
   jdl_return_bytes_copy(c, (const uint8_t*)VERSION, (uint32_t)(sizeof VERSION - 1));
