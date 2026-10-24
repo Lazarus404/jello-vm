@@ -1003,6 +1003,114 @@ static int link_path(const dep* d, const char* root, const char* dest, json** ma
   return ok;
 }
 
+static int prune(const char* packages, const deps* wanted, int* changed) {
+  DIR* dir = opendir(packages);
+  if(!dir) return 1;
+  int ok = 1;
+  struct dirent* e;
+  while(ok && (e = readdir(dir))) {
+    int needed = e->d_name[0] == '.';
+    for(size_t i = 0; i < wanted->count && !needed; i++)
+      needed = strcmp(wanted->items[i].name, e->d_name) == 0;
+    if(needed) continue;
+    char* path = path_of("%s/%s", packages, e->d_name);
+    ok = remove_tree(path);
+    free(path);
+    if(ok) {
+      fprintf(stderr, "removed %s\n", e->d_name);
+      *changed = 1;
+    }
+  }
+  closedir(dir);
+  return ok;
+}
+
+static int get_deps(const char* root) {
+  char* manifest_path = path_of("%s/jello.json", root);
+  char* lock_path = path_of("%s/jello.lock", root);
+  char* packages = path_of("%s/packages", root);
+  json* manifest = NULL;
+  lock old = {0}, now = {0};
+  deps queue = {0};
+  int ok = 0, changed = 0;
+  if(!is_file(manifest_path)) {
+    fprintf(stderr, "jlo_tool: no jello.json in %s (jlo_tool init makes one)\n", root);
+    goto done;
+  }
+  if(!(manifest = json_read(manifest_path)) || !lock_read(lock_path, &old)) goto done;
+  if(!json_string_at(manifest, "name")) {
+    fprintf(stderr, "jlo_tool: %s has no \"name\"\n", manifest_path);
+    goto done;
+  }
+  if(!manifest_deps(manifest, manifest_path, "jello.json", 1, &queue) ||
+     (queue.count && !make_dir(packages)))
+    goto done;
+  for(size_t i = 0; i < queue.count; i++) {
+    const dep* d = &queue.items[i];
+    const dep* first = NULL;
+    for(size_t k = 0; k < i && !first; k++)
+      if(strcmp(queue.items[k].name, d->name) == 0) first = &queue.items[k];
+    if(first) {
+      if(first->kind == d->kind && strcmp(first->source, d->source) == 0) continue;
+      fprintf(
+          stderr,
+          "jlo_tool: %s asks for %s from %s, and %s from %s; there is one copy of each package\n",
+          first->by, d->name, first->source, d->by, d->source);
+      goto done;
+    }
+    char* dest = path_of("%s/%s", packages, d->name);
+    json* pm = NULL;
+    int got;
+    if(d->kind == DEP_PATH) {
+      got = link_path(d, root, dest, &pm, &changed);
+    } else {
+      locked* pin = lock_find(&old, d->name);
+      if(pin && strcmp(pin->url, d->source) != 0) pin = NULL;
+      locked entry;
+      if(pin && package_is(dest, NULL, d->name, pin->version, &pm)) {
+        entry = locked_new(pin->name, pin->version, pin->url, pin->sha256);
+        got = 1;
+      } else {
+        got = fetch(d, packages, dest, pin ? pin->sha256 : NULL, &entry, &pm);
+        changed |= got;
+      }
+      if(got) {
+        now.items = xrealloc(now.items, (now.count + 1) * sizeof *now.items);
+        now.items[now.count++] = entry;
+      }
+    }
+    char* where = path_of("%s/jello.json", dest);
+    got = got && manifest_deps(pm, where, d->name, 0, &queue);
+    free(where);
+    free(dest);
+    json_free(pm);
+    if(!got) goto done;
+  }
+  if(!prune(packages, &queue, &changed)) goto done;
+  text t = {0};
+  lock_text(&now, &t);
+  size_t len = 0;
+  char* before = read_file(lock_path, &len);
+  if((now.count || before) && !(before && len == t.len && memcmp(before, t.data, len) == 0)) {
+    ok = write_file(lock_path, t.data, t.len);
+    changed = 1;
+  } else {
+    ok = 1;
+  }
+  free(before);
+  free(t.data);
+  if(ok && !changed) fputs("dependencies up to date\n", stderr);
+done:
+  json_free(manifest);
+  lock_free(&old);
+  lock_free(&now);
+  deps_free(&queue);
+  free(manifest_path);
+  free(lock_path);
+  free(packages);
+  return ok ? 0 : 1;
+}
+
 static int write_new(const char* path, const char* body) {
   if(kind_of(path)) return 1;
   return write_file(path, body, strlen(body));
@@ -1052,6 +1160,14 @@ done:
   free(main_path);
   free(ignore);
   return ok ? 0 : 1;
+}
+
+int jlo_get_deps_main(int argc, char** argv) {
+  if(argc > 1 || (argc == 1 && argv[0][0] == '-')) {
+    fputs("usage: jlo_tool get-deps [DIR]\n", stderr);
+    return 2;
+  }
+  return get_deps(argc ? argv[0] : ".");
 }
 
 int jlo_init_main(int argc, char** argv) {

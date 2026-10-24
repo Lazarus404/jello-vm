@@ -13,6 +13,8 @@
 extern const uint8_t jello_jelloc_image[];
 extern const uint8_t jello_jelloc_image_end[];
 
+void jello_host_start(void);
+
 void jello_print_host_result(const jello_bc_module* m, const jello_numeric_result* r, FILE* out,
                              int bytes_newline);
 
@@ -24,5 +26,8 @@ typedef struct jello_host_options {
   int jit_report;   /**< With `jit`; report on stderr what the JIT compiled. */
   int raw_bytes;    /**< Print a Bytes result as is, without a newline. */
 } jello_host_options;
+
+int jello_host_run(const jello_host_options* options, const char* name, const uint8_t* data,
+                   size_t size, int nargs, const char* const* args);
 
 #endif

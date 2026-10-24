@@ -6,6 +6,8 @@
 
 #ifndef JELLO_TOOLS_DEPS_H
 #define JELLO_TOOLS_DEPS_H
+
+int jlo_get_deps_main(int argc, char** argv);
 int jlo_init_main(int argc, char** argv);
 
 #endif

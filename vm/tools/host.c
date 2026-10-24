@@ -10,6 +10,33 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#include <windows.h>
+
+static UINT console_input_cp, console_output_cp;
+
+static void restore_console(void) {
+  if(console_input_cp) SetConsoleCP(console_input_cp);
+  if(console_output_cp) SetConsoleOutputCP(console_output_cp);
+}
+#endif
+
+void jello_host_start(void) {
+#ifdef _WIN32
+  _setmode(_fileno(stdin), _O_BINARY);
+  _setmode(_fileno(stdout), _O_BINARY);
+  _setmode(_fileno(stderr), _O_BINARY);
+  console_input_cp = GetConsoleCP();
+  console_output_cp = GetConsoleOutputCP();
+  if(console_input_cp || console_output_cp) {
+    SetConsoleCP(CP_UTF8);
+    SetConsoleOutputCP(CP_UTF8);
+    atexit(restore_console);
+  }
+#endif
+}
 
 static void print_heap(const void* p, FILE* out) {
   switch((jello_obj_kind)((const jello_obj_header*)p)->kind) {
