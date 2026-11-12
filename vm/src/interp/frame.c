@@ -9,7 +9,6 @@
 #include <jello/internal/platform.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
 
 #define VM_FIRST_FRAME_STACK_BYTES (16u * 1024u)
 

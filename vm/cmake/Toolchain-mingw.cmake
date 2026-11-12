@@ -1,0 +1,14 @@
+# Windows with llvm-mingw: -DCMAKE_TOOLCHAIN_FILE=cmake/Toolchain-mingw.cmake and
+# -DJELLO_MINGW_ARCH=x86_64 or aarch64, the toolchain's binaries on PATH.
+set(CMAKE_SYSTEM_NAME Windows)
+set(CMAKE_TRY_COMPILE_PLATFORM_VARIABLES JELLO_MINGW_ARCH)
+if(NOT JELLO_MINGW_ARCH)
+  set(JELLO_MINGW_ARCH x86_64)
+endif()
+set(CMAKE_SYSTEM_PROCESSOR ${JELLO_MINGW_ARCH})
+set(CMAKE_C_COMPILER ${JELLO_MINGW_ARCH}-w64-mingw32-clang)
+set(CMAKE_ASM_COMPILER ${JELLO_MINGW_ARCH}-w64-mingw32-clang)
+set(CMAKE_RC_COMPILER ${JELLO_MINGW_ARCH}-w64-mingw32-windres)
+set(CMAKE_AR llvm-ar)
+set(CMAKE_RANLIB llvm-ranlib)
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)

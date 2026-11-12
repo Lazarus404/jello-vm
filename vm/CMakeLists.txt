@@ -7,6 +7,22 @@ set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
+
+# Sources by their paths in this directory, as assertions and Mbed TLS name them, so that no
+# binary names the directory it was built in.
+if(NOT MSVC)
+  add_compile_options("-ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=")
+endif()
+# glibc hides POSIX and GNU declarations (clock_gettime, pthread_getattr_np) under -std=c11.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  add_compile_definitions(_GNU_SOURCE)
+endif()
+# Windows 10, as the manifest says, so that its APIs (GetCurrentThreadStackLimits) are declared;
+# the manifest each program carries is a resource.
+if(WIN32)
+  add_compile_definitions(_WIN32_WINNT=0x0A00)
+  enable_language(RC)
+endif()
 include(CompilerWarnings)
 
 option(JELLO_WARNINGS_AS_ERRORS "Treat warnings as errors" ON)
@@ -102,11 +118,10 @@ if(JELLO_WARNINGS_AS_ERRORS)
 endif()
 find_package(Threads REQUIRED)
 target_link_libraries(jello_vm PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
-
-if(APPLE)
-  target_link_libraries(jello_vm INTERFACE "-Wl,-force_load,$<TARGET_FILE:jello_vm>")
-else()
-  target_link_libraries(jello_vm INTERFACE "-Wl,--whole-archive" "$<TARGET_FILE:jello_vm>" "-Wl,--no-whole-archive")
+if(WIN32)
+  target_link_libraries(jello_vm PUBLIC ws2_32 bcrypt)
+elseif(NOT APPLE)
+  target_link_libraries(jello_vm PUBLIC m)
 endif()
 
 install(FILES src/include/jello.h DESTINATION include)
@@ -114,24 +129,30 @@ install(FILES src/include/jello/jdll.h DESTINATION include/jello)
 
 add_library(jello_host STATIC tools/host.c tools/run.c tools/boot.c tools/deps.c)
 target_include_directories(jello_host PUBLIC tools "${JELLO_GENERATED_DIR}")
+target_compile_definitions(jello_host PUBLIC JELLO_JDLL_HOST)
 target_link_libraries(jello_host PUBLIC jello_vm)
 jello_enable_warnings(jello_host)
 if(JELLO_WARNINGS_AS_ERRORS)
   target_compile_options(jello_host PRIVATE -Werror)
 endif()
 
-add_executable(jlo_tool tools/jlo_tool.c)
+# Windows links winpthreads statically, so that each program and library imports only system DLLs.
+function(jello_program target)
+  add_executable(${target} ${ARGN})
+  if(WIN32)
+    target_sources(${target} PRIVATE tools/manifest.rc)
+    target_link_options(${target} PRIVATE -static)
+  endif()
+endfunction()
+
+jello_program(jlo_tool tools/jlo_tool.c)
 target_link_libraries(jlo_tool PRIVATE jello_host)
 jello_enable_warnings(jlo_tool)
 if(JELLO_WARNINGS_AS_ERRORS)
   target_compile_options(jlo_tool PRIVATE -Werror)
 endif()
 
-if(WIN32)
-  add_executable(jello tools/jello.c tools/manifest.rc)
-else()
-  add_executable(jello tools/jello.c)
-endif()
+jello_program(jello tools/jello.c)
 target_link_libraries(jello PRIVATE jello_host)
 jello_enable_warnings(jello)
 if(JELLO_WARNINGS_AS_ERRORS)
@@ -140,7 +161,7 @@ endif()
 
 set(JELLOC_IMAGE "" CACHE FILEPATH "The compiler module jelloc embeds")
 if(JELLOC_IMAGE AND EXISTS "${JELLOC_IMAGE}")
-  add_executable(jelloc tools/jelloc.c tools/jelloc_image.S)
+  jello_program(jelloc tools/jelloc.c tools/jelloc_image.S)
   set_source_files_properties(tools/jelloc_image.S PROPERTIES
     COMPILE_DEFINITIONS "JELLOC_IMAGE=\"${JELLOC_IMAGE}\""
     OBJECT_DEPENDS "${JELLOC_IMAGE}")
@@ -157,6 +178,8 @@ function(jello_jdll target name)
   set_target_properties(${target} PROPERTIES OUTPUT_NAME "${name}" PREFIX "" SUFFIX ".jdll")
   if(APPLE)
     set_target_properties(${target} PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
+  elseif(WIN32)
+    target_link_options(${target} PRIVATE -static)
   endif()
   jello_enable_warnings(${target})
   if(JELLO_WARNINGS_AS_ERRORS)
@@ -182,7 +205,8 @@ if(WIN32)
 else()
   list(APPEND JELLO_STD_SOURCES std/command.c)
 endif()
-add_library(jello_pcre2 STATIC
+# PCRE2 as objects, so that its library holds all of it, as the vendored copy's checks expect.
+add_library(jello_pcre2 OBJECT
   third_party/pcre2-10.30/src/pcre2_auto_possess.c
   third_party/pcre2-10.30/src/pcre2_chartables.c
   third_party/pcre2-10.30/src/pcre2_compile.c
@@ -215,9 +239,15 @@ set_target_properties(jello_pcre2 PROPERTIES POSITION_INDEPENDENT_CODE ON C_VISI
 jello_jdll(jello_std_jdll std ${JELLO_STD_SOURCES})
 target_include_directories(jello_std_jdll PRIVATE third_party/pcre2-10.30/src)
 target_link_libraries(jello_std_jdll PRIVATE jello_pcre2)
+if(WIN32)
+  target_link_libraries(jello_std_jdll PRIVATE pthread bcrypt)
+elseif(NOT APPLE)
+  target_link_libraries(jello_std_jdll PRIVATE m)
+endif()
 
 file(GLOB JELLO_MBEDTLS_SOURCES "${CMAKE_CURRENT_LIST_DIR}/third_party/mbedtls-3.5.1/library/*.c")
-add_library(jello_mbedtls STATIC ${JELLO_MBEDTLS_SOURCES})
+# Mbed TLS as objects, so that its library holds all of it, as the vendored copy's checks expect.
+add_library(jello_mbedtls OBJECT ${JELLO_MBEDTLS_SOURCES})
 target_include_directories(jello_mbedtls SYSTEM PUBLIC third_party/mbedtls-3.5.1/include)
 target_include_directories(jello_mbedtls PRIVATE src/include)
 target_compile_definitions(jello_mbedtls PUBLIC "MBEDTLS_USER_CONFIG_FILE=<jello/internal/tls_config.h>")
@@ -225,6 +255,9 @@ set_target_properties(jello_mbedtls PROPERTIES POSITION_INDEPENDENT_CODE ON C_VI
 target_link_libraries(jello_mbedtls PUBLIC Threads::Threads)
 jello_jdll(jello_tls_jdll tls tls/tls.c tls/crypto.c)
 target_link_libraries(jello_tls_jdll PRIVATE jello_mbedtls)
+if(WIN32)
+  target_link_libraries(jello_tls_jdll PRIVATE pthread ws2_32 bcrypt crypt32)
+endif()
 
 enable_testing()
 add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../tests" tests)

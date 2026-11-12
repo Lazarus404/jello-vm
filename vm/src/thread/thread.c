@@ -10,7 +10,6 @@
 #include <jello/internal/platform.h>
 #include <jello/internal/proc_internal.h>
 #include <stdlib.h>
-#include <sys/mman.h>
 
 static jello_heap* heap_new(void) {
   jello_heap* heap = (jello_heap*)calloc(1, sizeof(jello_heap));
