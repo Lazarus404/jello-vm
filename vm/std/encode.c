@@ -55,6 +55,16 @@ void std_bytes_xor(jdlo_ctx* c) {
   return_owned(c, out, len);
 }
 
+void std_bytes_crc32(jdlo_ctx* c) {
+  const uint8_t* data = jdl_arg_bytes_data(c, 0);
+  uint32_t crc = UINT32_MAX;
+  for(uint32_t i = 0; i < jdl_arg_bytes_len(c, 0); i++) {
+    crc ^= data[i];
+    for(int bit = 0; bit < 8; bit++) crc = crc & 1 ? (crc >> 1) ^ UINT32_C(0xedb88320) : crc >> 1;
+  }
+  jdl_return_i32(c, (int32_t)~crc);
+}
+
 void std_bytes_hex(jdlo_ctx* c) {
   const uint8_t* s = jdl_arg_bytes_data(c, 0);
   uint32_t len = jdl_arg_bytes_len(c, 0);

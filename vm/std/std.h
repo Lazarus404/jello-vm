@@ -124,6 +124,7 @@ void std_integer_parse(jdlo_ctx* c);
 void std_quote(jdlo_ctx* c);
 void std_bytes_u8(jdlo_ctx* c);
 void std_bytes_xor(jdlo_ctx* c);
+void std_bytes_crc32(jdlo_ctx* c);
 void std_bytes_hex(jdlo_ctx* c);
 void std_bytes_from_hex(jdlo_ctx* c);
 void std_bytes_base64(jdlo_ctx* c);

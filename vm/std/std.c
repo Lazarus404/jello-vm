@@ -93,6 +93,7 @@ static const jello_jdll_export STD_EXPORTS[] = {
     {"quote", std_quote, Y, 1, {Y}, 0},
     {"bytes_u8", std_bytes_u8, Y, 1, {I}, 0},
     {"bytes_xor", std_bytes_xor, Y, 2, {Y, Y}, 0},
+    {"bytes_crc32", std_bytes_crc32, I, 1, {Y}, 0},
     {"bytes_hex", std_bytes_hex, Y, 1, {Y}, 0},
     {"bytes_from_hex", std_bytes_from_hex, D, 1, {Y}, 0},
     {"bytes_base64", std_bytes_base64, Y, 2, {Y, B}, 0},
