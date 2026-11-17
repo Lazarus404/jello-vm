@@ -42,6 +42,19 @@ static int base64_value(uint8_t d, int url) {
   return -1;
 }
 
+void std_bytes_xor(jdlo_ctx* c) {
+  const uint8_t* left = jdl_arg_bytes_data(c, 0);
+  const uint8_t* right = jdl_arg_bytes_data(c, 1);
+  uint32_t len = jdl_arg_bytes_len(c, 0);
+  if(len != jdl_arg_bytes_len(c, 1)) {
+    jdl_fail(c, "lengths differ");
+    return;
+  }
+  uint8_t* out = (uint8_t*)malloc((size_t)len + 1);
+  for(uint32_t i = 0; out && i < len; i++) out[i] = left[i] ^ right[i];
+  return_owned(c, out, len);
+}
+
 void std_bytes_hex(jdlo_ctx* c) {
   const uint8_t* s = jdl_arg_bytes_data(c, 0);
   uint32_t len = jdl_arg_bytes_len(c, 0);
