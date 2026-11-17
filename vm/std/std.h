@@ -49,6 +49,7 @@ void std_unicode_get(jdlo_ctx* c);
 void std_unicode_compare(jdlo_ctx* c);
 void std_unicode_sub(jdlo_ctx* c);
 void std_unicode_from_codepoint(jdlo_ctx* c);
+void std_unicode_normalize(jdlo_ctx* c);
 
 int std_utf8_valid(const uint8_t* s, uint32_t len);
 

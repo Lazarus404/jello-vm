@@ -41,6 +41,7 @@ static const jello_jdll_export STD_EXPORTS[] = {
     {"unicode_compare", std_unicode_compare, I, 2, {Y, Y}, 0},
     {"unicode_sub", std_unicode_sub, Y, 3, {Y, I, I}, 0},
     {"unicode_from_codepoint", std_unicode_from_codepoint, Y, 1, {I}, 0},
+    {"unicode_normalize", std_unicode_normalize, Y, 2, {Y, I}, 0},
     {"file_exists", std_file_exists, B, 1, {Y}, W},
     {"file_read", std_file_read, Y, 1, {Y}, W},
     {"file_contents", std_file_contents, D, 1, {Y}, W},
