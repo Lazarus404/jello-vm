@@ -175,6 +175,7 @@ static void* shallow_copy(copier* c, void* p) {
       const jello_function* f = (const jello_function*)p;
       jello_function* n = jello_function_new(vm, f->func_index, f->ncaps);
       n->h.type_id = oh->type_id;
+      n->identity = f->identity;
       memcpy(n->captures, f->captures, sizeof(uint64_t) * f->ncaps);
       return n;
     }

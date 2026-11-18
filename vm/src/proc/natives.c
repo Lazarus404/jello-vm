@@ -460,6 +460,51 @@ static void vm_buf_slice(jdlo_ctx* c) {
   jdl_return_value(c, jello_from_ptr(out));
 }
 
+static uint64_t mix64(uint64_t x) {
+  x ^= x >> 30;
+  x *= UINT64_C(0xbf58476d1ce4e5b9);
+  x ^= x >> 27;
+  x *= UINT64_C(0x94d049bb133111eb);
+  return x ^ (x >> 31);
+}
+
+static uint64_t siphash13(const uint8_t* data, uint32_t len, const uint64_t key[2]) {
+  uint64_t v0 = key[0] ^ UINT64_C(0x736f6d6570736575), v1 = key[1] ^ UINT64_C(0x646f72616e646f6d);
+  uint64_t v2 = key[0] ^ UINT64_C(0x6c7967656e657261), v3 = key[1] ^ UINT64_C(0x7465646279746573);
+  uint64_t tail = (uint64_t)len << 56;
+  uint32_t at = 0;
+#define SIPROUND do { v0 += v1; v1 = (v1 << 13) | (v1 >> 51); v1 ^= v0; v0 = (v0 << 32) | (v0 >> 32); v2 += v3; v3 = (v3 << 16) | (v3 >> 48); v3 ^= v2; v0 += v3; v3 = (v3 << 21) | (v3 >> 43); v3 ^= v0; v2 += v1; v1 = (v1 << 17) | (v1 >> 47); v1 ^= v2; v2 = (v2 << 32) | (v2 >> 32); } while(0)
+  while(at + 8 <= len) {
+    uint64_t m;
+    memcpy(&m, data + at, sizeof m);
+    v3 ^= m; SIPROUND; v0 ^= m;
+    at += 8;
+  }
+  for(uint32_t i = 0; at + i < len; i++) tail |= (uint64_t)data[at + i] << (8u * i);
+  v3 ^= tail; SIPROUND; v0 ^= tail; v2 ^= 0xff; SIPROUND; SIPROUND; SIPROUND;
+#undef SIPROUND
+  return v0 ^ v1 ^ v2 ^ v3;
+}
+
+static void vm_hash_i32(jdlo_ctx* c) { jdl_return_i32(c, (int32_t)mix64((uint32_t)jdl_arg_i32(c, 0))); }
+static void vm_hash_i64(jdlo_ctx* c) { jdl_return_i32(c, (int32_t)mix64((uint64_t)jdl_arg_i64(c, 0))); }
+static void vm_hash_bool(jdlo_ctx* c) { jdl_return_i32(c, (int32_t)mix64((uint32_t)jdl_arg_bool(c, 0))); }
+static void vm_hash_atom(jdlo_ctx* c) { jdl_return_i32(c, (int32_t)mix64(jdl_arg_atom(c, 0))); }
+static void vm_hash_bytes(jdlo_ctx* c) {
+  jdl_return_i32(c, (int32_t)siphash13(jdl_arg_bytes_data(c, 0), jdl_arg_bytes_len(c, 0), c->vm->heap->hash_key));
+}
+static void vm_hash_identity(jdlo_ctx* c) {
+  jello_value v = jdl_arg_value(c, 0);
+  const jello_obj_header* h = jello_is_ptr(v) ? (const jello_obj_header*)jello_as_ptr(v) : NULL;
+  uint64_t id = h && h->kind == JELLO_OBJ_OBJECT ? ((const jello_object*)h)->identity
+              : h && h->kind == JELLO_OBJ_FUNCTION ? ((const jello_function*)h)->identity : 0;
+  jdl_return_i32(c, (int32_t)mix64(id));
+}
+static void vm_hash_combine(jdlo_ctx* c) {
+  uint64_t a = (uint32_t)jdl_arg_i32(c, 0), b = (uint32_t)jdl_arg_i32(c, 1);
+  jdl_return_i32(c, (int32_t)mix64(a ^ (b + UINT64_C(0x9e3779b97f4a7c15) + (a << 6) + (a >> 2))));
+}
+
 #define D (uint8_t)JELLO_T_DYNAMIC
 #define I (uint8_t)JELLO_T_I32
 #define B (uint8_t)JELLO_T_BOOL
@@ -512,6 +557,13 @@ static const jello_jdll_export VM_EXPORTS[] = {
     {"buffer_add_i64", vm_buf_add_i64, L, 3, {D, I, L}, 0},
     {"buffer_cas_i64", vm_buf_cas_i64, B, 4, {D, I, L, L}, 0},
     {"buffer_slice", vm_buf_slice, D, 3, {D, I, I}, 0},
+    {"hash_i32", vm_hash_i32, I, 1, {I}, 0},
+    {"hash_i64", vm_hash_i64, I, 1, {L}, 0},
+    {"hash_bool", vm_hash_bool, I, 1, {B}, 0},
+    {"hash_atom", vm_hash_atom, I, 1, {(uint8_t)JELLO_T_ATOM}, 0},
+    {"hash_bytes", vm_hash_bytes, I, 1, {Y}, 0},
+    {"hash_identity", vm_hash_identity, I, 1, {D}, 0},
+    {"hash_combine", vm_hash_combine, I, 2, {I, I}, 0},
     {"net_tcp_listen", vm_net_tcp_listen, D, 2, {Y, I}, 0},
     {"net_tcp_accept", vm_net_tcp_accept, D, 2, {D, I}, 0},
     {"net_tcp_connect", vm_net_tcp_connect, D, 3, {Y, I, I}, 0},
