@@ -233,6 +233,9 @@ typedef struct jello_space {
 typedef struct jello_heap {
   jello_space space;
 
+  uint64_t hash_key[2]; /**< Per-program random key for attacker-resistant value hashing. */
+  _Atomic uint64_t next_identity; /**< Object and closure identities, never reused on this heap. */
+
   pthread_mutex_t alloc_lock;
   atomic_int stop_requested;
   pthread_mutex_t stw_lock;
@@ -328,6 +331,10 @@ struct jello_vm {
   struct jello_process* proc;  /**< The process it runs as, once its scheduler has started. */
   jello_trap_trace trap_trace; /**< How the last trap was reached; last, being cold. */
 };
+
+static inline uint64_t vm_next_identity(jello_vm* vm) {
+  return atomic_fetch_add_explicit(&vm->heap->next_identity, 1u, memory_order_relaxed);
+}
 
 static inline int vm_space_shared(const jello_heap* heap, const jello_space* space) {
   return space == &heap->space;

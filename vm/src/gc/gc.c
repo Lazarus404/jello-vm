@@ -724,10 +724,11 @@ void jello_array_resize(jello_vm* vm, const jello_bc_module* m, jello_array* a, 
   a->length = new_length;
 }
 
-static jello_function* function_init(jello_function* fn, uint32_t func_index, uint32_t ncaps,
-                                     jello_type_id type) {
+static jello_function* function_init(jello_function* fn, uint64_t identity, uint32_t func_index,
+                                     uint32_t ncaps, jello_type_id type) {
   fn->h.kind = (uint8_t)JELLO_OBJ_FUNCTION;
   fn->h.type_id = type;
+  fn->identity = identity;
   fn->func_index = func_index;
   fn->ncaps = ncaps;
   for(uint32_t i = 0; i < ncaps; i++) fn->captures[i] = 0;
@@ -740,7 +741,7 @@ jello_function* jello_function_new(jello_vm* vm, uint32_t func_index, uint32_t n
 #endif
   void* p = jello_gc_alloc(vm, sizeof(jello_function) + (size_t)ncaps * sizeof(uint64_t));
   /* CONST_FUN and CLOSURE set the Function type they store it as. */
-  return function_init((jello_function*)p, func_index, ncaps, 0);
+  return function_init((jello_function*)p, vm_next_identity(vm), func_index, ncaps, 0);
 }
 
 void* vm_immortal_alloc(size_t size) {
@@ -752,8 +753,8 @@ void* vm_immortal_alloc(size_t size) {
 }
 
 jello_function* vm_function_immortal(uint32_t func_index, jello_type_id type) {
-  return function_init((jello_function*)vm_immortal_alloc(sizeof(jello_function)), func_index, 0,
-                       type);
+  return function_init((jello_function*)vm_immortal_alloc(sizeof(jello_function)), 0, func_index,
+                       0, type);
 }
 
 size_t vm_bytes_immortal_size(uint32_t length) {

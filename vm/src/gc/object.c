@@ -35,6 +35,7 @@ jello_object* jello_object_new(jello_vm* vm, uint32_t type_id) {
   jello_object* o = (jello_object*)jello_gc_alloc(vm, sizeof(jello_object));
   o->h.kind = (uint8_t)JELLO_OBJ_OBJECT;
   o->h.type_id = type_id;
+  o->identity = vm_next_identity(vm);
   o->proto = NULL;
   o->len = 0;
   o->tombstones = 0;
@@ -209,6 +210,7 @@ void jello_object_clear(jello_object* o) {
 
 static jello_object* copy_object(jello_vm* vm, const jello_object* src, int shared) {
   jello_object* dst = jello_object_new(vm, src->h.type_id);
+  if(!shared) dst->identity = src->identity;
   for(uint32_t i = 0; i < src->cap; i++) {
     if(!vm_obj_slot_live(src->states[i])) continue;
     if(shared && src->states[i] == JELLO_OBJ_SLOT_OWNED) src->states[i] = JELLO_OBJ_SLOT_OCCUPIED;

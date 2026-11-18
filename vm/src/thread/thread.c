@@ -7,6 +7,7 @@
  * collector scans only call frames, never C stacks, so a parked thread needs no saved context. */
 
 #include <jello/internal.h>
+#include <jello/internal/entropy.h>
 #include <jello/internal/platform.h>
 #include <jello/internal/proc_internal.h>
 #include <stdlib.h>
@@ -18,6 +19,8 @@ static jello_heap* heap_new(void) {
   if(pthread_mutex_init(&heap->stw_lock, NULL) != 0) abort();
   if(pthread_cond_init(&heap->stw_resume_cv, NULL) != 0) abort();
   if(pthread_mutex_init(&heap->proc_lock, NULL) != 0) abort();
+  if(!jello_entropy(heap->hash_key, sizeof heap->hash_key)) abort();
+  atomic_init(&heap->next_identity, 1u);
   atomic_init(&heap->stop_requested, 0);
   return heap;
 }
