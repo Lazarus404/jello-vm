@@ -19,10 +19,10 @@ static const uint32_t GC_SIZE_CLASSES[GC_NUM_SIZE_CLASSES] = {
   32u, 64u, 128u, 256u, 512u, 1024u, 2048u, 4096u,
 };
 
-static jello_gc_hdr* hdr_of(void* obj) {
+static jello_gc_hdr* gc_header_of(void* obj) {
   return (jello_gc_hdr*)((uint8_t*)obj - sizeof(jello_gc_hdr));
 }
-static void* obj_of(jello_gc_hdr* h) {
+static void* gc_object_of(jello_gc_hdr* h) {
   return (void*)((uint8_t*)h + sizeof(jello_gc_hdr));
 }
 
@@ -50,11 +50,11 @@ static size_t shared_size(uint32_t length) {
 }
 
 static shared_head* shared_head_of(jello_bytes* bin) {
-  return (shared_head*)((uint8_t*)hdr_of(bin) - offsetof(shared_head, hdr));
+  return (shared_head*)((uint8_t*)gc_header_of(bin) - offsetof(shared_head, hdr));
 }
 
 /** What a Bytes holding shared binary `bin` counts live for it: the binary's whole block. */
-static uint32_t shared_native(const jello_bytes* bin) {
+static uint32_t shared_native_bytes(const jello_bytes* bin) {
   size_t n = shared_size(bin->length);
   return n > UINT32_MAX ? UINT32_MAX : (uint32_t)n;
 }
@@ -70,10 +70,10 @@ static void shared_release(jello_bytes* bin) {
 
 /** What object `oh` counts live beyond its block: a handle's native bytes, or the shared binary a
  * Bytes holds. */
-static uint32_t native_of(const jello_obj_header* oh) {
+static uint32_t object_native_bytes(const jello_obj_header* oh) {
   if(oh->kind == (uint8_t)JELLO_OBJ_HANDLE) return ((const jello_handle*)oh)->native_bytes;
   const jello_bytes* b = (const jello_bytes*)oh;
-  return oh->kind == (uint8_t)JELLO_OBJ_BYTES && b->shared ? shared_native(b->owner) : 0;
+  return oh->kind == (uint8_t)JELLO_OBJ_BYTES && b->shared ? shared_native_bytes(b->owner) : 0;
 }
 
 /** Live bytes before the first collection, and the least the threshold ever falls to. */
@@ -121,10 +121,10 @@ static void destroy_object(jello_space* space, void* p) {
 
 /** Frees the objects of list `h`, releasing what each owns beyond its block, as a sweep would,
  * counted in `space` unless it is NULL. */
-static void free_objects(jello_space* space, jello_gc_hdr* h) {
+static void free_object_list(jello_space* space, jello_gc_hdr* h) {
   while(h) {
     jello_gc_hdr* next = h->next;
-    destroy_object(space, obj_of(h));
+    destroy_object(space, gc_object_of(h));
     free(h);
     h = next;
   }
@@ -135,7 +135,7 @@ void jello_gc_shutdown(jello_vm* vm) {
 }
 
 void vm_space_free(jello_space* space) {
-  free_objects(space, space->objects);
+  free_object_list(space, space->objects);
   space->objects = NULL;
   space->bytes_live = 0;
   for(int i = 0; i < GC_NUM_SIZE_CLASSES; i++) {
@@ -184,15 +184,15 @@ static void out_of_memory(size_t size) {
   abort();
 }
 
-static jello_gc_hdr* free_class_pop(jello_space* space, int ci) {
+static jello_gc_hdr* pop_free_block(jello_space* space, int ci) {
   jello_gc_hdr* h = ci >= 0 ? space->free_classes[ci] : NULL;
   if(h) space->free_classes[ci] = h->next;
   return h;
 }
 
-static void* parcel_alloc(jello_vm* vm, int ci, uint32_t total, uint32_t native) {
+static void* parcel_alloc_block(jello_vm* vm, int ci, uint32_t total, uint32_t native) {
   vm_parcel* pc = vm->parcel;
-  jello_gc_hdr* h = vm_owns_space(vm) ? free_class_pop(vm->space, ci) : NULL;
+  jello_gc_hdr* h = vm_owns_space(vm) ? pop_free_block(vm->space, ci) : NULL;
   if(!h) {
     h = (jello_gc_hdr*)malloc(total);
     if(!h) out_of_memory(total);
@@ -203,7 +203,7 @@ static void* parcel_alloc(jello_vm* vm, int ci, uint32_t total, uint32_t native)
   if(!pc->objects) pc->tail = h;
   pc->objects = h;
   pc->bytes += (uint64_t)total + native;
-  return obj_of(h);
+  return gc_object_of(h);
 }
 
 static void space_lock(jello_vm* vm, int shared) {
@@ -214,7 +214,7 @@ static void space_unlock(jello_vm* vm, int shared) {
   if(shared) pthread_mutex_unlock(&vm->heap->alloc_lock);
 }
 
-static void* alloc(jello_vm* vm, size_t size, uint32_t native) {
+static void* allocate_object(jello_vm* vm, size_t size, uint32_t native) {
   if(!vm) abort();
   if(size > (size_t)UINT32_MAX - sizeof(jello_gc_hdr)) out_of_memory(size);
   jello_heap* heap = vm->heap;
@@ -223,7 +223,7 @@ static void* alloc(jello_vm* vm, size_t size, uint32_t native) {
 
   int ci = size_class_index(requested);
   uint32_t total = (ci >= 0) ? GC_SIZE_CLASSES[ci] : requested;
-  if(vm->parcel) return parcel_alloc(vm, ci, total, native);
+  if(vm->parcel) return parcel_alloc_block(vm, ci, total, native);
   if(atomic_load(&heap->stop_requested)) vm_safepoint_check(vm);
 
   int shared = !vm_owns_space(vm);
@@ -233,7 +233,7 @@ static void* alloc(jello_vm* vm, size_t size, uint32_t native) {
     jello_gc_collect(vm);
     space_lock(vm, shared);
   }
-  jello_gc_hdr* h = free_class_pop(space, ci);
+  jello_gc_hdr* h = pop_free_block(space, ci);
   if(!h) {
     space_unlock(vm, shared);
     h = (jello_gc_hdr*)malloc(total);
@@ -242,13 +242,13 @@ static void* alloc(jello_vm* vm, size_t size, uint32_t native) {
   }
   h->total_size = total;
   h->marked = 0;
-  ((jello_obj_header*)obj_of(h))->kind = 0;
+  ((jello_obj_header*)gc_object_of(h))->kind = 0;
   h->next = space->objects;
   space->objects = h;
   space->bytes_live += (uint64_t)total + native;
   space_unlock(vm, shared);
 
-  return obj_of(h);
+  return gc_object_of(h);
 }
 
 void vm_parcel_splice(jello_vm* vm, jello_space* space, vm_parcel* pc) {
@@ -277,12 +277,12 @@ void vm_parcel_join(vm_parcel* into, vm_parcel* from) {
 
 void vm_parcel_free(vm_parcel* pc) {
   if(pc->sockets) proc_sockets_take(NULL, &pc->sockets);
-  free_objects(NULL, pc->objects);
+  free_object_list(NULL, pc->objects);
   free(pc->protos);
   *pc = vm_parcel_empty();
 }
 
-void* jello_gc_alloc(jello_vm* vm, size_t size) { return alloc(vm, size, 0); }
+void* jello_gc_alloc(jello_vm* vm, size_t size) { return allocate_object(vm, size, 0); }
 
 typedef struct mark_stack {
   void** items;
@@ -309,7 +309,7 @@ static void* ms_pop(mark_stack* ms) {
 
 static void mark_ptr(mark_stack* ms, void* p) {
   if(!p) return;
-  jello_gc_hdr* h = hdr_of(p);
+  jello_gc_hdr* h = gc_header_of(p);
   if(h->marked) return;
   h->marked = 1;
   ms->marked++;
@@ -493,7 +493,7 @@ void jello_gc_collect(jello_vm* vm) {
   while(h) {
     jello_gc_hdr* next = h->next;
     if(!h->marked) {
-      void* obj = obj_of(h);
+      void* obj = gc_object_of(h);
       space->freed_objects++;
       *prev = next;
       destroy_object(space, obj);
@@ -507,7 +507,8 @@ void jello_gc_collect(jello_vm* vm) {
     } else {
       h->marked = 0;
       ms.marked--;
-      live_bytes += (uint64_t)h->total_size + native_of((const jello_obj_header*)obj_of(h));
+      live_bytes +=
+          (uint64_t)h->total_size + object_native_bytes((const jello_obj_header*)gc_object_of(h));
       prev = &h->next;
     }
     h = next;
@@ -530,7 +531,7 @@ void jello_gc_collect(jello_vm* vm) {
 
 jello_handle* jello_handle_new(jello_vm* vm, const struct jello_jdll_handle_class* cls,
                                void* payload, uint32_t native_bytes) {
-  jello_handle* hd = (jello_handle*)alloc(vm, sizeof(jello_handle), native_bytes);
+  jello_handle* hd = (jello_handle*)allocate_object(vm, sizeof(jello_handle), native_bytes);
   hd->h.kind = (uint8_t)JELLO_OBJ_HANDLE;
   hd->h.type_id = 0;
   hd->cls = cls;
@@ -551,7 +552,8 @@ static jello_bytes* bytes_init(jello_bytes* b, uint32_t length) {
 
 static jello_bytes* bytes_ref(jello_vm* vm, jello_bytes* owner, uint8_t* data, uint32_t length,
                               int shared) {
-  void* block = alloc(vm, sizeof(jello_bytes), shared ? shared_native(owner) : 0);
+  void* block =
+      allocate_object(vm, sizeof(jello_bytes), shared ? shared_native_bytes(owner) : 0);
   jello_bytes* b = bytes_init((jello_bytes*)block, length);
   b->data = data;
   b->owner = owner;
@@ -569,7 +571,7 @@ jello_bytes* jello_bytes_new(jello_vm* vm, uint32_t length) {
   s->refs = 1u;
   s->hdr.marked = GC_SHARED;
   atomic_fetch_add_explicit(&shared_live, 1u, memory_order_relaxed);
-  jello_bytes* bin = bytes_init((jello_bytes*)obj_of(&s->hdr), length);
+  jello_bytes* bin = bytes_init((jello_bytes*)gc_object_of(&s->hdr), length);
   return bytes_ref(vm, bin, bin->data, length, 1);
 }
 
@@ -749,7 +751,7 @@ void* vm_immortal_alloc(size_t size) {
   jello_gc_hdr* h = (jello_gc_hdr*)calloc(1, sizeof(jello_gc_hdr) + size);
   if(!h) abort();
   h->marked = GC_IMMORTAL;
-  return obj_of(h);
+  return gc_object_of(h);
 }
 
 jello_function* vm_function_immortal(uint32_t func_index, jello_type_id type) {
@@ -764,11 +766,11 @@ size_t vm_bytes_immortal_size(uint32_t length) {
 jello_bytes* vm_bytes_immortal_at(void* at, uint32_t length) {
   jello_gc_hdr* h = (jello_gc_hdr*)at;
   h->marked = GC_IMMORTAL;
-  return bytes_init((jello_bytes*)obj_of(h), length);
+  return bytes_init((jello_bytes*)gc_object_of(h), length);
 }
 
 void vm_immortal_free(void* p) {
-  if(p) free(hdr_of(p));
+  if(p) free(gc_header_of(p));
 }
 
 uint32_t vm_struct_fields_bytes(const jello_bc_module* m, uint32_t struct_sig_id) {

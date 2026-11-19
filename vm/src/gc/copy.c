@@ -360,6 +360,14 @@ static void fix_proto(const jello_vm* vm, jello_object* o, uint32_t g) {
   set_proto(o, proto_slot(o), proto);
 }
 
+static void fix_protos(jello_vm* vm, const vm_protos* protos, const copier* c) {
+  for(uint32_t i = 0; protos && i < protos->len; i++) {
+    jello_object* o = protos->at[i].object;
+    if(c) o = (jello_object*)map_get(c, o);
+    if(o) fix_proto(vm, o, protos->at[i].global);
+  }
+}
+
 jello_trap_code vm_parcel_pack(jello_vm* vm, jello_value v, int drop, vm_parcel* out) {
   if(!jello_is_ptr(v) || !jello_as_ptr(v)) { /* Spares a scalar setting up a copier. */
     *out = vm_parcel_empty();
@@ -371,14 +379,6 @@ jello_trap_code vm_parcel_pack(jello_vm* vm, jello_value v, int drop, vm_parcel*
   c.moves = !drop;
   out->value = copy_root(&c, v);
   return copy_end(&c, out);
-}
-
-static void fix_protos(jello_vm* vm, const vm_protos* protos, const copier* c) {
-  for(uint32_t i = 0; protos && i < protos->len; i++) {
-    jello_object* o = protos->at[i].object;
-    if(c) o = (jello_object*)map_get(c, o);
-    if(o) fix_proto(vm, o, protos->at[i].global);
-  }
 }
 
 jello_value vm_parcel_take(jello_vm* vm, vm_parcel* pc) {
