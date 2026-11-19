@@ -375,7 +375,8 @@ static int deliver(jello_process* p, vm_parcel* msg) {
     p->inbox_head = 0;
   }
   vm_parcel_move(proc_inbox_at(p, p->inbox_len++), msg);
-  return p->parked == PROC_PARK_RECEIVE && unpark(p);
+  int waiting = p->parked == PROC_PARK_RECEIVE || (p->parked == PROC_PARK_POLL && p->poll_inbox);
+  return waiting && unpark(p);
 }
 
 static void fire_due(proc_sched* s, uint64_t now) {
@@ -998,7 +999,8 @@ static jello_trap_code park_until(proc_sched* s, jello_vm* vm, uint8_t why, uint
   pthread_mutex_lock(&p->mu);
   jello_trap_code trap = JELLO_TRAP_NONE;
   while(!trap && !(why == PROC_PARK_RECEIVE && p->inbox_len) &&
-        !(why == PROC_PARK_POLL && p->polled) && !expired(deadline)) {
+        !(why == PROC_PARK_POLL && (p->polled || (p->poll_inbox && p->inbox_len))) &&
+        !expired(deadline)) {
     trap = park(s, vm, why, 0);
     pthread_mutex_lock(&p->mu);
   }
@@ -1287,6 +1289,7 @@ jello_trap_code proc_poll_wait(jello_vm* vm, int fd, uint32_t events, uint64_t d
   jello_process* p = running(vm);
   proc_sched* s = p->sched;
   proc_poll_desc* d = proc_polls_find(s, fd);
+  uint8_t inbox = (events & PROC_FD_MESSAGE) != 0;
   events &= PROC_FD_READ | PROC_FD_WRITE;
   *ready = 0;
   if(!d) return JELLO_TRAP_TYPE_MISMATCH;
@@ -1300,6 +1303,17 @@ jello_trap_code proc_poll_wait(jello_vm* vm, int fd, uint32_t events, uint64_t d
     *ready = got;
     return busy ? JELLO_TRAP_TYPE_MISMATCH : JELLO_TRAP_NONE;
   }
+  if(inbox) { /* A message already waiting ends it without registering as a waiter. */
+    pthread_mutex_lock(&p->mu);
+    int message = p->inbox_len != 0;
+    p->poll_inbox = !message;
+    pthread_mutex_unlock(&p->mu);
+    if(message) {
+      pthread_mutex_unlock(&d->mu);
+      *ready = PROC_FD_MESSAGE;
+      return JELLO_TRAP_NONE;
+    }
+  }
   p->polled = 0;
   for(uint32_t dir = 0; dir < 2; dir++)
     if(events & (1u << dir)) d->waiters[dir] = p;
@@ -1309,6 +1323,8 @@ jello_trap_code proc_poll_wait(jello_vm* vm, int fd, uint32_t events, uint64_t d
   jello_trap_code trap = park_until(s, vm, PROC_PARK_POLL, deadline);
   pthread_mutex_lock(&p->mu);
   got = p->polled;
+  int message = p->poll_inbox && p->inbox_len;
+  p->poll_inbox = 0;
   pthread_mutex_unlock(&p->mu);
   if(!got) { /* Not handed anything, so still a waiter, unless handed something since. */
     pthread_mutex_lock(&d->mu);
@@ -1318,7 +1334,8 @@ jello_trap_code proc_poll_wait(jello_vm* vm, int fd, uint32_t events, uint64_t d
     pthread_mutex_unlock(&d->mu);
   }
   atomic_fetch_sub(&s->outside, 1);
-  *ready = got;
+  /* Readiness handed over by the time it is looked at wins over a message. */
+  *ready = got ? got : message ? PROC_FD_MESSAGE : 0u;
   return trap;
 }
 

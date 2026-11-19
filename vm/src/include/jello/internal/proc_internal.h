@@ -100,7 +100,9 @@ typedef struct proc_native_call {
   struct proc_native_call* next;
 } proc_native_call;
 
-enum { PROC_FD_READ = 1u, PROC_FD_WRITE = 2u, PROC_FD_CLOSED = 4u };
+/** What a descriptor is ready for. PROC_FD_MESSAGE, asked of proc_poll_wait, also ends the wait
+ * when a message reaches the waiting process's inbox first, and is then what it reports. */
+enum { PROC_FD_READ = 1u, PROC_FD_WRITE = 2u, PROC_FD_CLOSED = 4u, PROC_FD_MESSAGE = 8u };
 
 #define PROC_POLL_BATCH 64u
 
@@ -226,6 +228,7 @@ typedef struct jello_process {
   uint8_t closed;
   uint8_t cleaning; /**< Its own: set while its cleanups run, when a stop waits, a park traps. */
   uint8_t polled;   /**< What the file descriptor it waits on is ready for, PROC_FD_* bits. */
+  uint8_t poll_inbox; /**< Set under `mu` while its poll wait also ends on a message. */
   uint8_t pinned;   /**< Run only by scheduler 0: the main process, and those spawned on main. */
   struct proc_socket* sockets; /**< The sockets it owns, closed as it finishes; see net.c. */
   proc_timer deadline;         /**< The deadline of its park, while it has one. */

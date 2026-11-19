@@ -16,7 +16,9 @@
  * A call that fails returns null, an empty Bytes or false, and records why for the calling VM,
  * where net_error reads it: an errno value, a getaddrinfo error past NET_GAI, a TLS error past
  * NET_TLS_ERRORS, or one of NET_TIMEOUT and NET_CLOSED. Each call clears it first, so an empty
- * read with none recorded is the end of the stream.
+ * read with none recorded is the end of the stream. A net_read or net_receive_from whose last
+ * argument is nonzero also ends on a message, recording NET_MESSAGE when one reaches the caller's
+ * inbox before any data; the caller then receives the message, so nothing went wrong.
  *
  * A stream secured with net_tls_start carries its data through its TLS session from then on:
  * net_read and net_write go through it, and closing it tells the other end first. Sessions are
@@ -36,6 +38,7 @@
 enum {
   NET_TIMEOUT = -1, /**< The call's time ran out. */
   NET_CLOSED = -2,  /**< The socket is closed, or not the caller's. */
+  NET_MESSAGE = -3, /**< A message reached the caller's inbox first. */
   NET_GAI = 100000, /**< Added to a getaddrinfo error. */
 };
 
@@ -288,8 +291,9 @@ static int await(jdlo_ctx* c, int fd, uint32_t events, uint64_t deadline) {
   jello_trap_code trap = proc_poll_wait(c->vm, fd, events, deadline, &ready);
   if(trap) proc_trap(c, trap);
   else if(ready & PROC_FD_CLOSED) failed(c, NET_CLOSED);
+  else if(ready & PROC_FD_MESSAGE) failed(c, NET_MESSAGE);
   else if(!ready) failed(c, NET_TIMEOUT);
-  return !trap && ready && !(ready & PROC_FD_CLOSED);
+  return !trap && ready && !(ready & (PROC_FD_CLOSED | PROC_FD_MESSAGE));
 }
 
 static int retry(jdlo_ctx* c, int fd, uint32_t events, uint64_t deadline) {
@@ -299,9 +303,11 @@ static int retry(jdlo_ctx* c, int fd, uint32_t events, uint64_t deadline) {
   return 0;
 }
 
-static int tls_retry(jdlo_ctx* c, const proc_socket* k, int fd, int r, uint64_t deadline) {
-  if(r == NET_TLS_WANT_READ) return await(c, fd, PROC_FD_READ, deadline);
-  if(r == NET_TLS_WANT_WRITE) return await(c, fd, PROC_FD_WRITE, deadline);
+/* `also` adds PROC_FD_MESSAGE to the wait, or nothing. */
+static int tls_retry(jdlo_ctx* c, const proc_socket* k, int fd, int r, uint64_t deadline,
+                     uint32_t also) {
+  if(r == NET_TLS_WANT_READ) return await(c, fd, PROC_FD_READ | also, deadline);
+  if(r == NET_TLS_WANT_WRITE) return await(c, fd, PROC_FD_WRITE | also, deadline);
   failed(c, k->tls_ops->error(k->tls));
   return 0;
 }
@@ -477,6 +483,7 @@ void vm_net_tcp_connect(jdlo_ctx* c) {
 }
 
 static void receive(jdlo_ctx* c, int from) {
+  uint32_t also = jdl_arg_i32(c, 3) ? PROC_FD_MESSAGE : 0u;
   jello_process* p;
   proc_socket* k;
   int fd = arg_fd(c, &p, &k);
@@ -499,7 +506,7 @@ static void receive(jdlo_ctx* c, int from) {
         jdl_return_bytes_copy(c, buf, (uint32_t)r);
         return;
       }
-      if(!tls_retry(c, k, fd, r, deadline)) break;
+      if(!tls_retry(c, k, fd, r, deadline, also)) break;
       continue;
     }
     struct sockaddr_storage peer;
@@ -514,7 +521,7 @@ static void receive(jdlo_ctx* c, int from) {
       jdl_return_bytes_copy(c, buf, (uint32_t)n);
       return;
     }
-    if(!retry(c, fd, PROC_FD_READ, deadline)) break;
+    if(!retry(c, fd, PROC_FD_READ | also, deadline)) break;
   }
   if(!c->failed) jdl_return_bytes_copy(c, NULL, 0);
 }
@@ -533,7 +540,7 @@ void vm_net_write(jdlo_ctx* c) {
   while(fd >= 0 && done < len && k->tls) {
     int r = k->tls_ops->write(k->tls, data + done, len - done);
     if(r >= 0) done += (uint32_t)r;
-    else if(!tls_retry(c, k, fd, r, 0)) break;
+    else if(!tls_retry(c, k, fd, r, 0, 0)) break;
   }
   while(fd >= 0 && done < len && !k->tls) {
     ssize_t n = jello_send(fd, data + done, len - done);
@@ -599,7 +606,7 @@ void vm_net_tls_start(jdlo_ctx* c) {
     k->tls = tls->open(config, fd, jdl_arg_bytes_data(c, 2), jdl_arg_bytes_len(c, 2), &err);
     if(!k->tls) failed(c, err);
     int r = NET_TLS_FAILED;
-    while(k->tls && (r = tls->handshake(k->tls)) != 0 && tls_retry(c, k, fd, r, 0)) {}
+    while(k->tls && (r = tls->handshake(k->tls)) != 0 && tls_retry(c, k, fd, r, 0, 0)) {}
     done = k->tls && r == 0;
     if(!done && owner_of(k) == p) {
       pthread_mutex_lock(&net_lock);
@@ -659,6 +666,7 @@ void vm_net_error_text(jdlo_ctx* c) {
   const char* text = code == 0                ? "no error"
                      : code == NET_TIMEOUT    ? "timed out"
                      : code == NET_CLOSED     ? "socket closed, or another process's"
+                     : code == NET_MESSAGE    ? "a message came first"
                      : code >= NET_TLS_ERRORS ? tls
                      : code >= NET_GAI        ? gai_strerror(code - NET_GAI)
                                               : jello_error_text(code);

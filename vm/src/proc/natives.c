@@ -162,8 +162,9 @@ static void vm_poll_open(jdlo_ctx* c) {
 
 static void vm_poll_wait(jdlo_ctx* c) {
   uint32_t ready = 0;
-  jello_trap_code code = proc_poll_wait(c->vm, jdl_arg_i32(c, 0), (uint32_t)jdl_arg_i32(c, 1),
-                                        proc_deadline(jdl_arg_i32(c, 2)), &ready);
+  uint32_t events = (uint32_t)jdl_arg_i32(c, 1) & (PROC_FD_READ | PROC_FD_WRITE);
+  jello_trap_code code =
+      proc_poll_wait(c->vm, jdl_arg_i32(c, 0), events, proc_deadline(jdl_arg_i32(c, 2)), &ready);
   if(code) proc_trap(c, code);
   else jdl_return_i32(c, (int32_t)ready);
 }
@@ -568,9 +569,9 @@ static const jello_jdll_export VM_EXPORTS[] = {
     {"net_tcp_accept", vm_net_tcp_accept, D, 2, {D, I}, 0},
     {"net_tcp_connect", vm_net_tcp_connect, D, 3, {Y, I, I}, 0},
     {"net_udp_bind", vm_net_udp_bind, D, 2, {Y, I}, 0},
-    {"net_read", vm_net_read, Y, 3, {D, I, I}, 0},
+    {"net_read", vm_net_read, Y, 4, {D, I, I, I}, 0},
     {"net_write", vm_net_write, B, 2, {D, Y}, 0},
-    {"net_receive_from", vm_net_receive_from, Y, 3, {D, I, I}, 0},
+    {"net_receive_from", vm_net_receive_from, Y, 4, {D, I, I, I}, 0},
     {"net_send_to", vm_net_send_to, B, 4, {D, Y, Y, I}, 0},
     {"net_close", vm_net_close, B, 1, {D}, 0},
     {"net_local_port", vm_net_local_port, I, 1, {D}, 0},
