@@ -71,6 +71,12 @@ if(TARGET jlo_tool)
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
   set_tests_properties(chapter7_jdll_and_std PROPERTIES
     ENVIRONMENT "JELLO_JDLL_PATH=$<TARGET_FILE_DIR:test_native_jdll>;${JELLO_JDLL_ASAN_OPTIONS}")
+
+  add_test(NAME asm_disasm_roundtrip
+    COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/ci/asm_roundtrip.sh" "$<TARGET_FILE:jlo_tool>"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+  set_tests_properties(asm_disasm_roundtrip PROPERTIES
+    ENVIRONMENT "JELLO_JDLL_PATH=$<TARGET_FILE_DIR:test_native_jdll>;${JELLO_JDLL_ASAN_OPTIONS}")
 endif()
 
 add_executable(chapter7_thread_tests csrc/chapter7_thread_tests.c)

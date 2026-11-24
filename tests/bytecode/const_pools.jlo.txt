@@ -1,0 +1,14 @@
+.jlo module version=1 features=[CONST64,CONSTBYTES] entry=0
+types: [I32, BYTES, F64, I64]
+sigs: []
+atoms: [plain, "", "two words"]
+struct_sigs: []
+const_i64: [9007199254740993]
+const_f64: [3.140625, 0.1, -0, 1.0000000000000002]
+const_bytes: ["tab\tquote\" nul\x00 \xff", ""]
+func[0] name="two words" nregs=4 reg_types=[I32, BYTES, F64, I64]
+  0: CONST_BYTES a=r1 b=r0 c=r0 imm=0
+  1: BYTES_LEN a=r0 b=r1 c=r0 imm=0
+  2: CONST_F64 a=r2 b=r0 c=r0 imm=3
+  3: CONST_I64 a=r3 b=r0 c=r0 imm=0
+  4: RET a=r0 b=r0 c=r0 imm=0

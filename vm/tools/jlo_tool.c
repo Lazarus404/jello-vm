@@ -16,6 +16,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <errno.h>
+#include <math.h>
 #include <time.h>
 
 #define JLO_MAGIC 0x4A4C5942u
@@ -166,6 +167,10 @@ typedef struct module_t {
   int64_t* const_i64;
   uint32_t nconst_f64;
   double* const_f64;
+  // The CONST_BYTES pool, in the binary only with CONSTBYTES.
+  uint32_t nconst_bytes;
+  uint8_t** const_bytes;
+  uint32_t* const_bytes_len;
   uint32_t nimports;
   asm_import_sig* imports;
   uint32_t nglobals;
@@ -198,6 +203,9 @@ static void module_free(module_t* m) {
   free(m->enum_sigs);
   free(m->const_i64);
   free(m->const_f64);
+  for(uint32_t i = 0; i < m->nconst_bytes; i++) free(m->const_bytes[i]);
+  free(m->const_bytes);
+  free(m->const_bytes_len);
   free(m->imports);
   free(m->global_types);
   for(uint32_t i = 0; i < m->nsource_files; i++) free(m->source_files[i]);
@@ -335,6 +343,14 @@ static int read_double(cursor* c, double* out) {
   size_t start = c->pos;
   if(c->pos < c->len && (c->buf[c->pos] == '-' || c->buf[c->pos] == '+')) c->pos++;
   size_t digits_start = c->pos;
+  // print_f64 writes infinities and NaNs as %g does.
+  if(c->len - c->pos >= 3 &&
+     (strncmp(c->buf + c->pos, "inf", 3) == 0 || strncmp(c->buf + c->pos, "nan", 3) == 0)) {
+    double v = c->buf[c->pos] == 'n' ? NAN : INFINITY;
+    *out = c->buf[start] == '-' ? -v : v;
+    c->pos += 3;
+    return 1;
+  }
   while(c->pos < c->len && c->buf[c->pos] >= '0' && c->buf[c->pos] <= '9') c->pos++;
   if(c->pos < c->len && c->buf[c->pos] == '.') {
     c->pos++;
@@ -355,6 +371,75 @@ static int read_double(cursor* c, double* out) {
   memcpy(buf, c->buf + start, n);
   buf[n] = '\0';
   *out = strtod(buf, NULL);
+  return 1;
+}
+
+static int hex_digit(char ch) {
+  if(ch >= '0' && ch <= '9') return ch - '0';
+  if(ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+  if(ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+  return -1;
+}
+
+// A quoted literal, escaped as print_quoted writes it; the result is NUL-terminated past `len`.
+static int read_quoted(cursor* c, uint8_t** out, uint32_t* out_len) {
+  if(!expect_ch(c, '"')) return 0;
+  uint8_t* data = (uint8_t*)malloc(c->len - c->pos + 1);
+  uint32_t n = 0;
+  for(;;) {
+    if(c->pos >= c->len || c->buf[c->pos] == '\n') {
+      free(data);
+      return perr(c, "unterminated quoted literal");
+    }
+    char ch = c->buf[c->pos++];
+    if(ch == '"') break;
+    if(ch != '\\') { data[n++] = (uint8_t)ch; continue; }
+    char esc = c->pos < c->len ? c->buf[c->pos++] : '\0';
+    if(esc == 'n') data[n++] = '\n';
+    else if(esc == 'r') data[n++] = '\r';
+    else if(esc == 't') data[n++] = '\t';
+    else if(esc == '"' || esc == '\\') data[n++] = (uint8_t)esc;
+    else if(esc == 'x' && c->pos + 1 < c->len && hex_digit(c->buf[c->pos]) >= 0 &&
+            hex_digit(c->buf[c->pos + 1]) >= 0) {
+      data[n++] = (uint8_t)(hex_digit(c->buf[c->pos]) * 16 + hex_digit(c->buf[c->pos + 1]));
+      c->pos += 2;
+    } else {
+      free(data);
+      return perr(c, "unknown escape in quoted literal");
+    }
+  }
+  data[n] = '\0';
+  *out = data;
+  *out_len = n;
+  return 1;
+}
+
+// An atom; an identifier, or a quoted literal for any other name, as print_atom writes it.
+static int read_atom(cursor* c, char** out) {
+  skip_ws(c);
+  if(c->pos < c->len && c->buf[c->pos] == '"') {
+    uint8_t* data;
+    uint32_t n;
+    if(!read_quoted(c, &data, &n)) return 0;
+    if(strlen((const char*)data) != n) {
+      free(data);
+      return perr(c, "an atom cannot hold a NUL byte");
+    }
+    *out = (char*)data;
+    return 1;
+  }
+  size_t start = c->pos;
+  while(c->pos < c->len) {
+    char ch = c->buf[c->pos];
+    if((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_')
+      c->pos++;
+    else
+      break;
+  }
+  if(c->pos == start) return perr(c, "expected an atom");
+  *out = (char*)malloc(c->pos - start + 1);
+  memcpy(*out, c->buf + start, c->pos - start);
+  (*out)[c->pos - start] = '\0';
   return 1;
 }
 
@@ -464,16 +549,14 @@ static int parse_atoms(cursor* c, char*** out_atoms, uint32_t* out_n) {
   skip_ws(c);
   if(!match_ch(c, ']')) {
     for(;;) {
-      char name[64];
-      if(!read_ident(c, name, sizeof(name))) {
+      char* name;
+      if(!read_atom(c, &name)) {
         for(uint32_t i = 0; i < n; i++) free(atoms[i]);
         free(atoms);
         return 0;
       }
       if(n == cap) { cap = cap ? cap * 2 : 4; atoms = (char**)realloc(atoms, cap * sizeof(char*)); }
-      atoms[n] = (char*)malloc(strlen(name) + 1);
-      strcpy(atoms[n], name);
-      n++;
+      atoms[n++] = name;
       if(match_ch(c, ',')) continue;
       break;
     }
@@ -538,6 +621,24 @@ static int parse_const_f64(cursor* c, double** out_vals, uint32_t* out_n) {
   *out_vals = vals;
   *out_n = n;
   return 1;
+}
+
+static int parse_const_bytes(cursor* c, module_t* m) {
+  if(!expect_ident(c, "const_bytes") || !expect_ch(c, ':') || !expect_ch(c, '[')) return 0;
+  uint32_t cap = 0;
+  if(match_ch(c, ']')) return 1;
+  for(;;) {
+    if(m->nconst_bytes == cap) {
+      cap = cap ? cap * 2 : 4;
+      m->const_bytes = (uint8_t**)realloc(m->const_bytes, cap * sizeof(uint8_t*));
+      m->const_bytes_len = (uint32_t*)realloc(m->const_bytes_len, cap * sizeof(uint32_t));
+    }
+    if(!read_quoted(c, &m->const_bytes[m->nconst_bytes], &m->const_bytes_len[m->nconst_bytes]))
+      return 0;
+    m->nconst_bytes++;
+    if(match_ch(c, ',')) continue;
+    return expect_ch(c, ']');
+  }
 }
 
 static int find_type_index_by_kind_name(cursor* c, const asm_type_entry* types, uint32_t ntypes,
@@ -646,12 +747,19 @@ static int parse_sigs(cursor* c, const asm_type_entry* types, uint32_t ntypes,
   return 1;
 }
 
-static int find_atom_index_by_name(cursor* c, char* const* atoms, uint32_t natoms,
-                                    const char* name, uint32_t* out_idx) {
+// Reads an atom (read_atom) and finds it in `atoms:`.
+static int read_atom_index(cursor* c, char* const* atoms, uint32_t natoms, uint32_t* out_idx) {
+  char* name;
+  if(!read_atom(c, &name)) return 0;
   for(uint32_t i = 0; i < natoms; i++) {
-    if(strcmp(atoms[i], name) == 0) { *out_idx = i; return 1; }
+    if(strcmp(atoms[i], name) == 0) {
+      free(name);
+      *out_idx = i;
+      return 1;
+    }
   }
   fprintf(stderr, "%s: atom '%s' used but not declared in 'atoms:'\n", c->filename, name);
+  free(name);
   return 0;
 }
 
@@ -710,9 +818,8 @@ static int parse_struct_sig_entry(cursor* c, const asm_type_entry* types, uint32
       skip_ws(c);
       if(!match_ch(c, ']')) {
         for(;;) {
-          char name[64];
           uint32_t ai;
-          if(!read_ident(c, name, sizeof(name)) || !find_atom_index_by_name(c, atoms, natoms, name, &ai)) {
+          if(!read_atom_index(c, atoms, natoms, &ai)) {
             names_ok = 0;
             break;
           }
@@ -834,57 +941,70 @@ fail:
   return 0;
 }
 
+static int read_import_kind(cursor* c, const char* what, jello_type_kind* out) {
+  char name[32];
+  if(!read_ident(c, name, sizeof(name))) return 0;
+  if(kind_from_name(name, out)) return 1;
+  fprintf(stderr, "%s: unknown %s kind '%s' in import\n", c->filename, what, name);
+  return 0;
+}
+
+// An import as disasm prints it; library.export(ARG KINDS) -> RESULT KIND.
+static int parse_import_call_form(cursor* c, char* const* atoms, uint32_t natoms,
+                                  asm_import_sig* out) {
+  if(!read_atom_index(c, atoms, natoms, &out->library_atom) || !expect_ch(c, '.') ||
+     !read_atom_index(c, atoms, natoms, &out->export_atom) || !expect_ch(c, '('))
+    return 0;
+  while(!match_ch(c, ')')) {
+    if(out->arity >= 8) {
+      fprintf(stderr, "%s: import arity exceeds 8 (v1 ceiling)\n", c->filename);
+      return 0;
+    }
+    if(!read_import_kind(c, "arg", &out->arg_kinds[out->arity])) return 0;
+    out->arity++;
+  }
+  if(!expect_ch(c, '-') || !expect_ch(c, '>')) return 0;
+  return read_import_kind(c, "ret", &out->ret_kind);
+}
+
+/* An import, as disasm prints it (parse_import_call_form) or in the brace form
+ * { library=ATOM, export=ATOM, ret=KIND, args=[KIND, ...] }. */
 static int parse_import_entry(cursor* c, char* const* atoms, uint32_t natoms, asm_import_sig* out) {
   memset(out, 0, sizeof(*out));
-  if(!expect_ch(c, '{')) return 0;
+  if(!match_ch(c, '{')) return parse_import_call_form(c, atoms, natoms, out);
   if(!expect_ident(c, "library")) return 0;
   if(!expect_ch(c, '=')) return 0;
-  char libname[64];
-  if(!read_ident(c, libname, sizeof(libname))) return 0;
-  if(!find_atom_index_by_name(c, atoms, natoms, libname, &out->library_atom)) return 0;
+  if(!read_atom_index(c, atoms, natoms, &out->library_atom)) return 0;
   match_ch(c, ',');
 
   if(!expect_ident(c, "export")) return 0;
   if(!expect_ch(c, '=')) return 0;
-  char expname[64];
-  if(!read_ident(c, expname, sizeof(expname))) return 0;
-  if(!find_atom_index_by_name(c, atoms, natoms, expname, &out->export_atom)) return 0;
+  if(!read_atom_index(c, atoms, natoms, &out->export_atom)) return 0;
   match_ch(c, ',');
 
   if(!expect_ident(c, "ret")) return 0;
   if(!expect_ch(c, '=')) return 0;
-  char retname[32];
-  if(!read_ident(c, retname, sizeof(retname))) return 0;
-  if(!kind_from_name(retname, &out->ret_kind)) {
-    fprintf(stderr, "%s: unknown ret kind '%s' in import\n", c->filename, retname);
-    return 0;
-  }
+  if(!read_import_kind(c, "ret", &out->ret_kind)) return 0;
   match_ch(c, ',');
 
   if(!expect_ident(c, "args")) return 0;
   if(!expect_ch(c, '=')) return 0;
   if(!expect_ch(c, '[')) return 0;
-  uint32_t got = 0;
   skip_ws(c);
   if(!match_ch(c, ']')) {
     for(;;) {
-      char name[32];
-      if(!read_ident(c, name, sizeof(name))) return 0;
-      jello_type_kind ak;
-      if(!kind_from_name(name, &ak)) {
-        fprintf(stderr, "%s: unknown arg kind '%s' in import\n", c->filename, name);
+      if(out->arity >= 8) {
+        fprintf(stderr, "%s: import arity exceeds 8 (v1 ceiling)\n", c->filename);
         return 0;
       }
-      if(got >= 8) { fprintf(stderr, "%s: import arity exceeds 8 (v1 ceiling)\n", c->filename); return 0; }
-      out->arg_kinds[got++] = ak;
+      if(!read_import_kind(c, "arg", &out->arg_kinds[out->arity])) return 0;
+      out->arity++;
       if(match_ch(c, ',')) continue;
       break;
     }
     if(!expect_ch(c, ']')) return 0;
   }
-  out->arity = (uint8_t)got;
-  if(!expect_ch(c, '}')) return 0;
-  return 1;
+  return expect_ch(c, '}');
 }
 
 static int parse_imports(cursor* c, char* const* atoms, uint32_t natoms,
@@ -917,18 +1037,24 @@ static int parse_line_table(cursor* c, module_t* m) {
   if(!match_ch(c, ']')) {
     for(;;) {
       skip_ws(c);
-      size_t start = c->pos;
-      while(c->pos < c->len && c->buf[c->pos] != ',' && c->buf[c->pos] != ']' &&
-            c->buf[c->pos] != ' ' && c->buf[c->pos] != '\n')
-        c->pos++;
-      if(c->pos == start) return perr(c, "expected a source path");
+      char* path;
+      if(c->pos < c->len && c->buf[c->pos] == '"') {
+        uint32_t n;
+        if(!read_quoted(c, (uint8_t**)&path, &n)) return 0;
+      } else {
+        size_t start = c->pos;
+        while(c->pos < c->len && c->buf[c->pos] != ',' && c->buf[c->pos] != ']' &&
+              c->buf[c->pos] != ' ' && c->buf[c->pos] != '\n')
+          c->pos++;
+        if(c->pos == start) return perr(c, "expected a source path");
+        path = (char*)malloc(c->pos - start + 1);
+        memcpy(path, c->buf + start, c->pos - start);
+        path[c->pos - start] = '\0';
+      }
       if(m->nsource_files == cap) {
         cap = cap ? cap * 2 : 4;
         m->source_files = (char**)realloc(m->source_files, cap * sizeof(char*));
       }
-      char* path = (char*)malloc(c->pos - start + 1);
-      memcpy(path, c->buf + start, c->pos - start);
-      path[c->pos - start] = '\0';
       m->source_files[m->nsource_files++] = path;
       if(match_ch(c, ',')) continue;
       if(!expect_ch(c, ']')) return 0;
@@ -1050,9 +1176,7 @@ static int parse_func(cursor* c, const asm_type_entry* types, uint32_t ntypes,
   size_t name_save = c->pos;
   if(match_ident(c, "name")) {
     if(!expect_ch(c, '=')) return 0;
-    char name[64];
-    if(!read_ident(c, name, sizeof(name))) return 0;
-    if(!find_atom_index_by_name(c, atoms, natoms, name, &name_atom)) return 0;
+    if(!read_atom_index(c, atoms, natoms, &name_atom)) return 0;
   } else {
     c->pos = name_save;
   }
@@ -1154,18 +1278,27 @@ static int parse_module(cursor* c, module_t* out) {
     module_free(out);
     return 0;
   }
+  /* The enum schema, the 64-bit pools, the globals and the line table are present exactly when
+   * their feature flags are; the Bytes pool and the imports, as disasm prints them, only when
+   * they have entries. */
   if(out->features & (uint32_t)JELLO_BC_FEAT_ENUM_SCHEMA) {
     if(!parse_enum_sigs(c, out->types, out->ntypes, &out->enum_sigs, &out->nenum_sigs)) {
       module_free(out);
       return 0;
     }
   }
-  // Each optional section is present exactly when its feature flag is.
   if(out->features & (uint32_t)JELLO_BC_FEAT_CONST64) {
     if(!parse_const_i64(c, &out->const_i64, &out->nconst_i64)) { module_free(out); return 0; }
     if(!parse_const_f64(c, &out->const_f64, &out->nconst_f64)) { module_free(out); return 0; }
   }
-  if(out->features & (uint32_t)JELLO_BC_FEAT_IMPORTS) {
+  save = c->pos;
+  if((out->features & (uint32_t)JELLO_BC_FEAT_CONSTBYTES) && match_ident(c, "const_bytes")) {
+    c->pos = save;
+    if(!parse_const_bytes(c, out)) { module_free(out); return 0; }
+  }
+  save = c->pos;
+  if(match_ident(c, "imports")) {
+    c->pos = save;
     if(!parse_imports(c, out->atoms, out->natoms, &out->imports, &out->nimports)) {
       module_free(out);
       return 0;
@@ -1309,7 +1442,7 @@ static int write_module(const module_t* m, byte_buf* bb) {
     bb_u32(bb, m->nconst_f64);
   }
   if(m->features & (uint32_t)JELLO_BC_FEAT_CONSTBYTES) {
-    bb_u32(bb, 0); /* nconst_bytes */
+    bb_u32(bb, m->nconst_bytes);
   }
   if(m->features & (uint32_t)JELLO_BC_FEAT_GLOBALS) bb_u32(bb, m->nglobals);
 
@@ -1381,6 +1514,12 @@ static int write_module(const module_t* m, byte_buf* bb) {
     }
   }
 
+  // Each Bytes constant as a u32 length, then its bytes.
+  for(uint32_t i = 0; i < m->nconst_bytes; i++) {
+    bb_u32(bb, m->const_bytes_len[i]);
+    bb_push(bb, m->const_bytes[i], m->const_bytes_len[i]);
+  }
+
   for(uint32_t i = 0; i < m->nglobals; i++) bb_u32(bb, m->global_types[i]);
 
   for(uint32_t f = 0; f < m->nfuncs; f++) {
@@ -1421,6 +1560,47 @@ static int write_module(const module_t* m, byte_buf* bb) {
     }
   }
   return 1;
+}
+
+// Prints `len` bytes as a quoted literal, escaped as the compiler prints Bytes literals.
+static void print_quoted(FILE* out, const uint8_t* p, size_t len) {
+  fputc('"', out);
+  for(size_t j = 0; j < len; j++) {
+    uint8_t ch = p[j];
+    if(ch == '\n') fprintf(out, "\\n");
+    else if(ch == '\r') fprintf(out, "\\r");
+    else if(ch == '\t') fprintf(out, "\\t");
+    else if(ch == '"' || ch == '\\') fprintf(out, "\\%c", ch);
+    else if(ch >= 32 && ch <= 126) fputc(ch, out);
+    else fprintf(out, "\\x%02x", ch);
+  }
+  fputc('"', out);
+}
+
+// Prints `name` bare when it is in `safe` and not empty, else quoted (print_quoted).
+static void print_name(FILE* out, const char* name, const char* safe) {
+  size_t len = strlen(name);
+  int bare = len > 0;
+  for(size_t i = 0; bare && i < len; i++) {
+    char ch = name[i];
+    bare = (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') ||
+           ch == '_' || (ch != '\0' && strchr(safe, ch) != NULL);
+  }
+  if(bare) fputs(name, out);
+  else print_quoted(out, (const uint8_t*)name, len);
+}
+
+// Prints an atom as read_atom reads it.
+static void print_atom(FILE* out, const char* atom) { print_name(out, atom, ""); }
+
+// Prints `v` in the fewest digits that read back as the same double.
+static void print_f64(FILE* out, double v) {
+  char buf[32];
+  for(int digits = 6; digits <= 17; digits++) {
+    snprintf(buf, sizeof buf, "%.*g", digits, v);
+    if(strtod(buf, NULL) == v) break;
+  }
+  fputs(buf, out);
 }
 
 static void print_real_module(const jello_bc_module* m, FILE* out) {
@@ -1470,7 +1650,7 @@ static void print_real_module(const jello_bc_module* m, FILE* out) {
   fprintf(out, "atoms: [");
   for(uint32_t i = 0; i < m->natoms; i++) {
     if(i) fprintf(out, ", ");
-    fprintf(out, "%s", m->atoms[i]);
+    print_atom(out, m->atoms[i]);
   }
   fprintf(out, "]\n");
 
@@ -1488,7 +1668,7 @@ static void print_real_module(const jello_bc_module* m, FILE* out) {
       fprintf(out, " names=[");
       for(uint32_t j = 0; j < sig->nfields; j++) {
         if(j) fprintf(out, ", ");
-        fprintf(out, "%s", m->atoms[sig->field_name_atom[j]]);
+        print_atom(out, m->atoms[sig->field_name_atom[j]]);
       }
       fprintf(out, "]");
     }
@@ -1525,27 +1705,16 @@ static void print_real_module(const jello_bc_module* m, FILE* out) {
     fprintf(out, "const_f64: [");
     for(uint32_t i = 0; i < m->nconst_f64; i++) {
       if(i) fprintf(out, ", ");
-      fprintf(out, "%g", m->const_f64[i]);
+      print_f64(out, m->const_f64[i]);
     }
     fprintf(out, "]\n");
   }
 
-  // The Bytes pool, escaped as the compiler prints Bytes literals.
   if(m->nconst_bytes > 0) {
     fprintf(out, "const_bytes: [");
     for(uint32_t i = 0; i < m->nconst_bytes; i++) {
-      fprintf(out, "%s\"", i ? ", " : "");
-      const uint8_t* p = m->const_bytes_values[i]->data;
-      for(uint32_t j = 0; j < m->const_bytes_values[i]->length; j++) {
-        uint8_t ch = p[j];
-        if(ch == '\n') fprintf(out, "\\n");
-        else if(ch == '\r') fprintf(out, "\\r");
-        else if(ch == '\t') fprintf(out, "\\t");
-        else if(ch == '"' || ch == '\\') fprintf(out, "\\%c", ch);
-        else if(ch >= 32 && ch <= 126) fputc(ch, out);
-        else fprintf(out, "\\x%02x", ch);
-      }
-      fprintf(out, "\"");
+      if(i) fprintf(out, ", ");
+      print_quoted(out, m->const_bytes_values[i]->data, m->const_bytes_values[i]->length);
     }
     fprintf(out, "]\n");
   }
@@ -1555,8 +1724,11 @@ static void print_real_module(const jello_bc_module* m, FILE* out) {
     fprintf(out, "imports: [");
     for(uint32_t i = 0; i < m->nimports; i++) {
       const jello_import_sig* imp = &m->imports[i];
-      fprintf(out, "%s%s.%s(", i ? ", " : "", m->atoms[imp->library_atom],
-              m->atoms[imp->export_atom]);
+      if(i) fprintf(out, ", ");
+      print_atom(out, m->atoms[imp->library_atom]);
+      fputc('.', out);
+      print_atom(out, m->atoms[imp->export_atom]);
+      fputc('(', out);
       for(uint8_t j = 0; j < imp->arity; j++)
         fprintf(out, "%s%s", j ? " " : "", kind_name_of((jello_type_kind)imp->arg_kinds[j]));
       fprintf(out, ") -> %s", kind_name_of((jello_type_kind)imp->ret_kind));
@@ -1575,8 +1747,10 @@ static void print_real_module(const jello_bc_module* m, FILE* out) {
 
   if(m->features & (uint32_t)JELLO_BC_FEAT_LINE_TABLE) {
     fprintf(out, "source_files: [");
-    for(uint32_t i = 0; i < m->nsource_files; i++)
-      fprintf(out, "%s%s", i ? ", " : "", m->source_files[i]);
+    for(uint32_t i = 0; i < m->nsource_files; i++) {
+      if(i) fprintf(out, ", ");
+      print_name(out, m->source_files[i], "./-+@~:");
+    }
     fprintf(out, "]\nlines: [");
     int any = 0;
     for(uint32_t f = 0; f < m->nfuncs; f++)
@@ -1591,7 +1765,10 @@ static void print_real_module(const jello_bc_module* m, FILE* out) {
   for(uint32_t f = 0; f < m->nfuncs; f++) {
     const jello_bc_function* fn = &m->funcs[f];
     fprintf(out, "func[%u]", f);
-    if(fn->name_atom != JELLO_BC_NO_NAME) fprintf(out, " name=%s", m->atoms[fn->name_atom]);
+    if(fn->name_atom != JELLO_BC_NO_NAME) {
+      fprintf(out, " name=");
+      print_atom(out, m->atoms[fn->name_atom]);
+    }
     fprintf(out, " nregs=%u", fn->nregs);
     if(fn->cap_start != fn->nregs) fprintf(out, " cap_start=%u", fn->cap_start);
     if(fn->nargs != fn->nregs) fprintf(out, " nargs=%u", fn->nargs);
